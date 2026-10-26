@@ -31,14 +31,15 @@ Kver is written in Rust.
 The proposed technology stack is:
 
 - **UI:** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-- **PDF engine:** PDFium via `pdfium-render` or an alternative, to be tested
+- **PDF engine:** Hayro preferred, pending validation; PDFium as a fallback
 - **Persistence:** SQLite
 - **Configuration:** TOML
 
 The prototype uses Hayro to render one page without requiring a native PDF
-library. This is not a backend decision: PDFium and `gpui-pdf` still need to
-be evaluated for rendering quality, text geometry, and packaging. GPUI
-provides the window; Hayro rasterizes the PDF page in background work.
+library. Hayro is the preferred initial backend if validation confirms
+rendering quality, positioned text, and responsive operation on representative
+PDFs. PDFium remains the comparison/fallback on meaningful gaps. GPUI provides
+the window; Hayro rasterizes the PDF page in background work.
 
 See [Architecture](docs/architecture.md) for details.
 
@@ -59,15 +60,19 @@ support is straightforward. See [Features](docs/features.md) and
 
 ## Status
 
-The prototype accepts a local PDF path, renders its first page, and offers
-zoom buttons. It does not navigate pages, compare PDF engines, or satisfy
-the macOS MVP gate.
+The prototype accepts a local PDF path, renders its first page at the
+window's display density, and offers zoom buttons. It does not navigate
+pages or satisfy the macOS MVP gate; display quality still needs visual
+testing on macOS with real PDFs.
 
-On macOS, install Rust and Xcode with the Metal Toolchain component, then
-open the sample PDF generated from the introduction and goals above:
+On macOS, install Rust 1.92 or newer (Hayro 0.8's minimum) and Xcode with the
+Metal Toolchain component, then open the sample PDF generated from the
+introduction and goals above. `rustup update stable` installs or updates the
+stable toolchain; `cargo +stable` uses it even when the default is an older
+nightly:
 
 ```sh
-cargo run -- examples/readme-sample.pdf
+cargo +stable run -- examples/readme-sample.pdf
 ```
 
 You can also pass another local PDF path. The `−` and `+` buttons render its
@@ -75,16 +80,16 @@ first page at different scales. To regenerate the sample after changing this
 README, run `python3 examples/generate_readme_pdf.py` (Python standard library
 only).
 
-Run `cargo test --no-default-features --lib` to exercise PDF rendering without
-building GPUI. The complete `cargo test` and `cargo clippy` require the Metal
-Toolchain. If Xcode reports it missing, install it with:
+Run `cargo +stable test --no-default-features --lib` to exercise PDF rendering
+without building GPUI. The complete test and Clippy checks also require the
+Metal Toolchain. If Xcode reports it missing, install it with:
 
 ```sh
 xcodebuild -downloadComponent MetalToolchain
 ```
 
-The next validation step is to run the window with real PDFs and compare
-backends as described in the [roadmap](docs/roadmap.md#0-validate-the-stack).
+The next validation step is to run the window with real PDFs and evaluate
+Hayro's gaps as described in the [Phase 0 validation guide](docs/rendering-validation.md).
 
 ## Inspiration
 

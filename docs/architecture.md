@@ -16,8 +16,8 @@ The primary architectural goal is to support a responsive reading experience wit
 | ------------------- | ------------------------------------ |
 | Language            | Rust                                 |
 | UI framework        | GPUI                                 |
-| PDF backend         | PDFium / pdfium-render (provisional) |
-| Alternative backend | Hayro                                |
+| PDF backend         | Hayro (preferred, under validation)  |
+| Alternative backend | PDFium / pdfium-render                |
 | Persistent state    | SQLite                               |
 | Configuration       | TOML                                 |
 
@@ -98,8 +98,8 @@ Positioned text extraction is especially important for text selection, searching
 
 ### PDFium
 
-PDFium is an initial candidate, not a selected backend. Validate the claims
-below against real PDFs alongside Hayro / `gpui-pdf`.
+PDFium is the fallback comparator if Hayro has a significant gap. Validate
+the relevant claims below on the PDFs that expose that gap.
 
 Advantages:
 
@@ -130,20 +130,23 @@ Advantages:
 
 Disadvantages:
 
-- Less mature PDF compatibility
+- Real-document compatibility and glyph-level text workflows still need validation
 - Potential integration issues with GPUI versions
 - Features and performance require evaluation
 
 ### Decision
 
 The prototype isolates Hayro behind `src/pdf.rs`, which returns an encoded
-page image to the UI. This adapter is deliberately limited to page one and
-does not constitute the eventual backend interface.
+page image to the UI. The UI currently displays only page one, though the
+adapter can render indexed pages. This is not the eventual backend interface.
 
-The backend choice remains open. Compare rendering accuracy, responsiveness,
-positioned text, document/screen coordinate handling, packaging, and Linux
-and Windows feasibility before choosing the initial backend. Validate scans
-and rotated/cropped pages. The prototype need not implement a visual ruler.
+Hayro is the preferred candidate for the initial backend if it supports
+Kver's reading needs; it avoids a separate native PDF library. The backend
+decision remains open until representative PDFs verify rendering accuracy,
+responsiveness, positioned text, and coordinate handling. Compare PDFium on
+meaningful gaps before accepting limitations or changing backends. Document
+packaging and Linux/Windows feasibility. The prototype need not implement a
+visual ruler. See the [validation guide](rendering-validation.md).
 
 ## Rendering Pipeline
 

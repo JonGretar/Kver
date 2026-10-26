@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+# Cloud Runner only: install tools once per runner, then populate its Cargo cache.
+export PATH="$HOME/.cargo/bin:$PATH"
+# GPUI links against XKB and Fontconfig on Linux; Mesa's Vulkan software driver
+# lets its headless renderer capture UI frames without a display server.
+sudo -n apt-get update -qq
+sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+    libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev libvulkan1 mesa-vulkan-drivers
+
+if ! command -v rustup >/dev/null 2>&1; then
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT HUP INT TERM
+    curl --proto '=https' --tlsv1.2 -fsS https://sh.rustup.rs -o "$installer"
+    sh "$installer" -y --profile minimal --default-toolchain stable
+    rm -f "$installer"
+    trap - EXIT HUP INT TERM
+fi
+
+rustup toolchain install stable --profile minimal --component clippy,rustfmt
+cargo +stable fetch --locked

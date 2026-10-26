@@ -215,10 +215,11 @@ add a PDFium probe if Hayro has a significant gap. No OCR is required for scans.
 
 ## Platform feasibility and current build limits
 
-- **macOS:** GPUI 0.2.2 uses Metal. After installing the Metal Toolchain
-  component on this macOS host, `cargo +stable check`, `cargo +stable test
-  --all-targets`, `cargo +stable clippy --all-targets -- -D warnings`, and a
-  binary build pass. The sample app opened an on-screen window. After screen
+- **macOS (before the `gpui-pre` migration):** GPUI 0.2.2 uses Metal. After
+  installing the Metal Toolchain component on this macOS host,
+  `cargo +stable check`, `cargo +stable test --all-targets`,
+  `cargo +stable clippy --all-targets -- -D warnings`, and a binary build pass.
+  The sample app opened an on-screen window. After screen
   capture permission was granted, a window-only capture showed the sample
   PDF laid out clearly at 100% on a high-density display. An initial
   hands-on scan-style PDF check found fast zoom and apparent responsiveness;
@@ -226,17 +227,19 @@ add a PDFium probe if Hayro has a significant gap. No OCR is required for scans.
   renders, horizontal scrolling at high zoom, and real-document display
   quality remain unverified. The preview now requests application quit when
   its last window closes; this close-to-exit behavior has not been retested
-  interactively.
-- **Linux:** The pinned [GPUI 0.2.2
-  features](https://docs.rs/crate/gpui/0.2.2/source/Cargo.toml) provide
-  `x11` and `wayland` backends, but Kver currently disables GPUI default
-  features and enables only `font-kit`. GPUI's [Linux platform
-  selection](https://docs.rs/gpui/0.2.2/src/gpui/platform.rs.html#98-152)
-  then falls back to headless even when a display is available; the
-  headless implementation cannot open a window. Enabling a display backend,
-  building on Linux with its system dependencies, and opening a window are
-  still required. No Linux binary has been built.
-- **Windows:** The pinned GPUI source has a
+  interactively. With `gpui-pre` 0.3.10 on a local Apple Silicon Mac, the
+  normal GUI binary builds and stays running after launch without reporting
+  an open-window error; the sample PDF window was confirmed visible on that
+  Mac. All 15 tests pass with the `screenshot` feature, and the headless
+  scenario captures 1840 × 1600 before/after frames using Metal. Clippy and
+  formatting checks pass.
+- **Linux:** Kver now uses `gpui-pre` 0.3.10 and the matching platform crate.
+  On a headless Debian Cloud Runner, a debug binary with the `screenshot`
+  feature built and captured the sample PDF UI at 1840 × 1600 using the
+  software Vulkan renderer. This validates off-screen rendering, not an
+  interactive X11/Wayland window or Linux packaging. The previous `gpui`
+  0.2.2 build was blocked in a transitive `xattr` dependency.
+- **Windows (before the `gpui-pre` migration):** The previous GPUI source has a
   [Windows platform path](https://docs.rs/gpui/0.2.2/src/gpui/platform.rs.html#154-161).
   No Windows target is installed on this macOS host, and no Windows build
   or packaging test has been run. Treat support as plausible, not proven.

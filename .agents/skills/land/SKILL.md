@@ -57,14 +57,15 @@ explicit rather than declaring them finished merely because code was merged.
    branch. Include a meaningful title/body, verification evidence, and known
    limitations; follow any applicable submission template or contribution
    requirements if they appear. `docs/agents/workflow.md` (step 4) calls for
-   review and a feature branch/PR when needed; using a PR here keeps this
-   landing reviewable even though Kver currently has no CI workflow or prior
-   PR history. Recheck branch rules, required reviews, and configured checks
-   at execution time. Verify **every applicable required check has passed on
-   the PR's current head** and any required review is complete. A pending,
-   failing, missing, or unverifiable required result blocks landing. If no
-   checks are configured or required, establish that from live repository
-   settings rather than interpreting an empty checks list alone as success.
+   review and a feature branch/PR when needed; the PR runs the macOS and Linux
+   checks defined in `.github/workflows/ci.yml`. Inspect its results, including
+   the exploratory hosted-macOS headless capture, before merging. Recheck
+   branch rules, required reviews, and configured checks at execution time.
+   Verify **every applicable required check has passed on the PR's current
+   head** and any required review is complete. A pending, failing, missing,
+   or unverifiable required result blocks landing. If no checks are configured
+   or required, establish that from live repository settings rather than
+   interpreting an empty checks list alone as success.
 
 5. **Merge and prove it landed.** Before merging, ensure the PR head and
    destination are still the versions that were reviewed and checked. If the

@@ -21,6 +21,16 @@ The primary architectural goal is to support a responsive reading experience wit
 | Persistent state    | SQLite                               |
 | Configuration       | TOML                                 |
 
+### UI components to revisit
+
+[GPUI Kit](https://github.com/longbridge/gpui-kit) bundles GPUI with styled
+controls, themes, and accessibility helpers. It could be useful when Kver
+needs search, settings, and other desktop controls. The prototype currently
+uses `gpui` 0.2.2 directly; GPUI Kit 0.8.1 pins a different GPUI release
+(`gpui-pre` 0.3.10). Evaluate a single-version migration when those controls
+are needed rather than adding both UI stacks now. It does not replace PDF
+rendering or text geometry.
+
 ## High-Level Architecture
 
 This diagram shows prospective responsibilities, including features scheduled

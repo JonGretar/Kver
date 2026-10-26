@@ -158,6 +158,12 @@ Publish project tickets to GitHub Issues. See `docs/agents/issue-tracker.md`.
 
 Use a single-context glossary and ADR layout. See `docs/agents/domain.md`.
 
+### Feature workflow
+
+For new feature threads, review, or landing in Delta, see
+`docs/agents/workflow.md`. Use isolated Delta worktrees for new implementation
+threads; Git and `jj` are both acceptable in this project.
+
 ## Scope
 
 Do not implement features outside the current milestone without a clear reason.

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+
+      - name: Install Linux GUI and software rendering libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libvulkan1 mesa-vulkan-drivers
+
+      - name: Ensure macOS Metal toolchain is available
+        if: runner.os == 'macOS'
+        run: |
+          if ! xcrun --find metal; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
+      - name: Check formatting
+        run: cargo +stable fmt --all -- --check
+
+      - name: Test all targets with headless support
+        run: cargo +stable test --locked --all-targets --features screenshot
+
+      - name: Lint all targets
+        run: cargo +stable clippy --locked --all-targets --features screenshot -- -D warnings
+
+      - name: Build normal GUI binary
+        run: cargo +stable build --locked --bin kver
+
+      - name: Capture and verify headless zoom
+        if: runner.os == 'Linux'
+        run: |
+          cargo +stable run --locked --features screenshot -- \
+            --automate examples/zoom-scenario.txt captures examples/readme-sample.pdf
+          python3 .github/scripts/verify-captures.py captures
+
+      # Validate GitHub's hosted Metal runner before making this a required gate.
+      - name: Try headless zoom on macOS
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          cargo +stable run --locked --features screenshot -- \
+            --automate examples/zoom-scenario.txt captures examples/readme-sample.pdf
+          python3 .github/scripts/verify-captures.py captures
+
+      - name: Upload captures for visual review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kver-captures-${{ matrix.os }}
+          path: captures/*.png
+          if-no-files-found: ignore
+          retention-days: 7

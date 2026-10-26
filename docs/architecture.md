@@ -21,15 +21,26 @@ The primary architectural goal is to support a responsive reading experience wit
 | Persistent state    | SQLite                               |
 | Configuration       | TOML                                 |
 
-### UI components to revisit
+### GPUI snapshot and UI components
 
-[GPUI Kit](https://github.com/longbridge/gpui-kit) bundles GPUI with styled
-controls, themes, and accessibility helpers. It could be useful when Kver
-needs search, settings, and other desktop controls. The prototype currently
-uses `gpui` 0.2.2 directly; GPUI Kit 0.8.1 pins a different GPUI release
-(`gpui-pre` 0.3.10). Evaluate a single-version migration when those controls
-are needed rather than adding both UI stacks now. It does not replace PDF
-rendering or text geometry.
+The prototype uses the pinned `gpui-pre` 0.3.10 snapshot directly with its
+matching `gpui-pre-platform` crate. This provides a cross-platform headless
+renderer for Cloud Runner screenshots without introducing GPUI Kit's components
+or starting a desktop session. The optional `screenshot` feature enables
+GPUI test support; the normal UI does not compile it. The Linux headless path
+was captured using Mesa's software Vulkan driver; the macOS headless path was
+captured using Metal. The normal macOS GUI binary built and launched, and its
+sample PDF window was confirmed on a local Mac.
+Headless scenarios accept a small, explicit set of zoom
+and capture steps, calling the same zoom command as the GUI button. This
+exercises state changes and rendering without a general-purpose scripting
+runtime or coordinate-dependent mouse automation. It does not verify button
+hit-testing; add an input-event test if that becomes a regression risk.
+
+[GPUI Kit](https://github.com/longbridge/gpui-kit) bundles styled controls,
+themes, and accessibility helpers and may be useful for future search or
+settings screens. It does not replace PDF rendering or text geometry. Revisit
+it when the UI actually needs those components, keeping a single GPUI version.
 
 ## High-Level Architecture
 

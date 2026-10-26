@@ -36,10 +36,11 @@ The proposed technology stack is:
 - **Configuration:** TOML
 
 The prototype uses Hayro to render one page without requiring a native PDF
-library. Hayro is the preferred initial backend if validation confirms
-rendering quality, positioned text, and responsive operation on representative
-PDFs. PDFium remains the comparison/fallback on meaningful gaps. GPUI provides
-the window; Hayro rasterizes the PDF page in background work.
+library, and the pinned `gpui-pre` 0.3.10 GPUI snapshot for the UI and headless
+screenshot renderer. Hayro is the preferred initial backend if validation
+confirms rendering quality, positioned text, and responsive operation on
+representative PDFs. PDFium remains the comparison/fallback on meaningful gaps.
+GPUI provides the window; Hayro rasterizes the PDF page in background work.
 
 See [Architecture](docs/architecture.md) for details.
 
@@ -87,6 +88,43 @@ Metal Toolchain. If Xcode reports it missing, install it with:
 ```sh
 xcodebuild -downloadComponent MetalToolchain
 ```
+
+For new Delta checkouts, `.agents/prepare` fetches locked Rust dependencies
+when Cargo is available (on macOS, install Rust first). On a Cloud Runner,
+`.agents/setup` installs stable Rust, Clippy, rustfmt, Linux XKB libraries, and
+Mesa's software Vulkan driver, then fetches dependencies after preparation.
+Both scripts need network access on a fresh machine; neither starts a window.
+For headless Linux validation, run
+`cargo +stable test --locked --no-default-features --lib`. To capture the actual
+GPUI interface with the sample PDF (no display server required), run:
+
+```sh
+cargo +stable run --locked --features screenshot -- --screenshot kver.png examples/readme-sample.pdf
+```
+
+For repeatable headless interaction checks, run a scenario:
+
+```sh
+cargo +stable run --locked --features screenshot -- --automate examples/zoom-scenario.txt captures examples/readme-sample.pdf
+```
+
+The [sample scenario](examples/zoom-scenario.txt) captures `captures/before.png`,
+runs `zoom-in`, then captures `captures/after.png`. Scenario files allow one
+step per line: `zoom-in`, `zoom-out`, or `capture filename.png` (a filename in
+the chosen output directory); blank lines and `#` comments are ignored. Zoom
+steps invoke the same command as the corresponding UI button and wait for the
+new page to render; they do not synthesize mouse clicks or run arbitrary code.
+
+The `screenshot` feature enables GPUI's test-support renderer and pre-renders
+the first page before capture; normal GUI execution still rasterizes off the
+UI thread. Headless captures depend on a working Vulkan software adapter.
+On macOS, the headless scenario has also produced both captures with Metal;
+the normal GUI binary builds and launches, and the sample window's display
+was confirmed on a local Mac. The
+[PR checks](.github/workflows/ci.yml) build, test, and lint on Linux and macOS;
+Linux headless capture is required, while hosted-macOS capture remains
+exploratory until the GitHub runner is verified. Captures are uploaded for
+visual review.
 
 The next validation step is to run the window with real PDFs and evaluate
 Hayro's gaps as described in the [Phase 0 validation guide](docs/rendering-validation.md).

@@ -1,8 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use gpui::{
-    App, Application, Bounds, Context, Image, ImageFormat, Window, WindowBounds, WindowOptions,
-    div, img, prelude::*, px, rgb, size,
+    App, Bounds, Context, Image, ImageFormat, Window, WindowBounds, WindowOptions, div, img,
+    prelude::*, px, rgb, size,
 };
 use kver::pdf;
 
@@ -42,6 +42,22 @@ impl Preview {
         };
         preview.request_render(cx);
         preview
+    }
+
+    #[cfg(feature = "screenshot")]
+    fn from_rendered(path: PathBuf, rendered: pdf::RenderedPage) -> Self {
+        Self {
+            path,
+            scale: 1.0,
+            display_scale: 1.0,
+            request: 0,
+            status: "First page · 100%".into(),
+            page: Some((
+                Arc::new(Image::from_bytes(ImageFormat::Png, rendered.png)),
+                rendered.page_width,
+                rendered.page_height,
+            )),
+        }
     }
 
     fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
@@ -169,14 +185,148 @@ impl Render for Preview {
     }
 }
 
+#[cfg(feature = "screenshot")]
+enum Step {
+    Capture(PathBuf),
+    ZoomIn,
+    ZoomOut,
+}
+
+#[cfg(feature = "screenshot")]
+fn parse_scenario(text: &str, output_dir: &std::path::Path) -> Result<Vec<Step>, String> {
+    use std::path::Component;
+
+    let mut steps = Vec::new();
+    for (line, raw) in text.lines().enumerate() {
+        let raw = raw.trim();
+        if raw.is_empty() || raw.starts_with('#') {
+            continue;
+        }
+        let tokens: Vec<_> = raw.split_whitespace().collect();
+        let step = match tokens.as_slice() {
+            ["zoom-in"] => Step::ZoomIn,
+            ["zoom-out"] => Step::ZoomOut,
+            ["capture", name]
+                if std::path::Path::new(name)
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_)))
+                    && std::path::Path::new(name).components().count() == 1
+                    && name.ends_with(".png") =>
+            {
+                Step::Capture(output_dir.join(name))
+            }
+            _ => return Err(format!("Invalid scenario step on line {}", line + 1)),
+        };
+        steps.push(step);
+    }
+    if !steps.iter().any(|step| matches!(step, Step::Capture(_))) {
+        return Err("Scenario must contain at least one capture".into());
+    }
+    Ok(steps)
+}
+
+#[cfg(feature = "screenshot")]
+fn run_headless(path: PathBuf, steps: Vec<Step>) -> Result<(), Box<dyn std::error::Error>> {
+    use gpui::HeadlessAppContext;
+
+    // Render synchronously before opening the test window so the captured frame
+    // contains the page rather than the normal asynchronous loading state.
+    let rendered = pdf::render_first_page(&path, 1.0)?;
+    let text_system = gpui_platform::current_platform(true).text_system();
+    let mut cx = HeadlessAppContext::with_platform(
+        text_system,
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    let window = cx.open_window(size(px(920.0), px(800.0)), |_, cx| {
+        cx.new(|_| Preview::from_rendered(path, rendered))
+    })?;
+    cx.run_until_parked();
+    for step in steps {
+        match step {
+            Step::ZoomIn | Step::ZoomOut => {
+                let factor = if matches!(step, Step::ZoomIn) {
+                    1.25
+                } else {
+                    0.8
+                };
+                // This is the same command the on_click handlers invoke.
+                let zoom = window.update(&mut cx, |preview, _, cx| {
+                    preview.change_scale(factor, cx);
+                    preview.scale
+                })?;
+                cx.run_until_parked();
+                let status =
+                    cx.update(|app| window.read(app).map(|preview| preview.status.clone()))?;
+                let expected = format!("First page · {}%", (zoom * 100.0).round());
+                if status != expected {
+                    return Err(format!("Zoom render did not finish: {status}").into());
+                }
+            }
+            Step::Capture(output) => {
+                let status =
+                    cx.update(|app| window.read(app).map(|preview| preview.status.clone()))?;
+                if !status.starts_with("First page") {
+                    return Err(format!("Cannot capture while page is not ready: {status}").into());
+                }
+                cx.capture_screenshot(window.into())?.save(output)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() {
-    let Some(path) = std::env::args_os().nth(1).map(PathBuf::from) else {
-        eprintln!("Usage: cargo run -- path/to/document.pdf");
+    let mut args = std::env::args_os().skip(1);
+    let Some(first) = args.next() else {
+        eprintln!("Usage: kver path/to/document.pdf");
+        #[cfg(feature = "screenshot")]
+        eprintln!("       kver --screenshot output.png path/to/document.pdf");
+        #[cfg(feature = "screenshot")]
+        eprintln!("       kver --automate scenario.txt output-dir path/to/document.pdf");
         std::process::exit(2);
     };
+    #[cfg(feature = "screenshot")]
+    if first == "--screenshot" || first == "--automate" {
+        let result = if first == "--screenshot" {
+            match (args.next(), args.next(), args.next()) {
+                (Some(output), Some(path), None) => run_headless(
+                    PathBuf::from(path),
+                    vec![Step::Capture(PathBuf::from(output))],
+                ),
+                _ => Err("Usage: kver --screenshot output.png path/to/document.pdf".into()),
+            }
+        } else {
+            match (args.next(), args.next(), args.next(), args.next()) {
+                (Some(scenario), Some(output_dir), Some(path), None) => {
+                    let output_dir = PathBuf::from(output_dir);
+                    (|| {
+                        let text = std::fs::read_to_string(scenario)?;
+                        let steps = parse_scenario(&text, &output_dir)?;
+                        std::fs::create_dir_all(output_dir)?;
+                        run_headless(PathBuf::from(path), steps)
+                    })()
+                }
+                _ => Err(
+                    "Usage: kver --automate scenario.txt output-dir path/to/document.pdf".into(),
+                ),
+            }
+        };
+        if let Err(error) = result {
+            eprintln!("Cannot run headless: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(not(feature = "screenshot"))]
+    if first == "--screenshot" || first == "--automate" {
+        eprintln!("Headless capture requires --features screenshot");
+        std::process::exit(2);
+    }
+    let path = PathBuf::from(first);
 
-    Application::new().run(move |cx: &mut App| {
-        cx.on_window_closed(|cx| {
+    gpui_platform::application().run(move |cx: &mut App| {
+        cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
             }
@@ -215,5 +365,35 @@ mod tests {
         assert!(scale < 8.0);
         assert!(scale > 7.0);
         assert!(595.44 * 842.04 * scale * scale <= 32_000_000.0);
+    }
+
+    #[cfg(feature = "screenshot")]
+    #[test]
+    fn scenario_accepts_commands_and_safe_capture_names() {
+        let steps = parse_scenario(
+            "# comment\ncapture before.png\nzoom-in\nzoom-out\ncapture after.png\n",
+            std::path::Path::new("captures"),
+        )
+        .unwrap();
+        assert_eq!(steps.len(), 4);
+        assert!(
+            matches!(&steps[0], Step::Capture(path) if path == std::path::Path::new("captures/before.png"))
+        );
+        assert!(matches!(steps[1], Step::ZoomIn));
+        assert!(
+            matches!(&steps[3], Step::Capture(path) if path == std::path::Path::new("captures/after.png"))
+        );
+        assert!(parse_scenario("capture ../escape.png", std::path::Path::new("captures")).is_err());
+        assert!(
+            parse_scenario("capture /tmp/escape.png", std::path::Path::new("captures")).is_err()
+        );
+        assert!(parse_scenario("zoom-in", std::path::Path::new("captures")).is_err());
+        assert!(
+            parse_scenario(
+                "click 10 10\ncapture a.png",
+                std::path::Path::new("captures")
+            )
+            .is_err()
+        );
     }
 }

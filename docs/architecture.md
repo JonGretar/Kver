@@ -2,7 +2,7 @@
 
 ## Overview
 
-Folio is a native, cross-platform PDF reader implemented in Rust using GPUI.
+Kver is a native, cross-platform PDF reader implemented in Rust using GPUI.
 
 The application separates PDF processing, document navigation, rendering orchestration, and UI components.
 
@@ -235,7 +235,7 @@ Command parsing should be independently testable.
 
 ## Visual Ruler
 
-The visual ruler is a central feature of Folio.
+The visual ruler is a central feature of Kver.
 
 It provides a visual guide for following text while reading.
 
@@ -330,4 +330,4 @@ These may be considered later.
 - How should PDF rendering workers be managed?
 - What text-line grouping strategy works best?
 - Should PDF annotations eventually be written into PDFs or stored separately?
-- What licensing model should Folio use?
+- What licensing model should Kver use?

@@ -53,7 +53,7 @@ Acceptance criteria:
 
 ## Phase 2 — Practical Daily Reader
 
-**Goal:** Make Folio useful for everyday document reading.
+**Goal:** Make Kver useful for everyday document reading.
 
 Tasks:
 
@@ -70,13 +70,13 @@ Tasks:
 
 Acceptance criteria:
 
-- Folio can replace a conventional PDF reader for common workflows
+- Kver can replace a conventional PDF reader for common workflows
 - Navigation state behaves predictably
 - Text interactions work on representative PDFs
 
 ## Phase 3 — Desktop Application
 
-**Goal:** Prepare Folio for external beta testing.
+**Goal:** Prepare Kver for external beta testing.
 
 Tasks:
 
@@ -101,7 +101,7 @@ Acceptance criteria:
 
 ## Phase 4 — Advanced Reading
 
-**Goal:** Expand Folio beyond a basic reader.
+**Goal:** Expand Kver beyond a basic reader.
 
 Potential tasks:
 

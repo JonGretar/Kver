@@ -1,12 +1,14 @@
-# Folio
+# Kver
 
 **A modern, cross-platform PDF reader built for the keyboard.**
 
-Folio is a fast, lightweight PDF reader designed for people who spend a lot of time reading documents.
+Kver is a fast, lightweight PDF reader designed for people who spend a lot of time reading documents.
 
-Inspired by [Sioyek](https://sioyek.info/), Folio combines Vim-style keyboard navigation with a modern, minimal desktop interface.
+The name _Kver_ is Icelandic for a small book or booklet.
 
-Although particularly suited to developers, researchers, and technical users, Folio aims to be a general-purpose PDF reader that is equally comfortable with a mouse.
+Inspired by [Sioyek](https://sioyek.info/), Kver combines Vim-style keyboard navigation with a modern, minimal desktop interface.
+
+Although particularly suited to developers, researchers, and technical users, Kver aims to be a general-purpose PDF reader that is equally comfortable with a mouse.
 
 ## Goals
 
@@ -21,7 +23,7 @@ Although particularly suited to developers, researchers, and technical users, Fo
 
 ## Technology
 
-Folio is written in Rust.
+Kver is written in Rust.
 
 The proposed technology stack is:
 
@@ -53,7 +55,7 @@ See [Features](docs/features.md) and [Roadmap](docs/roadmap.md).
 
 ## Status
 
-Folio is in the planning and early prototyping stage.
+Kver is in the planning and early prototyping stage.
 
 The initial development priority is validating GPUI and the PDF rendering engine, followed by building a minimal but usable reader.
 

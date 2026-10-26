@@ -2,7 +2,7 @@
 
 ## Product Direction
 
-Folio is a general-purpose, keyboard-first PDF reader.
+Kver is a general-purpose, keyboard-first PDF reader.
 
 The primary audience includes developers, technical users, researchers, and people who frequently read long documents.
 

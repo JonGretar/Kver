@@ -1,6 +1,6 @@
 # Domain docs
 
-Folio uses a single-context layout: `GLOSSARY.md` at the repository root and ADRs under `docs/adr/`.
+Kver uses a single-context layout: `GLOSSARY.md` at the repository root and ADRs under `docs/adr/`.
 
 Before exploring a relevant area, read the glossary and any applicable ADRs. If they do not exist yet, proceed without creating empty files. Add a glossary entry when a domain term is settled; record a consequential architectural decision when its trade-offs need preserving.
 

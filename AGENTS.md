@@ -1,8 +1,8 @@
-# Folio — Agent Instructions
+# Kver — Agent Instructions
 
 ## Project Overview
 
-Folio is a modern, cross-platform, keyboard-first PDF reader written in Rust.
+Kver is a modern, cross-platform, keyboard-first PDF reader written in Rust.
 
 It is inspired by Sioyek, but aims to be a general-purpose PDF reader rather than an academic-specific application.
 

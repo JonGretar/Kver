@@ -146,6 +146,16 @@ Keep these documents updated when decisions change:
 
 Document important architectural decisions and tradeoffs.
 
+## Agent skills
+
+### Issue tracker
+
+Publish project tickets to GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Use a single-context glossary and ADR layout. See `docs/agents/domain.md`.
+
 ## Scope
 
 Do not implement features outside the current milestone without a clear reason.

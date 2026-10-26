@@ -2,7 +2,8 @@
 
 ## Overview
 
-Kver is a native, cross-platform PDF reader implemented in Rust using GPUI.
+Kver is a planned native PDF reader in Rust using GPUI. macOS is the first
+delivery target; Linux and Windows are separate targets.
 
 The application separates PDF processing, document navigation, rendering orchestration, and UI components.
 
@@ -20,6 +21,9 @@ The primary architectural goal is to support a responsive reading experience wit
 | Configuration       | TOML                                 |
 
 ## High-Level Architecture
+
+This diagram shows prospective responsibilities, including features scheduled
+after the MVP. It is not a requirement to implement every branch at once.
 
 ```text
 Application
@@ -83,7 +87,8 @@ Positioned text extraction is especially important for text selection, searching
 
 ### PDFium
 
-PDFium is the initial preferred backend.
+PDFium is an initial candidate, not a selected backend. Validate the claims
+below against real PDFs alongside Hayro / `gpui-pdf`.
 
 Advantages:
 
@@ -120,9 +125,10 @@ Disadvantages:
 
 ### Decision
 
-The backend choice remains provisional.
-
-Build a small rendering prototype and test both approaches before finalizing it.
+The backend choice remains open. Compare rendering accuracy, responsiveness,
+positioned text, document/screen coordinate handling, packaging, and Linux
+and Windows feasibility before choosing the initial backend. Validate scans
+and rotated/cropped pages. The prototype need not implement a visual ruler.
 
 ## Rendering Pipeline
 
@@ -211,15 +217,12 @@ Actions can be triggered from different inputs.
 
 ## Keyboard Commands
 
-The command system should support:
+The macOS MVP needs predefined controls for scrolling, pages, and zoom. Keep
+actions independent of their input so later work can add configurable
+keybindings, multi-key sequences, counts, input contexts, and a command
+palette without changing the reader or PDF backend.
 
-- Configurable keybindings
-- Multi-key sequences
-- Numeric counts
-- Different input contexts
-- A command palette
-
-Example sequences:
+Examples of possible later sequences (not MVP defaults):
 
 - `j` / `k`: scroll
 - `gg`: document beginning
@@ -229,19 +232,20 @@ Example sequences:
 - `'a`: jump to mark
 - `/`: search
 
-Exact default bindings will be defined during development.
-
-Command parsing should be independently testable.
+Exact bindings will be defined during development. Test any multi-key parser
+when it is introduced.
 
 ## Visual Ruler
 
-The visual ruler is a central feature of Kver.
+The visual ruler is a desired reading feature, not a macOS MVP requirement
+or a scheduled next release. Technical validation should preserve the
+document-space and text-geometry prerequisites without building the ruler.
 
 It provides a visual guide for following text while reading.
 
 ### Modes
 
-Initial implementation:
+When implemented:
 
 - Text-line-aware mode
 - Coordinate-based fallback mode
@@ -295,9 +299,9 @@ Database schema design is deferred until the persistence layer is implemented.
 
 Target platforms:
 
-- macOS
-- Linux
-- Windows
+- macOS: first downloadable MVP, initially unsigned
+- Linux: separate delivery gate after feasibility checks
+- Windows: separate delivery gate after feasibility checks
 
 Avoid platform-specific logic in core document and navigation code.
 

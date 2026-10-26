@@ -2,7 +2,8 @@
 
 ## Project Overview
 
-Kver is a modern, cross-platform, keyboard-first PDF reader written in Rust.
+Kver is a planned keyboard-first PDF reader in Rust. The first downloadable
+release targets macOS; Linux and Windows have separate delivery gates.
 
 It is inspired by Sioyek, but aims to be a general-purpose PDF reader rather than an academic-specific application.
 
@@ -110,7 +111,8 @@ Avoid loading or rasterizing entire large documents eagerly.
 
 ## Visual Ruler
 
-The visual ruler is a core MVP feature, not a later enhancement.
+The visual ruler is a desired feature, not an MVP release gate. Validate
+positioned text and document coordinates early so it remains feasible.
 
 It should:
 
@@ -160,6 +162,8 @@ Use a single-context glossary and ADR layout. See `docs/agents/domain.md`.
 
 Do not implement features outside the current milestone without a clear reason.
 
-The first objective is a working reader with smooth navigation, zooming, and a visual ruler.
+The first objective is to validate the stack, then ship a buildable,
+downloadable macOS PDF reader with smooth navigation and zooming. The ruler
+and full keyboard customization are later goals, not MVP blockers.
 
 See `docs/roadmap.md`.

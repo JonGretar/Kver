@@ -1,188 +1,78 @@
 # Features
 
-## Product Direction
+Kver is a general-purpose PDF reader for people who read long or varied
+documents. Keyboard access matters, but mouse interaction should remain
+natural. The [roadmap](roadmap.md) defines release gates; this page identifies
+which capabilities belong to each gate.
 
-Kver is a general-purpose, keyboard-first PDF reader.
+## macOS MVP — first downloadable preview
 
-The primary audience includes developers, technical users, researchers, and people who frequently read long documents.
+- Open local PDFs; show understandable failures.
+- Display pages with continuous vertical scrolling, page navigation, zoom,
+  fit width, and fit page.
+- Render visible pages asynchronously with bounded memory use so long
+  documents remain responsive.
+- Provide a predefined set of keyboard controls for scrolling, pages, and
+  zoom, as well as ordinary mouse navigation.
+- Distribute a buildable, downloadable unsigned macOS app. Signing and
+  notarization can follow later.
 
-The application must remain usable with conventional mouse and keyboard interactions.
+Test with text, scanned, long, and rotated/cropped PDFs. Password-protected
+PDFs may be included if straightforward, but do not block this release.
+The MVP does not promise OCR.
 
-## Core MVP — P0
+## Daily-reader milestone
 
-These features are required before considering the initial reader complete.
+- Search document text; move between and highlight results.
+- Select and copy text with the mouse.
+- Follow internal links; display a PDF outline when present.
+- Navigate backward and forward.
+- Restore the previous reading position.
 
-### PDF Viewing
+These are the next defined capability gate, not prerequisites for the first
+download. Search-result highlighting is transient; it does not create an
+annotation.
 
-- Open local PDF documents
-- Handle password-protected PDFs
-- Continuous vertical scrolling
-- Page navigation
-- Zoom in/out
-- Fit width
-- Fit page
-- Smooth scrolling
-- Efficient rendering and caching
-- Handle large documents without excessive memory use
+## Goals without a fixed release date
 
-### Keyboard Navigation
+### Visual ruler
 
-- Vim-style `j` and `k` scrolling
-- `gg` and `G` navigation
-- Numeric command counts
-- Page-wise navigation
-- Configurable keybindings
-- Navigation backward/forward
+A movable reading guide should follow text lines where geometry is usable and
+move by position on scans. Its position should survive zoom and scrolling.
+Keyboard controls and an overlay independent of page rasterization keep
+movement responsive. The ruler is wanted but is **not an MVP gate** or a
+promise for the immediately following release.
 
-### Visual Ruler
+### More navigation and desktop controls
 
-The visual ruler is a core feature.
+- Configurable keybindings and preferences.
+- Vim-style sequences, numeric counts, named marks, and a command palette.
+- Recent documents, multiple-document switching, tabs or windows, and
+  drag-and-drop.
+- Password-protected PDFs if deferred from MVP.
+- Link hints and keyboard-driven text selection.
 
-Requirements:
+### Authoring and study
 
-- Toggle ruler visibility
-- Move ruler using keyboard commands
-- Line-aware positioning where possible
-- Fallback movement for image-only documents
-- Configurable ruler appearance
-- Correct positioning while scrolling and zooming
+- Reload PDFs after rebuilds; SyncTeX forward/inverse navigation with LaTeX
+  source files.
+- Notes, persistent text highlights, bookmarks, and annotation export. Decide
+  how annotations are stored and shared before promising PDF interoperability.
+- Split views, snapshots, overviews, and two-page or presentation layouts.
+- Smart jumps to references, bibliography navigation, and portals inspired by
+  Sioyek.
 
-### Search
+These capabilities can be promoted independently when they have a clear
+use case and an implementation path. They do not define a mandatory order.
 
-- Search text within the current document
-- Navigate next/previous match
-- Visually highlight matches
-- Keyboard-accessible search interface
-- Incremental search if practical
+## Other platforms
 
-### Basic Text Interaction
+Linux and Windows are targets with separate delivery gates. Evaluate their
+feasibility early, but do not hold the first macOS download until their
+packages are ready.
 
-- Select text with the mouse
-- Copy selected text
-- Follow internal links
-- Open external links safely
+## Out of scope for the initial reader
 
-## Everyday Usability — P1
-
-These are important for a practical replacement for existing readers.
-
-### Navigation
-
-- Document table of contents
-- Jump to a page number
-- Named marks
-- Recently opened documents
-- Restore previous reading position
-- Restore appropriate zoom state
-- Document navigation history
-
-### Desktop Experience
-
-- Native file opening
-- Drag-and-drop PDF files
-- Dark/light application themes
-- Keyboard command palette
-- Useful error messages
-- Configurable preferences
-
-### Multiple Documents
-
-- Open multiple documents
-- Switch between documents quickly
-- Preserve independent state per document
-
-Tabs are desirable but not mandatory for the first working prototype.
-
-## Advanced Features — P2
-
-These are valuable but should not delay the initial release.
-
-### Annotation
-
-- Text highlighting
-- Named bookmarks
-- Annotation navigation
-- Notes
-- Export or persistence of annotations
-
-### Advanced Viewing
-
-- Split views
-- Two-page layouts
-- Presentation mode
-- Document comparison
-- Multiple windows
-
-### Navigation Enhancements
-
-- Link hints
-- Search across previously opened documents
-- Enhanced mark management
-- Keyboard-driven text selection
-
-## Academic / Research Features — P3
-
-These are inspired by Sioyek and may be implemented incrementally.
-
-### Smart Jump
-
-Recognize references to figures, tables, equations, and bibliography entries even when PDF hyperlinks are missing.
-
-### Overview Windows
-
-Display referenced content without leaving the current reading position.
-
-### Portals
-
-Connect document locations and dynamically display referenced material in another viewport.
-
-### Bibliography Navigation
-
-Identify references and navigate between citations and their corresponding bibliography entries.
-
-## Design Principles
-
-### Keyboard-first, not keyboard-only
-
-All important actions should be keyboard-accessible, but mouse interaction must remain natural.
-
-### Responsiveness
-
-Rendering should not interrupt navigation or input handling.
-
-### Minimal UI
-
-Avoid permanent UI elements that unnecessarily reduce document viewing space.
-
-### Configurability
-
-Power users should be able to customize keyboard bindings and relevant reading behavior.
-
-### Persistence
-
-A document should reopen where the user left off.
-
-### General-purpose usability
-
-Do not assume PDFs are academic papers.
-
-Documents may include:
-
-- Manuals
-- Technical specifications
-- Programming books
-- Reports
-- Invoices
-- Research papers
-- Scanned documents
-- Presentations
-
-## Out of Scope for MVP
-
-- Editing PDF contents
-- Creating PDFs
-- OCR
-- PDF form editing
-- Digital signatures
-- Cloud document libraries
-- Collaborative editing
+Creating or editing PDF contents, OCR, PDF form editing, digital signatures,
+cloud document libraries, and collaborative editing are not initial-release
+commitments.

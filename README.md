@@ -1,12 +1,16 @@
 # Kver
 
-**A modern, cross-platform PDF reader built for the keyboard.**
+**A keyboard-friendly PDF reader, starting on macOS.**
 
-Kver is a fast, lightweight PDF reader designed for people who spend a lot of time reading documents.
+Kver aims to be a responsive PDF reader for people who spend a lot of time
+reading documents. It is still in the planning stage; there is no application
+to download yet.
 
 The name _Kver_ is Icelandic for a small book or booklet.
 
-Inspired by [Sioyek](https://sioyek.info/), Kver combines Vim-style keyboard navigation with a modern, minimal desktop interface.
+Inspired by [Sioyek](https://sioyek.info/) and
+[Skim](https://skim-app.sourceforge.io/), Kver aims to pair keyboard navigation
+with a minimal desktop interface.
 
 Although particularly suited to developers, researchers, and technical users, Kver aims to be a general-purpose PDF reader that is equally comfortable with a mouse.
 
@@ -14,50 +18,48 @@ Although particularly suited to developers, researchers, and technical users, Kv
 
 - Fast and responsive PDF viewing
 - Keyboard-first, but not keyboard-only
-- Cross-platform support for macOS, Linux, and Windows
+- A first downloadable release on macOS, with Linux and Windows as separate targets
 - Minimal, distraction-free interface
 - Powerful navigation inspired by Vim and Sioyek
-- Persistent reading positions, marks, and document history
-- A built-in visual ruler for focused reading
-- Configurable keyboard shortcuts and behavior
+- Search, text interaction, and reading-position restoration as the reader matures
+- A visual ruler and configurable keyboard shortcuts as future goals
 
 ## Technology
 
-Kver is written in Rust.
+Kver is planned in Rust.
 
 The proposed technology stack is:
 
 - **UI:** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-- **PDF engine:** PDFium via `pdfium-render` (provisional)
+- **PDF engine:** PDFium via `pdfium-render` or an alternative, to be tested
 - **Persistence:** SQLite
 - **Configuration:** TOML
 
-Alternative PDF implementations, particularly Hayro and `gpui-pdf`, will be evaluated during early development.
+PDFium, Hayro, and `gpui-pdf` will be evaluated before choosing an initial backend.
 
 See [Architecture](docs/architecture.md) for details.
 
-## Features
+## Plan
 
-The initial focus is on creating an excellent everyday reading experience:
+1. Validate the UI and PDF backends with representative documents, including
+   text geometry and coordinates needed for future features.
+2. Release a buildable, downloadable **unsigned macOS MVP** that opens and
+   reads PDFs smoothly, with basic predefined keyboard and mouse controls.
+3. Add search, selection/copy, links, outline, history, and reading-position
+   restoration to make it a daily reader.
 
-- Continuous PDF scrolling and zooming
-- Vim-style keyboard navigation
-- Visual ruler with keyboard-controlled movement
-- Text searching, selection, and copying
-- Document outlines and internal links
-- Marks and navigation history
-- Automatic restoration of reading position
-- Configurable keyboard shortcuts
-
-More advanced features, such as highlights, annotations, smart reference jumping, and split views, are planned for later development.
-
-See [Features](docs/features.md) and [Roadmap](docs/roadmap.md).
+The visual ruler, configurable bindings, annotations, and LaTeX/SyncTeX
+integration remain goals without assigned release dates. Password-protected
+PDFs are required eventually, but do not block the first download unless
+support is straightforward. See [Features](docs/features.md) and
+[Roadmap](docs/roadmap.md) for the gates and later goals.
 
 ## Status
 
-Kver is in the planning and early prototyping stage.
+Kver is in the planning stage.
 
-The initial development priority is validating GPUI and the PDF rendering engine, followed by building a minimal but usable reader.
+The initial priority is validating GPUI and the PDF backend choices, followed
+by the macOS reader.
 
 ## Inspiration
 

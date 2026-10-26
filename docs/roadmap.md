@@ -1,152 +1,89 @@
 # Roadmap
 
-## Phase 0 — Technical Validation
+Kver's first job is to read PDFs well. The first downloadable product is a
+macOS MVP, not a replacement for every existing reader. Capabilities beyond
+the daily reader are goals, not a fixed release sequence. See
+[features](features.md) for the corresponding scope.
 
-**Goal:** Confirm that the proposed technology stack is viable.
+## 0. Validate the stack
 
-Tasks:
+**Outcome:** Evidence for a viable UI and PDF backend before committing to one.
 
-- [ ] Create initial Rust project
-- [ ] Initialize GPUI application
-- [ ] Open a native application window
-- [ ] Evaluate PDFium through `pdfium-render`
-- [ ] Evaluate Hayro / `gpui-pdf`
-- [ ] Render a PDF page
-- [ ] Test page rendering at different scales
-- [ ] Extract text and text geometry
-- [ ] Validate macOS support
-- [ ] Investigate Linux and Windows compatibility
-- [ ] Record findings and choose initial PDF backend
+- Bootstrap Rust and GPUI; open a macOS window and render a PDF page at
+  several scales without blocking input.
+- Compare PDFium (`pdfium-render`) with Hayro / `gpui-pdf` using representative
+  text, scanned, long, and rotated/cropped PDFs. Record rendering quality,
+  responsiveness, packaging trade-offs, and usable positioned text geometry.
+- Validate transforms between document and screen coordinates, including
+  rotated/cropped pages. Scans should still render without a text layer.
+- Check Linux and Windows feasibility early. Record blockers rather than
+  promising release artifacts at this stage.
+- Choose the initial backend based on the evidence, or document what remains
+  unresolved.
 
-Acceptance criteria:
+**Gate:** Pages render correctly at multiple scales; input remains responsive;
+text geometry and coordinate transforms have been tested; backend and platform
+risks are documented. This is a technical prototype, not a release. It need
+not implement the visual ruler.
 
-- PDF pages render correctly
-- Text geometry is available
-- UI remains responsive during rendering
-- No fundamental cross-platform blockers are identified
+## 1. Ship a macOS MVP
 
-## Phase 1 — Reader Prototype
+**Outcome:** A buildable, downloadable PDF reader for macOS.
 
-**Goal:** Create a minimal PDF reader suitable for reading ordinary documents.
+- Open local PDFs and report failures clearly.
+- Show and navigate pages with continuous scrolling, zoom, fit width, and fit
+  page. Keep scrolling and zooming responsive in long documents by rendering
+  visible pages in background work and bounding cache memory.
+- Provide basic predefined keyboard controls for scrolling, pages, and zoom,
+  alongside ordinary mouse interactions. A full Vim command language and
+  configurable bindings are not release blockers.
+- Package a downloadable macOS build and test it with long, scanned,
+  rotated/cropped, and text PDFs. No OCR is promised.
+- Include password-protected PDFs if support is straightforward; otherwise
+  give an understandable error and keep support as an explicit later goal.
 
-Tasks:
+**Gate:** Someone can download and build the macOS app, open ordinary PDFs,
+read across pages, and use basic keyboard/mouse navigation without UI stalls or
+unbounded page loading. An unsigned preview is acceptable; paid Developer ID
+signing and notarization are not prerequisites. Communicate the resulting
+macOS security prompts with the download.
 
-- [ ] Open local PDFs
-- [ ] Display multiple pages
-- [ ] Implement continuous scrolling
-- [ ] Add zoom controls
-- [ ] Add fit-width and fit-page modes
-- [ ] Implement basic page virtualization
-- [ ] Render pages asynchronously
-- [ ] Add page image caching
-- [ ] Implement basic Vim navigation
-- [ ] Add an initial visual ruler overlay
-- [ ] Add line-aware ruler movement
-- [ ] Add fallback ruler movement
+## 2. Make it a daily reader
 
-Acceptance criteria:
+**Outcome:** Common reading workflows no longer require another PDF reader.
 
-- A long PDF can be read comfortably
-- Scrolling and keyboard navigation feel responsive
-- The visual ruler works on text-based documents
-- Zooming does not block the UI
+- Search document text and move between highlighted results.
+- Select and copy text with the mouse.
+- Follow internal links and show the document outline when present.
+- Navigate back and forward and restore the last reading position.
 
-## Phase 2 — Practical Daily Reader
+**Gate:** These workflows work on representative PDFs, and navigation remains
+predictable after zoom and scrolling. The order within this milestone is
+flexible. Search-result highlights are transient, not saved annotations.
 
-**Goal:** Make Kver useful for everyday document reading.
+## Separate platform delivery
 
-Tasks:
+Linux and Windows remain product targets. Their compatibility is checked
+during technical validation, but each needs its own build, packaging, and PDF
+regression checks before a downloadable release. Neither blocks the macOS MVP
+or daily-reader milestones.
 
-- [ ] Implement text search
-- [ ] Highlight search matches
-- [ ] Implement text selection and copying
-- [ ] Add PDF link navigation
-- [ ] Add table of contents
-- [ ] Implement navigation history
-- [ ] Add marks
-- [ ] Restore reading positions
-- [ ] Add recently opened documents
-- [ ] Support password-protected PDFs
+## Goals to schedule after evidence
 
-Acceptance criteria:
+Keep these visible without implying a date or order:
 
-- Kver can replace a conventional PDF reader for common workflows
-- Navigation state behaves predictably
-- Text interactions work on representative PDFs
+- Visual ruler: keyboard movement along text lines, a positional fallback on
+  scans, and stable placement through zoom/scroll. Validate its coordinate and
+  text-geometry prerequisites in Phase 0; implement it when ready.
+- Configurable keybindings, numeric counts, multi-key commands, named marks,
+  recent-document navigation, and a command palette.
+- Multiple-document switching, tabs or windows, and drag-and-drop.
+- Password-protected PDFs if not shipped in the MVP.
+- Notes, persistent highlights, and annotation interchange.
+- Reload after PDF rebuilds and SyncTeX source/PDF navigation for LaTeX.
+- Split views, snapshots or overviews, smart reference jumping, and portals.
 
-## Phase 3 — Desktop Application
-
-**Goal:** Prepare Kver for external beta testing.
-
-Tasks:
-
-- [ ] Add command palette
-- [ ] Add user-configurable keybindings
-- [ ] Add settings
-- [ ] Add document tabs or equivalent switching
-- [ ] Implement drag-and-drop
-- [ ] Improve errors and loading states
-- [ ] Add application icon
-- [ ] Implement macOS packaging
-- [ ] Implement Linux packaging
-- [ ] Implement Windows packaging
-- [ ] Test on all supported platforms
-
-Acceptance criteria:
-
-- Installation is straightforward
-- Keyboard and mouse interaction are polished
-- Common PDFs work reliably
-- The application is ready for early users
-
-## Phase 4 — Advanced Reading
-
-**Goal:** Expand Kver beyond a basic reader.
-
-Potential tasks:
-
-- [ ] Text highlights
-- [ ] Persistent bookmarks
-- [ ] Improved navigation across documents
-- [ ] Split views
-- [ ] Link hints
-- [ ] Keyboard-driven text selection
-- [ ] Advanced visual ruler behavior
-- [ ] Annotation support
-
-These features should be prioritized based on actual usage.
-
-## Phase 5 — Research Features
-
-**Goal:** Introduce advanced Sioyek-inspired functionality.
-
-Potential tasks:
-
-- [ ] Smart jumping to figures and tables
-- [ ] Bibliography reference navigation
-- [ ] Overview windows
-- [ ] Portals
-- [ ] Advanced document structure detection
-
-These features are not required for the initial release.
-
-## Engineering Priorities
-
-At every phase:
-
-1. Preserve UI responsiveness.
-2. Avoid unnecessary architectural complexity.
-3. Keep PDF backend details isolated.
-4. Test with real-world PDFs.
-5. Maintain cross-platform portability.
-6. Document major architectural decisions.
-
-## Immediate Next Steps
-
-1. Bootstrap the Rust + GPUI application.
-2. Implement PDF page rendering using PDFium.
-3. Test positioned text extraction.
-4. Investigate the existing gpui-pdf implementation.
-5. Prototype the visual ruler.
-6. Evaluate rendering performance.
-7. Confirm the initial architecture before expanding scope.
+Promote a goal into a delivery milestone when its user value and technical
+cost are understood. Protect the core reading experience while doing so.
+See [architecture](architecture.md) for boundaries that keep these additions
+possible without building them prematurely.

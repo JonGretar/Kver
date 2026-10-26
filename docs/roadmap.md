@@ -9,6 +9,13 @@ the daily reader are goals, not a fixed release sequence. See
 
 **Outcome:** Evidence for a viable UI and PDF backend before committing to one.
 
+**Current work:** A Rust/GPUI single-page prototype uses Hayro for PDF
+rasterization, with the PDF work off the UI thread. The macOS window opens the
+README-derived [sample PDF](../examples/readme-sample.pdf). The initial preview
+appears soft; display-scale quality needs testing with real documents. Text
+selection belongs to the daily-reader milestone. The backend comparison and
+coordinate/text checks remain.
+
 - Bootstrap Rust and GPUI; open a macOS window and render a PDF page at
   several scales without blocking input.
 - Compare PDFium (`pdfium-render`) with Hayro / `gpui-pdf` using representative

@@ -3,8 +3,8 @@
 **A keyboard-friendly PDF reader, starting on macOS.**
 
 Kver aims to be a responsive PDF reader for people who spend a lot of time
-reading documents. It is still in the planning stage; there is no application
-to download yet.
+reading documents. A single-page technical prototype exists; there is no
+downloadable reader yet.
 
 The name _Kver_ is Icelandic for a small book or booklet.
 
@@ -26,7 +26,7 @@ Although particularly suited to developers, researchers, and technical users, Kv
 
 ## Technology
 
-Kver is planned in Rust.
+Kver is written in Rust.
 
 The proposed technology stack is:
 
@@ -35,7 +35,10 @@ The proposed technology stack is:
 - **Persistence:** SQLite
 - **Configuration:** TOML
 
-PDFium, Hayro, and `gpui-pdf` will be evaluated before choosing an initial backend.
+The prototype uses Hayro to render one page without requiring a native PDF
+library. This is not a backend decision: PDFium and `gpui-pdf` still need to
+be evaluated for rendering quality, text geometry, and packaging. GPUI
+provides the window; Hayro rasterizes the PDF page in background work.
 
 See [Architecture](docs/architecture.md) for details.
 
@@ -56,10 +59,32 @@ support is straightforward. See [Features](docs/features.md) and
 
 ## Status
 
-Kver is in the planning stage.
+The prototype accepts a local PDF path, renders its first page, and offers
+zoom buttons. It does not navigate pages, compare PDF engines, or satisfy
+the macOS MVP gate.
 
-The initial priority is validating GPUI and the PDF backend choices, followed
-by the macOS reader.
+On macOS, install Rust and Xcode with the Metal Toolchain component, then
+open the sample PDF generated from the introduction and goals above:
+
+```sh
+cargo run -- examples/readme-sample.pdf
+```
+
+You can also pass another local PDF path. The `−` and `+` buttons render its
+first page at different scales. To regenerate the sample after changing this
+README, run `python3 examples/generate_readme_pdf.py` (Python standard library
+only).
+
+Run `cargo test --no-default-features --lib` to exercise PDF rendering without
+building GPUI. The complete `cargo test` and `cargo clippy` require the Metal
+Toolchain. If Xcode reports it missing, install it with:
+
+```sh
+xcodebuild -downloadComponent MetalToolchain
+```
+
+The next validation step is to run the window with real PDFs and compare
+backends as described in the [roadmap](docs/roadmap.md#0-validate-the-stack).
 
 ## Inspiration
 

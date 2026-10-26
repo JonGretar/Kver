@@ -2,8 +2,9 @@
 
 ## Overview
 
-Kver is a planned native PDF reader in Rust using GPUI. macOS is the first
-delivery target; Linux and Windows are separate targets.
+Kver is a native PDF reader in Rust using GPUI. Its current single-page
+prototype renders with Hayro; the production PDF backend remains undecided.
+macOS is the first delivery target; Linux and Windows are separate targets.
 
 The application separates PDF processing, document navigation, rendering orchestration, and UI components.
 
@@ -124,6 +125,10 @@ Disadvantages:
 - Features and performance require evaluation
 
 ### Decision
+
+The prototype isolates Hayro behind `src/pdf.rs`, which returns an encoded
+page image to the UI. This adapter is deliberately limited to page one and
+does not constitute the eventual backend interface.
 
 The backend choice remains open. Compare rendering accuracy, responsiveness,
 positioned text, document/screen coordinate handling, packaging, and Linux

@@ -1,0 +1,61 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1253 >>
+stream
+BT /F1 12 Tf 50 750 Td 17 TL
+(Kver - a keyboard-friendly PDF reader) Tj T*
+() Tj T*
+(A keyboard-friendly PDF reader, starting on macOS.) Tj T*
+() Tj T*
+(Kver aims to be a responsive PDF reader for people who spend a lot of time) Tj T*
+(reading documents. A single-page technical prototype exists; there is no) Tj T*
+(downloadable reader yet.) Tj T*
+() Tj T*
+(The name Kver is Icelandic for a small book or booklet.) Tj T*
+() Tj T*
+(Inspired by Sioyek and Skim, Kver aims to pair keyboard navigation with a) Tj T*
+(minimal desktop interface.) Tj T*
+() Tj T*
+(Although particularly suited to developers, researchers, and technical users,) Tj T*
+(Kver aims to be a general-purpose PDF reader that is equally comfortable with) Tj T*
+(a mouse.) Tj T*
+() Tj T*
+() Tj T*
+(Goals) Tj T*
+(- Fast and responsive PDF viewing) Tj T*
+(- Keyboard-first, but not keyboard-only) Tj T*
+(- A first downloadable release on macOS, with Linux and Windows as separate) Tj T*
+(  targets) Tj T*
+(- Minimal, distraction-free interface) Tj T*
+(- Powerful navigation inspired by Vim and Sioyek) Tj T*
+(- Search, text interaction, and reading-position restoration as the reader) Tj T*
+(  matures) Tj T*
+(- A visual ruler and configurable keyboard shortcuts as future goals) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001546 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1616
+%%EOF

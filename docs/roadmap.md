@@ -7,31 +7,39 @@ the daily reader are goals, not a fixed release sequence. See
 
 ## 0. Validate the stack
 
-**Outcome:** Evidence for a viable UI and PDF backend before committing to one.
+**Outcome:** Evidence that the UI and an initial PDF backend can support the
+reader before committing to a release.
 
 **Current work:** A Rust/GPUI single-page prototype uses Hayro for PDF
 rasterization, with the PDF work off the UI thread. The macOS window opens the
 README-derived [sample PDF](../examples/readme-sample.pdf). The initial preview
-appears soft; display-scale quality needs testing with real documents. Text
-selection belongs to the daily-reader milestone. The backend comparison and
-coordinate/text checks remain.
+appeared soft; the prototype now requests display-density-aware images, but
+its quality still needs visual testing with real documents. Text
+selection belongs to the daily-reader milestone. Synthetic crop/rotation
+transforms, text positions on the sample, and a small
+[public-PDF spot check](rendering-validation.md#public-pdf-spot-check) have been
+recorded. [Platform build blockers](rendering-validation.md#platform-feasibility-and-current-build-limits)
+are documented; full real-document, UI, and platform checks remain.
 
 - Bootstrap Rust and GPUI; open a macOS window and render a PDF page at
   several scales without blocking input.
-- Compare PDFium (`pdfium-render`) with Hayro / `gpui-pdf` using representative
-  text, scanned, long, and rotated/cropped PDFs. Record rendering quality,
-  responsiveness, packaging trade-offs, and usable positioned text geometry.
+- Validate Hayro first with representative text, scanned, long, and
+  rotated/cropped PDFs. Record rendering quality, responsiveness, packaging
+  trade-offs, and usable positioned text geometry. Prefer it for the initial
+  backend if it meets the reader's needs; compare PDFium (`pdfium-render`) on
+  any significant gap before accepting a limitation or switching backends.
 - Validate transforms between document and screen coordinates, including
   rotated/cropped pages. Scans should still render without a text layer.
 - Check Linux and Windows feasibility early. Record blockers rather than
   promising release artifacts at this stage.
-- Choose the initial backend based on the evidence, or document what remains
-  unresolved.
+- Confirm Hayro as the initial backend based on the evidence, or document the
+  blockers and the PDFium comparison needed to resolve them.
 
 **Gate:** Pages render correctly at multiple scales; input remains responsive;
 text geometry and coordinate transforms have been tested; backend and platform
-risks are documented. This is a technical prototype, not a release. It need
-not implement the visual ruler.
+risks are documented. A full PDFium implementation is not required if Hayro
+meets these checks. This is a technical prototype, not a release. It need not
+implement the visual ruler.
 
 ## 1. Ship a macOS MVP
 

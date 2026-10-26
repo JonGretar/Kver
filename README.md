@@ -91,8 +91,9 @@ xcodebuild -downloadComponent MetalToolchain
 
 For new Delta checkouts, `.agents/prepare` fetches locked Rust dependencies
 when Cargo is available (on macOS, install Rust first). On a Cloud Runner,
-`.agents/setup` installs stable Rust, Clippy, rustfmt, Linux XKB libraries, and
-Mesa's software Vulkan driver, then fetches dependencies after preparation.
+`.agents/setup` installs stable Rust, Clippy, rustfmt, Linux XKB and Fontconfig
+development files, and Mesa's software Vulkan driver, then fetches dependencies
+after preparation.
 Both scripts need network access on a fresh machine; neither starts a window.
 For headless Linux validation, run
 `cargo +stable test --locked --no-default-features --lib`. To capture the actual

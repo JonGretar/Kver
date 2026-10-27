@@ -20,17 +20,21 @@ version-control operations in this repository.
 3. **Build a slice.** Implement one usable behavior per ticket. Follow the
    applicable project skills (such as `tdd` for test-first work), run the
    checks relevant to that behavior, and demonstrate it with a real PDF where
-   UI or rendering behavior matters. PR CI builds and tests macOS and Linux,
-   then runs the headless zoom scenario (Linux required; hosted-macOS capture
-   exploratory until it succeeds there). These checks validate off-screen
+   UI or rendering behavior matters. PR CI builds, tests, and runs the
+   headless visual integration target on both macOS and Linux. These checks validate off-screen
    rendering, not a visible window or pointer hit-testing. Check a real macOS
    window for releases or changes to native window/input behavior; a Linux
    Cloud Runner cannot substitute for that check. Do not require a local Mac
    for every routine UI PR.
+   For exploratory UI probes, temporarily add a Rust case to `tests/visual.rs`,
+   run it on the main thread with `cargo +stable test --locked --features screenshot --test visual`,
+   and inspect captures under ignored `target/`. Remove the probe code when
+   done; retain a test or committed screenshot only when intentionally chosen
+   as a stable regression gate. Preserve other work in the file when removing
+   your probe.
 4. **Review, then land.** Inspect **Review Changes** in Delta and resolve
    feedback. Publish an ordinary feature branch and pull request for review
-   when needed. Require the passing macOS and Linux PR checks before landing;
-   promote hosted-macOS capture to a required check once it is reliable. An
+   when needed. Require the passing macOS and Linux PR checks before landing. An
    independent thread's changes reach the project through version control;
    an isolated subthread's changes require an explicit worktree pull into its
    parent. Landing on `main` requires approval for that specific change.

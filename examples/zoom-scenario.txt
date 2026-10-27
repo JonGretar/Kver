@@ -1,4 +1,0 @@
-# Capture the reader before and after invoking its zoom command.
-capture before.png
-zoom-in
-capture after.png

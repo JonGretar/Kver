@@ -18,7 +18,7 @@ and LaTeX integration
   ([reading bar](https://skim-app.sourceforge.io/manual/SkimHelp_30.html),
   [appearance](https://skim-app.sourceforge.io/manual/SkimHelp_31.html)).
   This is a closer analogue of Kver's core
-  [visual ruler](architecture.md#visual-ruler) than Skim's annotation tools.
+  [visual ruler](../architecture.md#visual-ruler) than Skim's annotation tools.
 - **Snapshots:** Keep a selected page region visible for reference without
   navigating away. Skim says snapshots are *not* saved with the PDF
   ([snapshot help](https://skim-app.sourceforge.io/manual/SkimHelp_23.html)).
@@ -89,7 +89,7 @@ If source synchronization becomes a priority, expose a viewer-level action
 and editor invocation outside the PDF raster/text backend: the mapping comes
 from a compiler sidecar, not necessarily from the PDF engine. Convert incoming
 page coordinates using the same tested document-space transformations used by
-the [reader](architecture.md#coordinate-systems). For inverse search, make
+the [reader](../architecture.md#coordinate-systems). For inverse search, make
 editor invocation configurable and treat paths from source-map files as
 untrusted input rather than interpolating them into a shell command.
 

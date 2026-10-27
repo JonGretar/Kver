@@ -96,35 +96,38 @@ development files, and Mesa's software Vulkan driver, then fetches dependencies
 after preparation.
 Both scripts need network access on a fresh machine; neither starts a window.
 For headless Linux validation, run
-`cargo +stable test --locked --no-default-features --lib`. To capture the actual
-GPUI interface with the sample PDF (no display server required), run:
+`cargo +stable test --locked --no-default-features --lib`. To exercise the
+actual GPUI reader with the sample PDF (no display server required) and save
+before/after zoom captures, run:
 
 ```sh
-cargo +stable run --locked --features screenshot -- --screenshot kver.png examples/readme-sample.pdf
+cargo +stable test --locked --features screenshot --test visual
 ```
 
-For repeatable headless interaction checks, run a scenario:
+The [visual test](tests/visual.rs) writes `target/captures/before.png` and
+`after.png`. Set `KVER_TEST_PDF` to open another document and
+`KVER_CAPTURE_DIR` to choose another output directory. Agents can add Rust test
+functions there to drive the reader, assert state, and capture any UI they need
+to inspect; call new functions from the test target's
+`main` so GPUI stays on the process main thread (required by macOS Metal).
+Unlike the old scenario runner, this test opens the normal asynchronous reader,
+not a pre-rendered page. It invokes the same zoom behavior as the GUI button,
+but does not synthesize a click or prove the button's hit-testing. For an
+exploratory pointer check, capture a frame first (to lay out hitboxes), call
+`click(&mut cx, window.into(), gpui::point(px(x), px(y)))?` with window-local
+**logical** pixel coordinates, then capture again. Screenshot dimensions may
+be scaled by the display density, so screenshot pixel coordinates are not
+necessarily click coordinates. Save probes under `target/` and remove the
+temporary test code after inspecting them; keep only cases intentionally
+promoted to CI.
 
-```sh
-cargo +stable run --locked --features screenshot -- --automate examples/zoom-scenario.txt captures examples/readme-sample.pdf
-```
-
-The [sample scenario](examples/zoom-scenario.txt) captures `captures/before.png`,
-runs `zoom-in`, then captures `captures/after.png`. Scenario files allow one
-step per line: `zoom-in`, `zoom-out`, or `capture filename.png` (a filename in
-the chosen output directory); blank lines and `#` comments are ignored. Zoom
-steps invoke the same command as the corresponding UI button and wait for the
-new page to render; they do not synthesize mouse clicks or run arbitrary code.
-
-The `screenshot` feature enables GPUI's test-support renderer and pre-renders
-the first page before capture; normal GUI execution still rasterizes off the
-UI thread. Headless captures depend on a working Vulkan software adapter.
-On macOS, the headless scenario has also produced both captures with Metal;
-the normal GUI binary builds and launches, and the sample window's display
-was confirmed on a local Mac. The
+The `screenshot` feature enables GPUI's test-support renderer; normal GUI
+execution still rasterizes off the UI thread. Headless Linux captures depend
+on a working Vulkan software adapter. Metal headless capture has also been
+validated on a local Mac; the normal GUI binary builds and launches, and the
+sample window's display was confirmed on a local Mac. The
 [PR checks](.github/workflows/ci.yml) build, test, and lint on Linux and macOS;
-Linux headless capture is required, while hosted-macOS capture remains
-exploratory until the GitHub runner is verified. Captures are uploaded for
+the visual integration test is required on both. Captures are uploaded for
 visual review.
 
 The next validation step is to run the window with real PDFs and evaluate

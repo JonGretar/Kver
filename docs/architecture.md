@@ -31,11 +31,12 @@ GPUI test support; the normal UI does not compile it. The Linux headless path
 was captured using Mesa's software Vulkan driver; the macOS headless path was
 captured using Metal. The normal macOS GUI binary built and launched, and its
 sample PDF window was confirmed on a local Mac.
-Headless scenarios accept a small, explicit set of zoom
-and capture steps, calling the same zoom command as the GUI button. This
-exercises state changes and rendering without a general-purpose scripting
-runtime or coordinate-dependent mouse automation. It does not verify button
-hit-testing; add an input-event test if that becomes a regression risk.
+The `tests/visual.rs` Cargo integration target runs on the process main thread
+(required by macOS Metal), opens the same reader as the desktop binary, waits
+for asynchronous PDF rendering, and captures before/after zoom frames. Tests
+can call reader commands, inspect state, or dispatch GPUI input events; the
+zoom test does not verify button hit-testing. Add an input-event test when
+that interaction becomes a regression risk. There is no scenario language.
 
 [GPUI Kit](https://github.com/longbridge/gpui-kit) bundles styled controls,
 themes, and accessibility helpers and may be useful for future search or

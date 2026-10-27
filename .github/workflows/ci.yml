@@ -47,7 +47,7 @@ jobs:
       - name: Check formatting
         run: cargo +stable fmt --all -- --check
 
-      - name: Test all targets with headless support
+      - name: Test all targets including headless visuals
         run: cargo +stable test --locked --all-targets --features screenshot
 
       - name: Lint all targets
@@ -56,27 +56,11 @@ jobs:
       - name: Build normal GUI binary
         run: cargo +stable build --locked --bin kver
 
-      - name: Capture and verify headless zoom
-        if: runner.os == 'Linux'
-        run: |
-          cargo +stable run --locked --features screenshot -- \
-            --automate examples/zoom-scenario.txt captures examples/readme-sample.pdf
-          python3 .github/scripts/verify-captures.py captures
-
-      # Validate GitHub's hosted Metal runner before making this a required gate.
-      - name: Try headless zoom on macOS
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        run: |
-          cargo +stable run --locked --features screenshot -- \
-            --automate examples/zoom-scenario.txt captures examples/readme-sample.pdf
-          python3 .github/scripts/verify-captures.py captures
-
       - name: Upload captures for visual review
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kver-captures-${{ matrix.os }}
-          path: captures/*.png
+          path: target/captures/*.png
           if-no-files-found: ignore
           retention-days: 7

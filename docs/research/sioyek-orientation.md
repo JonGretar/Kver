@@ -1,27 +1,29 @@
 # Kver and Sioyek: orientation for design discussions
 
-This is a reading note, not a backend decision or a feature commitment. Sioyek's
-documentation and source links below refer to its `development` branch or current
-published documentation; behavior may differ between releases.
+This is a historical reading note, not a current project-status report, backend
+decision, or feature commitment. Sioyek's documentation and source links below
+refer to its `development` branch or published documentation; behavior may
+differ between releases.
 
 ## Where Kver stands
 
 - Kver aims to be a general-purpose, keyboard-first **but mouse-usable** PDF
   reader. macOS leads; Linux and Windows have separate delivery gates. The
   proposed stack includes Rust, GPUI, an undecided PDF backend, SQLite, and
-  TOML ([README](../README.md), [roadmap](roadmap.md)).
-- There is no Rust application in this repository yet. Phase 0 calls for a GPUI
-  window, render and text-geometry experiments, and comparison of PDFium with
-  Hayro / `gpui-pdf` before choosing a backend ([roadmap](roadmap.md),
-  [architecture](architecture.md)).
+  TOML ([README](../../README.md), [roadmap](../roadmap.md)).
+- At the time of this note, there was no Rust application in the repository.
+  Phase 0 called for a GPUI window, render and text-geometry experiments, and
+  comparison of PDFium with Hayro / `gpui-pdf` before choosing a backend
+  ([roadmap](../roadmap.md),
+  [architecture](../architecture.md)).
 - The intended boundaries are UI, commands, reader state, rendering, PDF backend,
   and persistence. PDF processing should not block input; document-space positions
-  must survive viewport changes ([architecture](architecture.md#high-level-architecture),
-  [coordinate systems](architecture.md#coordinate-systems)).
+  must survive viewport changes ([architecture](../architecture.md#high-level-architecture),
+  [coordinate systems](../architecture.md#coordinate-systems)).
 - The visual ruler is a wanted reading feature, not an MVP blocker. Its design
   calls for line-aware movement where text geometry permits, positional
   movement on image-only pages, and an overlay separate from page rasterization
-  ([architecture](architecture.md#visual-ruler), [features](features.md#visual-ruler)).
+  ([architecture](../architecture.md#visual-ruler), [features](../features.md#visual-ruler)).
 
 ## What Sioyek actually offers
 
@@ -47,8 +49,8 @@ published documentation; behavior may differ between releases.
   [overview](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#overview-and-smartjump),
   [portals](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#portals)).
   These are unscheduled Kver goals
-  ([features](features.md#goals-without-a-fixed-release-date),
-  [roadmap](roadmap.md#goals-to-schedule-after-evidence)).
+  ([features](../features.md#goals-without-a-fixed-release-date),
+  [roadmap](../roadmap.md#goals-to-schedule-after-evidence)).
 - Sioyek's source is C++/Qt with MuPDF rendering rather than Kver's proposed
   Rust/GPUI stack and undecided PDF backend. Its renderer uses worker threads,
   queued requests, cached responses, and discards queued requests at obsolete zoom
@@ -65,14 +67,14 @@ published documentation; behavior may differ between releases.
 - Validate PDF rendering, positioned text, coordinate transforms, worker
   behavior, and packaging before choosing the backend. The ruler can remain
   unimplemented while its prerequisites are checked
-  ([roadmap](roadmap.md#0-validate-the-stack)).
+  ([roadmap](../roadmap.md#0-validate-the-stack)).
 - Keep persistent locations in document space so restoration, navigation,
   and later overlays do not depend on screen dimensions
-  ([architecture](architecture.md#coordinate-systems)).
+  ([architecture](../architecture.md#coordinate-systems)).
 - Sioyek's visual mark illustrates line-aware reading; Kver still needs to
   decide how to order lines in multi-column layouts when it builds its ruler
   ([Sioyek visual mark](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#visual-mark),
-  [Kver ruler design](architecture.md#visual-ruler)).
+  [Kver ruler design](../architecture.md#visual-ruler)).
 
 No engine benchmark, platform prototype, or hands-on Sioyek test was performed
 for this note; those remain validation work, not established conclusions.

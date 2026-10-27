@@ -14,6 +14,12 @@ name = "kver"
 path = "src/main.rs"
 required-features = ["gui"]
 
+[[test]]
+name = "visual"
+path = "tests/visual.rs"
+harness = false # macOS Metal needs to initialize on the process main thread
+required-features = ["screenshot"]
+
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.10", default-features = false, features = ["font-kit"], optional = true }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "x11", "wayland"], optional = true }

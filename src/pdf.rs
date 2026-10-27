@@ -45,6 +45,18 @@ pub struct PageGeometry {
     pub transform: PageTransform,
 }
 
+/// Lightweight page sizes for laying out a continuous document without rasterizing it.
+pub fn document_pages(path: &Path) -> Result<Vec<(f32, f32)>, String> {
+    let data =
+        std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    let pdf = open_pdf(data)?;
+    Ok(pdf
+        .pages()
+        .iter()
+        .map(|page| page.render_dimensions())
+        .collect())
+}
+
 /// Renders a zero-based page index, independently of the UI.
 pub fn render_page(path: &Path, page_index: usize, scale: f32) -> Result<RenderedPage, String> {
     let data =

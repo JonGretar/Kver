@@ -67,6 +67,11 @@ arrows to change pages, and `−`/`+` to zoom. It does not yet provide continuou
 scrolling or satisfy the macOS MVP gate; broader rendering quality and
 scan-heavy document checks remain.
 
+To package the current prototype as an unsigned macOS `.app` from the release
+binary and existing icon, follow the [local build and launch guide](docs/macos-app.md).
+This is not a published download or an MVP release; launching the bundle
+currently requires passing a PDF path from the command line.
+
 On macOS, install Rust 1.92 or newer (Hayro 0.8's minimum) and Xcode with the
 Metal Toolchain component, then open the bundled 100-page sample PDF.
 `rustup update stable` installs or updates the

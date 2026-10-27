@@ -33,7 +33,7 @@ fractional dimensions). Debug-build timings are diagnostic, not a backend
 benchmark.
 
 Inspect the PNGs at their **native pixel size** and in the GPUI window at
-each zoom level (`cargo +stable run -- path/to/document.pdf`). The preview
+each zoom level (`cargo +stable run --release -- path/to/document.pdf`). The preview
 keeps its display size in PDF points × zoom, but requests raster pixels at that
 size × the window's display density. It retains the previous image, scaled
 to the new logical size, until background rendering completes. Moving the
@@ -44,11 +44,11 @@ preview on a 2x-density screen could look soft. A window-only macOS capture
 of the README sample at 100% now shows legible, sharp-looking text and
 correct page layout at 2064×1888 window pixels. This is **one static view**:
 real-document display quality, zoom transitions, and input responsiveness
-still need visual testing. The UI still renders only page one.
+still need visual testing. The current UI navigates one page at a time.
 
 For the remaining **interactive macOS check**:
 
-1. Run `cargo +stable run -- examples/readme-sample.pdf` on a Mac display
+1. Run `cargo +stable run --release -- examples/readme-sample.pdf` on a Mac display
    and compare the text with a familiar PDF viewer. The `−` and
    `+` buttons should change displayed size immediately and then replace
    the scaled preview with a newly rendered image.
@@ -71,6 +71,90 @@ to grow wider than the viewport. In a follow-up hands-on check with the
 scan-style PDF, the observer confirmed that the image visibly zooms beyond
 200%. Horizontal scrolling at high zoom and display-density changes remain
 unchecked.
+
+## Page-turn latency: debug versus release
+
+The opt-in main-thread GPUI probe in `tests/visual.rs` opens a PDF, renders its
+middle page, then alternates eight times between that page and the next. It
+times from the `next_page`/`previous_page` call to acceptance of the new image
+and to a headless Metal screenshot. The probe checks that successive captured
+page regions differ. It exercises a **2× display density** at 100% zoom; set
+`KVER_BENCH_ZOOM_IN=1` for 125% zoom (2.5× raster scale). These are warm,
+repeated renders of two pages; Kver does not yet cache or prefetch them. The
+probe does not measure native key dispatch, onscreen frame presentation, cold
+start, or Skim/Sioyek on the same machine.
+
+On this macOS machine (10 logical CPUs, 24 GB RAM), at 920×800 logical
+pixels, elapsed time per turn was:
+
+| PDF / zoom | Debug accepted / captured | Release accepted / captured |
+| --- | --- | --- |
+| Bundled 100-page sample, pages 50–51, 100% | 168–171 / 283–287 ms | 3–4 / 7–9 ms |
+| pdf.js `tracemonkey.pdf`, pages 7–8, 100% | 910–1021 / 1028–1141 ms | 10–11 / 14–15 ms |
+| pdf.js `tracemonkey.pdf`, pages 7–8, 125% | 1106–1242 / 1223–1360 ms | 12–13 / 16–17 ms |
+
+The first duration includes a roughly 1 ms status-poll interval; the second
+includes headless Metal capture/readback rather than an onscreen present.
+Timings vary by PDF content and machine. The **build profile dominated this
+check**: do not use `cargo run` without `--release` to decide whether prefetch
+is required.
+
+To repeat with the public pdf.js corpus file at revision
+`c85e80cb42e365ae1e9cd6c10253b9ae0d6dbf71` (SHA-256
+`3662ff519e485810520552bf301d8c3b2b917fd2f83303f4965d7abed367e113`):
+
+```sh
+mkdir -p target/perf-pages
+curl --fail --location --show-error \
+  https://raw.githubusercontent.com/mozilla/pdf.js/c85e80cb42e365ae1e9cd6c10253b9ae0d6dbf71/test/pdfs/tracemonkey.pdf \
+  --output target/perf-pages/tracemonkey.pdf
+KVER_BENCH=1 KVER_BENCH_PDF=target/perf-pages/tracemonkey.pdf \
+  cargo +stable test --locked --release --features screenshot --test visual
+```
+
+Omit `--release` for the debug comparison; omit `KVER_BENCH_PDF` for the
+bundled sample. On macOS the Metal Toolchain must be installed. Compare the
+same PDF, window, density, zoom, and build profile before inferring a backend
+speed difference.
+
+### Long-document and loading-error check
+
+The release-mode visual test also opened the [194-page RFC 9110 PDF](https://www.rfc-editor.org/rfc/rfc9110.pdf)
+(2.7 MB, SHA-256 `60b30efa1048900833d1758440247fe8ac85a3134f2327388dcb24e07d814c89`).
+It captured pages 1, 97, and 194 at 2× display density, zoomed to 125%, and
+queued page changes without waiting for intermediate results. The displayed
+page and status matched the latest request; the first/middle/last captures
+showed different, legible content. Eight release-mode turns between pages
+97–98 took 6–7 ms to accept the image and 10–12 ms through headless capture.
+This does **not** prove native-window responsiveness under sustained input.
+The file remains under ignored `target/perf-pages/`, not in the repository.
+
+```sh
+mkdir -p target/perf-pages
+curl --fail --location --show-error \
+  https://www.rfc-editor.org/rfc/rfc9110.pdf \
+  --output target/perf-pages/rfc9110.pdf
+KVER_TEST_PDF=target/perf-pages/rfc9110.pdf \
+KVER_CAPTURE_DIR=target/captures/rfc9110 \
+  cargo +stable test --locked --release --features screenshot --test visual
+```
+
+The same visual test opens a missing path and a deliberately invalid `.pdf`
+under ignored `target/captures/`. The UI shows `Cannot read ...` for the
+missing file and `Cannot open PDF: invalid or unsupported PDF file` for the
+invalid one. `target/captures/invalid-pdf.png` captures the latter. Hayro's
+`Invalid` result does not distinguish a damaged PDF from an unsupported one.
+In a real macOS release window, the observer confirmed that the invalid file
+was handled gracefully and that page turns in the 194-page RFC felt fast.
+This is qualitative feedback, not a native key-to-present measurement or a
+scan-heavy PDF check.
+
+**Next decision:** This page-at-a-time navigation slice no longer needs
+prefetch to be usable. Validate scan-heavy documents separately; if release
+mode later shows a noticeable page-turn gap against another reader on the
+same file, measure native key-to-present time first. Any future adjacent-page
+cache needs a fixed memory budget, latest-page priority, zoom/display-density
+invalidation, and obsolete-work handling; do not pre-render the whole PDF.
 
 ## Coordinate evidence so far
 
@@ -97,10 +181,11 @@ Each [positioned glyph](https://docs.rs/hayro-interpret/0.8.0/hayro_interpret/fo
 has a text-space transform and an optional Unicode mapping (which Hayro
 describes as experimental). The probe interprets the page without a display
 transform and reports glyph origins and outline bounds in PDF document
-coordinates. On the bundled PDF it saw **970 glyphs, all with Unicode
-mappings**. Its first “K” starts at document point (50, 750), matching the
-[sample generator](../examples/generate_readme_pdf.py); its space characters
-have positions but no outline bounds. This has an automated example test.
+coordinates. On the original hand-built PDF it saw **970 glyphs, all with Unicode
+mappings**; that fixture has since been replaced by the
+[Typst sample](../examples/reader-sample.typ). Re-run the probe for current
+font and text-mapping evidence. Its space characters had positions but no
+outline bounds. This has an automated example test.
 
 This demonstrates *access to glyph-level positions*, not a complete search,
 selection, or visual-ruler text model. The probe does not group lines, measure

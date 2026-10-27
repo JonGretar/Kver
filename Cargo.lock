@@ -2959,6 +2959,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "hayro",
+ "image",
 ]
 
 [[package]]

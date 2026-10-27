@@ -3,7 +3,7 @@
 **A keyboard-friendly PDF reader, starting on macOS.**
 
 Kver aims to be a responsive PDF reader for people who spend a lot of time
-reading documents. A single-page technical prototype exists; there is no
+reading documents. A page-at-a-time technical prototype exists; there is no
 downloadable reader yet.
 
 The name _Kver_ is Icelandic for a small book or booklet.
@@ -35,7 +35,7 @@ The proposed technology stack is:
 - **Persistence:** SQLite
 - **Configuration:** TOML
 
-The prototype uses Hayro to render one page without requiring a native PDF
+The prototype uses Hayro to render a requested page without requiring a native PDF
 library, and the pinned `gpui-pre` 0.3.10 GPUI snapshot for the UI and headless
 screenshot renderer. Hayro is the preferred initial backend if validation
 confirms rendering quality, positioned text, and responsive operation on
@@ -61,14 +61,15 @@ support is straightforward. See [Features](docs/features.md) and
 
 ## Status
 
-The prototype accepts a local PDF path, renders its first page at the
-window's display density, and offers zoom buttons. It does not navigate
-pages or satisfy the macOS MVP gate; display quality still needs visual
-testing on macOS with real PDFs.
+The prototype accepts a local PDF path and renders one selected page at the
+window's display density. Use the left/right arrow keys, `p`/`n`, or toolbar
+arrows to change pages, and `−`/`+` to zoom. It does not yet provide continuous
+scrolling or satisfy the macOS MVP gate; broader rendering quality and
+scan-heavy document checks remain.
 
 On macOS, install Rust 1.92 or newer (Hayro 0.8's minimum) and Xcode with the
-Metal Toolchain component, then open the sample PDF generated from the
-introduction and goals above. `rustup update stable` installs or updates the
+Metal Toolchain component, then open the bundled 100-page sample PDF.
+`rustup update stable` installs or updates the
 stable toolchain; `cargo +stable` uses it even when the default is an older
 nightly:
 
@@ -76,10 +77,18 @@ nightly:
 cargo +stable run -- examples/readme-sample.pdf
 ```
 
-You can also pass another local PDF path. The `−` and `+` buttons render its
-first page at different scales. To regenerate the sample after changing this
-README, run `python3 examples/generate_readme_pdf.py` (Python standard library
-only).
+This default **debug build is much slower** than the optimized build; use
+`cargo +stable run --release -- examples/readme-sample.pdf` when judging page
+turn speed against other readers. The first release build takes longer to
+compile. See the [page-turn measurements](docs/rendering-validation.md#page-turn-latency-debug-versus-release)
+for the headless comparison and its limitations.
+
+You can also pass another local PDF path. To rebuild the sample (requires
+[Typst](https://typst.app/)), run:
+
+```sh
+typst compile examples/reader-sample.typ examples/readme-sample.pdf
+```
 
 Run `cargo +stable test --no-default-features --lib` to exercise PDF rendering
 without building GPUI. The complete test and Clippy checks also require the
@@ -98,21 +107,22 @@ Both scripts need network access on a fresh machine; neither starts a window.
 For headless Linux validation, run
 `cargo +stable test --locked --no-default-features --lib`. To exercise the
 actual GPUI reader with the sample PDF (no display server required) and save
-before/after zoom captures, run:
+first/middle/last page and zoom captures, run:
 
 ```sh
 cargo +stable test --locked --features screenshot --test visual
 ```
 
-The [visual test](tests/visual.rs) writes `target/captures/before.png` and
-`after.png`. Set `KVER_TEST_PDF` to open another document and
-`KVER_CAPTURE_DIR` to choose another output directory. Agents can add Rust test
+The [visual test](tests/visual.rs) writes `target/captures/before.png`,
+`after.png`, `middle.png`, `last.png`, and `invalid-pdf.png`. Set `KVER_TEST_PDF`
+to check another PDF (at least three pages), and `KVER_CAPTURE_DIR` to choose
+another directory for the page captures. Agents can add Rust test
 functions there to drive the reader, assert state, and capture any UI they need
 to inspect; call new functions from the test target's
 `main` so GPUI stays on the process main thread (required by macOS Metal).
 Unlike the old scenario runner, this test opens the normal asynchronous reader,
-not a pre-rendered page. It invokes the same zoom behavior as the GUI button,
-but does not synthesize a click or prove the button's hit-testing. For an
+not a pre-rendered page. It invokes the same navigation and zoom methods as the
+GUI controls, but does not synthesize a click or prove hit-testing. For an
 exploratory pointer check, capture a frame first (to lay out hitboxes), call
 `click(&mut cx, window.into(), gpui::point(px(x), px(y)))?` with window-local
 **logical** pixel coordinates, then capture again. Screenshot dimensions may

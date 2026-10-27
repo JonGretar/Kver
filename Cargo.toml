@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = ["gui"]
-gui = ["dep:gpui", "dep:gpui_platform"]
+gui = ["dep:gpui", "dep:gpui_platform", "dep:image"]
 screenshot = ["gui", "gpui/test-support", "gpui_platform/test-support"]
 
 [[bin]]
@@ -24,3 +24,4 @@ required-features = ["screenshot"]
 gpui = { package = "gpui-pre", version = "=0.3.10", default-features = false, features = ["font-kit"], optional = true }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "x11", "wayland"], optional = true }
 hayro = "0.8.0"
+image = { version = "0.25", default-features = false, optional = true }

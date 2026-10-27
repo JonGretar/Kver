@@ -148,6 +148,16 @@ Keep these documents updated when decisions change:
 
 Document important architectural decisions and tradeoffs.
 
+For ticketed work:
+
+- Reference the issue number (`#N`) in commits. Use `Closes #N` in a PR only
+  when merging it completes the issue; otherwise use `Refs #N`.
+- In the landing PR, check off roadmap items only when fully complete, and add
+  notable reader-facing changes to `CHANGELOG.md` under `Unreleased`.
+- Create a release or tag only when explicitly requested.
+
+For the full close-out and release process, see `docs/agents/workflow.md`.
+
 ## Agent skills
 
 ### Issue tracker
@@ -160,9 +170,12 @@ Use a single-context glossary and ADR layout. See `docs/agents/domain.md`.
 
 ### Feature workflow
 
-For new feature threads, review, or landing in Delta, see
-`docs/agents/workflow.md`. Use isolated Delta worktrees for new implementation
-threads; Git and `jj` are both acceptable in this project.
+For task suggestions or "what's next", start with `docs/roadmap.md` and the
+linked GitHub issues; check live blockers and ownership before recommending
+ready work. For specs, tickets, work status, parallel implementation, review,
+or landing in Delta, see `docs/agents/workflow.md`. Use isolated Delta
+worktrees for independent implementation; Git and `jj` are both acceptable
+in this project.
 
 ## Scope
 

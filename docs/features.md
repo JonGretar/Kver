@@ -5,7 +5,7 @@ documents. Keyboard access matters, but mouse interaction should remain
 natural. The [roadmap](roadmap.md) defines release gates; this page identifies
 which capabilities belong to each gate.
 
-## macOS MVP — first downloadable preview
+## Apple silicon macOS MVP — first downloadable preview
 
 - Open local PDFs; show understandable failures.
 - Display pages with continuous vertical scrolling, page navigation, zoom,
@@ -14,8 +14,9 @@ which capabilities belong to each gate.
   documents remain responsive.
 - Provide a predefined set of keyboard controls for scrolling, pages, and
   zoom, as well as ordinary mouse navigation.
-- Distribute a buildable, downloadable unsigned macOS app. Signing and
-  notarization can follow later.
+- Distribute a buildable, downloadable unsigned Apple silicon macOS app through
+  a versioned GitHub Release. Signing, notarization, and an Intel build can
+  follow later.
 
 Test with text, scanned, long, and rotated/cropped PDFs. Password-protected
 PDFs may be included if straightforward, but do not block this release.

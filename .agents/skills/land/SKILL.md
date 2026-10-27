@@ -59,13 +59,12 @@ explicit rather than declaring them finished merely because code was merged.
    requirements if they appear. `docs/agents/workflow.md` (step 4) calls for
    review and a feature branch/PR when needed; the PR runs the macOS and Linux
    checks defined in `.github/workflows/ci.yml`. Inspect its results, including
-   the exploratory hosted-macOS headless capture, before merging. Recheck
-   branch rules, required reviews, and configured checks at execution time.
-   Verify **every applicable required check has passed on the PR's current
-   head** and any required review is complete. A pending, failing, missing,
-   or unverifiable required result blocks landing. If no checks are configured
-   or required, establish that from live repository settings rather than
-   interpreting an empty checks list alone as success.
+   the exploratory hosted-macOS headless capture, before merging. Verify the
+   macOS and Linux PR checks have passed on the PR's current head and resolve
+   outstanding review feedback. A pending, failing, missing, or unverifiable
+   PR check blocks landing. The owner's `main` protection only prevents force
+   pushes and deletion; do not query GitHub rulesets or branch-protection
+   settings as a separate landing gate.
 
 5. **Merge and prove it landed.** Before merging, ensure the PR head and
    destination are still the versions that were reviewed and checked. If the

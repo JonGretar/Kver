@@ -3,7 +3,7 @@
 **A keyboard-friendly PDF reader, starting on macOS.**
 
 Kver aims to be a responsive PDF reader for people who spend a lot of time
-reading documents. A page-at-a-time technical prototype exists; there is no
+reading documents. A continuous-scroll technical prototype exists; there is no
 downloadable reader yet.
 
 The name _Kver_ is Icelandic for a small book or booklet.
@@ -61,10 +61,12 @@ support is straightforward. See [Features](docs/features.md) and
 
 ## Status
 
-The prototype accepts a local PDF path and renders one selected page at the
-window's display density. Use the left/right arrow keys, `p`/`n`, or toolbar
-arrows to change pages, and `−`/`+` to zoom. It does not yet provide continuous
-scrolling or satisfy the macOS MVP gate; broader rendering quality and
+The prototype accepts a local PDF path and lays out all pages as lightweight
+placeholders, rendering only those in the viewport at the window's display
+density. Scroll with a wheel/trackpad or `j`/`k` and up/down; use left/right,
+`p`/`n`, or toolbar arrows to jump to page boundaries, and `−`/`+` to zoom.
+Bitmaps outside the viewport are released (up to 128 MiB of visible bitmaps).
+It does not yet satisfy the macOS MVP gate; broader rendering quality and
 scan-heavy document checks remain.
 
 To package the current prototype as an unsigned macOS `.app` from the release
@@ -112,16 +114,17 @@ Both scripts need network access on a fresh machine; neither starts a window.
 For headless Linux validation, run
 `cargo +stable test --locked --no-default-features --lib`. To exercise the
 actual GPUI reader with the sample PDF (no display server required) and save
-first/middle/last page and zoom captures, run:
+first/middle/last page, scrolling, and zoom captures, run:
 
 ```sh
 cargo +stable test --locked --features screenshot --test visual
 ```
 
 The [visual test](tests/visual.rs) writes `target/captures/before.png`,
-`after.png`, `middle.png`, `last.png`, and `invalid-pdf.png`. Set `KVER_TEST_PDF`
-to check another PDF (at least three pages), and `KVER_CAPTURE_DIR` to choose
-another directory for the page captures. Agents can add Rust test
+`after.png`, `middle.png`, `last.png`, `scrolled.png`, and `invalid-pdf.png`.
+Set `KVER_TEST_PDF` to check another PDF (at least three pages), and
+`KVER_CAPTURE_DIR` to choose another directory for the page captures.
+Agents can add Rust test
 functions there to drive the reader, assert state, and capture any UI they need
 to inspect; call new functions from the test target's
 `main` so GPUI stays on the process main thread (required by macOS Metal).

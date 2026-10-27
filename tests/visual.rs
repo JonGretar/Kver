@@ -6,7 +6,8 @@
 
 use gpui::{
     AnyWindowHandle, AppContext as _, HeadlessAppContext, InputEvent as _, KeyDownEvent, Keystroke,
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, WindowHandle, px, size,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
+    WindowHandle, point, px, size,
 };
 use kver::reader::Preview;
 use std::{
@@ -29,7 +30,9 @@ fn wait_for_page(
             cx.forbid_parking();
             return Ok(());
         }
-        if !status.starts_with("Rendering page ") || Instant::now() >= deadline {
+        if !(status.starts_with("Rendering page ") || status == "Loading document…")
+            || Instant::now() >= deadline
+        {
             return Err(format!("Expected {expected:?}, got {status:?}").into());
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -127,9 +130,9 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         );
     })?;
     assert_eq!(
-        cx.update(|app| window.read(app).unwrap().displayed_page_index()),
-        Some(0),
-        "keep page 1 visible while page 2 renders"
+        cx.update(|app| window.read(app).unwrap().page_index()),
+        1,
+        "navigation updates before the next bitmap is ready"
     );
     wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 100%"))?;
     window.update(&mut cx, |reader, _, cx| reader.previous_page(cx))?;
@@ -196,7 +199,76 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         "last page should differ from middle page"
     );
     last.save(output.join("last.png"))?;
+    // Traverse the long sample with both rapid jumps and sustained scrolling.
+    window.update(&mut cx, |reader, _, cx| reader.select_page(0, cx))?;
+    for index in 1..page_count {
+        window.update(&mut cx, |reader, _, cx| reader.select_page(index, cx))?;
+    }
+    wait_for_page(
+        &mut cx,
+        &window,
+        &format!("Page {page_count} of {page_count} · 125%"),
+    )?;
+    let bytes = cx.update(|app| window.read(app).unwrap().retained_bitmap_bytes());
+    assert!(
+        bytes > 0 && bytes <= 128 * 1024 * 1024,
+        "retained {bytes} bytes"
+    );
+    window.update(&mut cx, |reader, _, cx| reader.select_page(0, cx))?;
+    for _ in 0..page_count * 2 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(800.0, cx))?;
+    }
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().page_index()),
+        page_count - 1
+    );
+    wait_for_page(
+        &mut cx,
+        &window,
+        &format!("Page {page_count} of {page_count} · 125%"),
+    )?;
+    window.update(&mut cx, |reader, _, cx| reader.scroll_by(-800.0, cx))?;
+    wait_for_page(
+        &mut cx,
+        &window,
+        &format!("Page {} of {page_count} · 125%", page_count - 1),
+    )?;
+    cx.capture_screenshot(window.into())?
+        .save(output.join("scrolled.png"))?;
+    assert!(
+        cx.update(|app| window.read(app).unwrap().page_index()) < page_count - 1,
+        "scrolling must move into the preceding page"
+    );
+    // Dispatch a real wheel event through GPUI, not just the reader command.
+    cx.update_window(window.into(), |_, window, app| {
+        window.dispatch_event(
+            ScrollEvent {
+                position: point(px(500.0), px(500.0)),
+                delta: ScrollDelta::Pixels(point(px(0.0), px(-800.0))),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            app,
+        );
+    })?;
+    wait_for_page(
+        &mut cx,
+        &window,
+        &format!("Page {page_count} of {page_count} · 125%"),
+    )?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().page_index()),
+        page_count - 1
+    );
+    window.update(&mut cx, |reader, _, cx| {
+        reader.select_page(page_count - 1, cx)
+    })?;
     window.update(&mut cx, |reader, _, cx| reader.next_page(cx))?;
+    wait_for_page(
+        &mut cx,
+        &window,
+        &format!("Page {page_count} of {page_count} · 125%"),
+    )?;
     assert_eq!(
         cx.update(|app| window.read(app).unwrap().page_index()),
         page_count - 1
@@ -231,7 +303,9 @@ fn loading_error_is_visible(
             println!("Loading error: {status}");
             break;
         }
-        if !status.starts_with("Rendering page ") || Instant::now() >= deadline {
+        if !(status.starts_with("Rendering page ") || status == "Loading document…")
+            || Instant::now() >= deadline
+        {
             return Err(format!("Loading error not shown: {status}").into());
         }
         std::thread::sleep(Duration::from_millis(10));

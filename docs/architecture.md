@@ -2,7 +2,7 @@
 
 ## Overview
 
-Kver is a native PDF reader in Rust using GPUI. Its current page-at-a-time
+Kver is a native PDF reader in Rust using GPUI. Its continuous-scroll
 prototype renders with Hayro; the production PDF backend remains undecided.
 macOS is the first delivery target; Linux and Windows are separate targets.
 
@@ -38,15 +38,16 @@ can call reader commands, inspect state, or dispatch GPUI input events; the
 visual test does not verify button hit-testing. Add an input-event test when
 that interaction becomes a regression risk. There is no scenario language.
 
-The prototype reads and parses the PDF in background work for each page/zoom
-request, rasterizes only the requested page, and reports its document page count
-with the result. The UI receives premultiplied BGRA pixels directly rather than
-encoding and decoding PNG for every turn; PNG remains available for rendering
-validation. The reader accepts a result only when its request generation is
-still current. Page and zoom changes keep the last image visible until the
-replacement is ready; the rendering status identifies the pending page. This is
-not yet a parsed-document cache, a render queue with cancellation, or
-continuous-scroll virtualization.
+The prototype loads page dimensions once in background work and lays out the
+whole document with spacer elements around the visible pages. It rasterizes one
+visible page at a time on the background executor, selecting the next job from
+the *current* viewport rather than filling a queue that can become obsolete.
+Results from an old zoom or an offscreen page are discarded. Only visible
+bitmaps are retained, subject to a 128 MiB budget; offscreen pages remain
+placeholders. The UI receives premultiplied BGRA pixels directly rather than
+encoding/decoding PNG. Zoom preserves the page-local reading position in PDF
+points. The adapter currently reparses the PDF for each raster request; a
+parsed-document worker and prefetch are deferred until measurements justify them.
 
 [GPUI Kit](https://github.com/longbridge/gpui-kit) bundles styled controls,
 themes, and accessibility helpers and may be useful for future search or

@@ -1,172 +1,314 @@
-//! The reader preview shared by the desktop app and visual tests.
+//! Continuous reader: geometry drives layout; only the viewport owns bitmaps.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use gpui::{Context, FocusHandle, RenderImage, Window, div, img, prelude::*, px, rgb};
+use gpui::{
+    Context, FocusHandle, RenderImage, ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
+};
 use image::{Frame, RgbaImage};
 
 use crate::pdf;
+
+const GAP: f32 = 16.0;
+const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
+
+fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
+    let max_scale = (32_000_000.0 / (width * height))
+        .sqrt()
+        .min(8192.0 / width)
+        .min(8192.0 / height);
+    (zoom * density).clamp(0.25, 8.0).min(max_scale)
+}
+
+/// Page-local position stays in PDF points when layout or zoom changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Position {
+    page: usize,
+    y: f32,
+}
+
+fn page_top(pages: &[(f32, f32)], zoom: f32, index: usize) -> f32 {
+    pages.iter().take(index).map(|&(_, h)| h * zoom + GAP).sum()
+}
+
+fn position_at(pages: &[(f32, f32)], zoom: f32, offset: f32) -> Position {
+    let mut top = 0.0;
+    for (index, &(_, height)) in pages.iter().enumerate() {
+        let next = top + height * zoom + GAP;
+        if offset < next || index + 1 == pages.len() {
+            return Position {
+                page: index,
+                y: ((offset - top) / zoom).clamp(0.0, height),
+            };
+        }
+        top = next;
+    }
+    Position { page: 0, y: 0.0 }
+}
+
+fn visible_range(pages: &[(f32, f32)], zoom: f32, top: f32, height: f32) -> std::ops::Range<usize> {
+    let mut y = 0.0;
+    let mut first = pages.len();
+    let mut end = pages.len();
+    for (index, &(_, page_height)) in pages.iter().enumerate() {
+        let bottom = y + page_height * zoom;
+        if bottom >= top && y <= top + height {
+            first = first.min(index);
+            end = index + 1;
+        } else if y > top + height {
+            break;
+        }
+        y = bottom + GAP;
+    }
+    first..end
+}
+
+struct Bitmap {
+    image: Arc<RenderImage>,
+    bytes: usize,
+}
 
 pub struct Preview {
     path: PathBuf,
     scale: f32,
     display_scale: f32,
-    request: u64,
+    pages: Vec<(f32, f32)>,
+    images: HashMap<usize, Bitmap>,
+    // Only one rasterization runs at once; the next job is chosen from the
+    // *current* viewport, rather than queued ahead of a later jump.
+    in_flight: Option<(usize, u64)>,
+    generation: u64,
+    failed: Option<usize>,
     page_index: usize,
-    page_count: Option<usize>,
+    last_viewport: (f32, f32),
+    scroll: ScrollHandle,
     focus: FocusHandle,
     focus_initialized: bool,
     status: String,
-    // Last completed image (which can be the previous page while rendering).
-    // Dimensions are unscaled PDF points.
-    page: Option<(Arc<RenderImage>, usize, f32, f32)>,
-}
-
-fn raster_scale(zoom: f32, display_scale: f32, page_size: Option<(f32, f32)>) -> f32 {
-    let requested = (zoom * display_scale).clamp(0.25, 8.0);
-    let Some((width, height)) = page_size else {
-        return requested;
-    };
-    // Match the PDF adapter's bitmap bounds. An old image remains visible
-    // at logical zoom while a density-limited replacement is rendered.
-    let max_scale = (32_000_000.0 / (width * height))
-        .sqrt()
-        .min(8192.0 / width)
-        .min(8192.0 / height);
-    requested.min(max_scale)
 }
 
 impl Preview {
     pub fn new(path: PathBuf, display_scale: f32, cx: &mut Context<Self>) -> Self {
-        let mut preview = Self {
+        let mut reader = Self {
             path,
             scale: 1.0,
             display_scale,
-            request: 0,
+            pages: Vec::new(),
+            images: HashMap::new(),
+            in_flight: None,
+            generation: 0,
+            failed: None,
             page_index: 0,
-            page_count: None,
+            last_viewport: (f32::NAN, f32::NAN),
+            scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
-            status: String::new(),
-            page: None,
+            status: "Loading document…".into(),
         };
-        preview.request_render(cx);
-        preview
+        reader.load(cx);
+        reader
     }
 
-    pub fn status(&self) -> &str {
-        &self.status
-    }
-
-    pub fn page_index(&self) -> usize {
-        self.page_index
-    }
-
-    pub fn page_count(&self) -> Option<usize> {
-        self.page_count
-    }
-
-    /// The page currently on screen, which may lag behind the requested page.
-    pub fn displayed_page_index(&self) -> Option<usize> {
-        self.page.as_ref().map(|(_, index, _, _)| *index)
-    }
-
-    pub fn next_page(&mut self, cx: &mut Context<Self>) {
-        self.select_page(self.page_index.saturating_add(1), cx);
-    }
-
-    pub fn previous_page(&mut self, cx: &mut Context<Self>) {
-        if let Some(index) = self.page_index.checked_sub(1) {
-            self.select_page(index, cx);
-        }
-    }
-
-    /// Select a zero-based page; out-of-range requests leave the view unchanged.
-    pub fn select_page(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.page_count.is_some_and(|count| index < count) && index != self.page_index {
-            self.page_index = index;
-            self.request_render(cx);
-        }
-    }
-
-    pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
-        self.change_scale(1.25, cx);
-    }
-
-    fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
-        let next = (self.scale * factor).clamp(0.25, 4.0);
-        if next != self.scale {
-            self.scale = next;
-            self.request_render(cx);
-        }
-    }
-
-    fn request_render(&mut self, cx: &mut Context<Self>) {
-        self.request += 1;
-        let request = self.request;
+    fn load(&mut self, cx: &mut Context<Self>) {
         let path = self.path.clone();
-        let scale = self.scale;
-        let page_index = self.page_index;
-        // Zoom determines the logical image size; display density determines
-        // how many pixels we need to rasterize for that size.
-        let raster_scale = raster_scale(
-            scale,
-            self.display_scale,
-            self.page
-                .as_ref()
-                .filter(|(_, index, _, _)| *index == page_index)
-                .map(|(_, _, width, height)| (*width, *height)),
-        );
-        self.status = format!(
-            "Rendering page {} at {}%…",
-            page_index + 1,
-            (scale * 100.0).round()
-        );
-        cx.notify();
-
-        // Parsing, rasterization, and conversion to display pixels happen off the UI thread.
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::render_bitmap(&path, page_index, raster_scale) });
+            .spawn(async move { pdf::document_pages(&path) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                // A slower earlier page or zoom must never overwrite the latest request.
-                if this.request != request {
-                    return;
-                }
                 match result {
-                    Ok(rendered) => {
-                        let Some(pixels) =
-                            RgbaImage::from_raw(rendered.width, rendered.height, rendered.bgra)
-                        else {
-                            this.status =
-                                "Cannot display page image: invalid pixel dimensions".into();
-                            cx.notify();
-                            return;
-                        };
-                        this.page_count = Some(rendered.page_count);
-                        this.page = Some((
-                            Arc::new(RenderImage::new(vec![Frame::new(pixels)])),
-                            page_index,
-                            rendered.page_width,
-                            rendered.page_height,
-                        ));
-                        this.status = format!(
-                            "Page {} of {} · {}%",
-                            page_index + 1,
-                            rendered.page_count,
-                            (scale * 100.0).round()
-                        );
+                    Ok(pages) if !pages.is_empty() => {
+                        self::Preview::install_pages(this, pages, cx);
                     }
-                    Err(error) => {
-                        this.status = error;
-                    }
+                    Ok(_) => this.status = "PDF has no pages".into(),
+                    Err(error) => this.status = error,
                 }
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    fn install_pages(&mut self, pages: Vec<(f32, f32)>, cx: &mut Context<Self>) {
+        self.pages = pages;
+        self.status = self.ready_status();
+        self.schedule(cx);
+    }
+
+    fn ready_status(&self) -> String {
+        format!(
+            "Page {} of {} · {}%",
+            self.page_index + 1,
+            self.pages.len(),
+            (self.scale * 100.0).round()
+        )
+    }
+
+    pub fn status(&self) -> &str {
+        &self.status
+    }
+    pub fn page_index(&self) -> usize {
+        self.page_index
+    }
+    pub fn page_count(&self) -> Option<usize> {
+        (!self.pages.is_empty()).then_some(self.pages.len())
+    }
+    pub fn displayed_page_index(&self) -> Option<usize> {
+        self.images
+            .contains_key(&self.page_index)
+            .then_some(self.page_index)
+    }
+    /// Diagnostic for asserting that sustained scrolling does not retain every page.
+    pub fn retained_bitmap_bytes(&self) -> usize {
+        self.images.values().map(|image| image.bytes).sum()
+    }
+
+    fn viewport(&self) -> (f32, f32) {
+        let top = (-f32::from(self.scroll.offset().y)).max(0.0);
+        let measured = f32::from(self.scroll.bounds().size.height);
+        let height = if measured > 0.0 { measured } else { 700.0 };
+        (top, height)
+    }
+
+    fn sync_viewport(&mut self, cx: &mut Context<Self>) {
+        if self.pages.is_empty() {
+            return;
+        }
+        let (top, height) = self.viewport();
+        self.last_viewport = (top, height);
+        self.page_index = position_at(&self.pages, self.scale, top).page;
+        self.schedule(cx);
+        cx.notify();
+    }
+
+    pub fn next_page(&mut self, cx: &mut Context<Self>) {
+        self.select_page(self.page_index.saturating_add(1), cx);
+    }
+    pub fn previous_page(&mut self, cx: &mut Context<Self>) {
+        if let Some(index) = self.page_index.checked_sub(1) {
+            self.select_page(index, cx);
+        }
+    }
+    pub fn select_page(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.pages.len() {
+            return;
+        }
+        self.page_index = index;
+        if self.failed != Some(index) {
+            self.failed = None;
+        }
+        self.scroll.set_offset(point(
+            self.scroll.offset().x,
+            px(-page_top(&self.pages, self.scale, index)),
+        ));
+        self.schedule(cx);
+        cx.notify();
+    }
+    pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
+        self.change_scale(1.25, cx);
+    }
+    fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
+        let next = (self.scale * factor).clamp(0.25, 4.0);
+        if next == self.scale {
+            return;
+        }
+        let (top, _) = self.viewport();
+        let position = position_at(&self.pages, self.scale, top);
+        self.scale = next;
+        self.generation += 1;
+        self.images.clear();
+        self.failed = None;
+        self.scroll.set_offset(point(
+            self.scroll.offset().x,
+            px(-page_top(&self.pages, next, position.page) - position.y * next),
+        ));
+        self.schedule(cx);
+        cx.notify();
+    }
+
+    fn schedule(&mut self, cx: &mut Context<Self>) {
+        if self.pages.is_empty() {
+            return;
+        }
+        let (top, height) = self.viewport();
+        let range = visible_range(&self.pages, self.scale, top, height);
+        if self.failed.is_some_and(|index| !range.contains(&index)) {
+            self.failed = None;
+        }
+        // No offscreen cache: bitmap ownership and memory scale with the viewport.
+        self.images.retain(|index, _| range.contains(index));
+        if self.in_flight.is_some() {
+            return;
+        }
+        let used = self.retained_bitmap_bytes();
+        let index = range
+            .filter(|index| !self.images.contains_key(index) && self.failed != Some(*index))
+            .min_by_key(|index| (page_top(&self.pages, self.scale, *index) - top).abs() as i64);
+        let Some(index) = index else {
+            if self.failed.is_none() {
+                self.status = self.ready_status();
+            }
+            return;
+        };
+        let dimensions = self.pages[index];
+        let density = raster_scale(self.scale, self.display_scale, dimensions);
+        let estimated =
+            (dimensions.0 * density).ceil() as usize * (dimensions.1 * density).ceil() as usize * 4;
+        if used > 0 && used.saturating_add(estimated) > BITMAP_BUDGET {
+            self.status = self.ready_status();
+            return;
+        }
+        let generation = self.generation;
+        self.in_flight = Some((index, generation));
+        self.status = format!(
+            "Rendering page {} at {}%…",
+            index + 1,
+            (self.scale * 100.0).round()
+        );
+        let path = self.path.clone();
+        let work = cx
+            .background_executor()
+            .spawn(async move { pdf::render_bitmap(&path, index, density) });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.in_flight = None;
+                let (top, height) = this.viewport();
+                if generation == this.generation
+                    && visible_range(&this.pages, this.scale, top, height).contains(&index)
+                {
+                    match result {
+                        Ok(rendered) => {
+                            let bytes = rendered.bgra.len();
+                            if let Some(pixels) =
+                                RgbaImage::from_raw(rendered.width, rendered.height, rendered.bgra)
+                            {
+                                this.images.insert(
+                                    index,
+                                    Bitmap {
+                                        image: Arc::new(RenderImage::new(vec![Frame::new(pixels)])),
+                                        bytes,
+                                    },
+                                );
+                            } else {
+                                this.status =
+                                    "Cannot display page image: invalid pixel dimensions".into();
+                                this.failed = Some(index);
+                            }
+                        }
+                        Err(error) => {
+                            this.status = error;
+                            this.failed = Some(index);
+                        }
+                    }
+                }
+                this.schedule(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 }
 
@@ -176,27 +318,51 @@ impl Render for Preview {
             window.focus(&self.focus, cx);
             self.focus_initialized = true;
         }
-        // A window moved between displays needs a new bitmap, but retains its
-        // logical size and keeps showing the old one until rendering completes.
-        let display_scale = window.scale_factor();
-        if self.display_scale != display_scale {
-            self.display_scale = display_scale;
-            self.request_render(cx);
+        let density = window.scale_factor();
+        if self.display_scale != density {
+            self.display_scale = density;
+            self.generation += 1;
+            self.images.clear();
+            self.schedule(cx);
         }
-        let page = self.page.as_ref().map(|(image, _, width, height)| {
-            let page_width = px(*width * self.scale);
-            div()
-                .w_full()
-                .min_w(page_width)
-                .flex()
-                .justify_center()
-                .child(
-                    img(image.clone())
-                        .w(page_width)
-                        .h(px(*height * self.scale))
-                        .flex_shrink_0(),
-                )
-        });
+        if !self.pages.is_empty() && self.viewport() != self.last_viewport {
+            self.sync_viewport(cx);
+        }
+        let (top, height) = self.viewport();
+        let range = visible_range(&self.pages, self.scale, top, height);
+        let top_space = page_top(&self.pages, self.scale, range.start);
+        let end_space = page_top(&self.pages, self.scale, self.pages.len())
+            - page_top(&self.pages, self.scale, range.end);
+        let mut content = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(div().h(px(top_space)).flex_shrink_0());
+        for index in range {
+            let (width, page_height) = self.pages[index];
+            let page_width = px(width * self.scale);
+            let page_height = px(page_height * self.scale);
+            let image = self.images.get(&index).map(|bitmap| bitmap.image.clone());
+            content = content.child(
+                div()
+                    .w_full()
+                    .min_w(page_width)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(page_width)
+                            .h(page_height)
+                            .flex_shrink_0()
+                            .bg(rgb(0xffffff))
+                            .when_some(image, |element, image| {
+                                element.child(img(image).size_full())
+                            }),
+                    )
+                    .mb(px(GAP)),
+            );
+        }
+        content = content.child(div().h(px(end_space)).flex_shrink_0());
 
         div()
             .size_full()
@@ -206,6 +372,8 @@ impl Render for Preview {
                     match event.keystroke.key.as_str() {
                         "right" | "n" => this.next_page(cx),
                         "left" | "p" => this.previous_page(cx),
+                        "down" | "j" => this.scroll_by(100.0, cx),
+                        "up" | "k" => this.scroll_by(-100.0, cx),
                         _ => {}
                     }
                 }
@@ -265,9 +433,22 @@ impl Render for Preview {
                     .flex_1()
                     .overflow_y_scroll()
                     .overflow_x_scroll()
+                    .track_scroll(&self.scroll)
+                    .on_scroll(cx.listener(|this, _, _, cx| this.sync_viewport(cx)))
                     .p_4()
-                    .when_some(page, |this, page| this.child(page)),
+                    .child(content),
             )
+    }
+}
+
+impl Preview {
+    pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
+        let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
+        let maximum =
+            (page_top(&self.pages, self.scale, self.pages.len()) - self.viewport().1).max(0.0);
+        self.scroll
+            .set_offset(point(self.scroll.offset().x, px(-top.min(maximum))));
+        self.sync_viewport(cx);
     }
 }
 
@@ -276,16 +457,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn density_increases_pixels_without_changing_logical_zoom() {
-        assert_eq!(raster_scale(1.0, 2.0, Some((612.0, 792.0))), 2.0);
-        assert_eq!(raster_scale(1.0, 1.0, Some((612.0, 792.0))), 1.0);
+    fn display_density_changes_bitmap_resolution_not_logical_zoom() {
+        assert_eq!(raster_scale(1.0, 2.0, (612.0, 792.0)), 2.0);
+        assert_eq!(raster_scale(1.0, 1.0, (612.0, 792.0)), 1.0);
     }
 
     #[test]
     fn high_zoom_is_bounded_for_a4_scans() {
-        let scale = raster_scale(4.0, 2.0, Some((595.44, 842.04)));
+        let scale = raster_scale(4.0, 2.0, (595.44, 842.04));
         assert!(scale < 8.0);
         assert!(scale > 7.0);
         assert!(595.44 * 842.04 * scale * scale <= 32_000_000.0);
+    }
+
+    #[test]
+    fn long_document_only_lays_out_visible_pages() {
+        let pages = vec![(612.0, 792.0); 1000];
+        assert_eq!(visible_range(&pages, 1.0, 0.0, 700.0), 0..1);
+        assert_eq!(
+            visible_range(&pages, 1.0, page_top(&pages, 1.0, 500), 700.0),
+            500..501
+        );
+        assert_eq!(
+            visible_range(&pages, 1.0, page_top(&pages, 1.0, 999), 700.0),
+            999..1000
+        );
+    }
+    #[test]
+    fn page_local_position_survives_zoom() {
+        let pages = vec![(100.0, 200.0), (150.0, 300.0)];
+        let position = position_at(&pages, 1.0, 216.0 + 75.0);
+        assert_eq!(position, Position { page: 1, y: 75.0 });
+        assert_eq!(
+            position_at(&pages, 2.0, page_top(&pages, 2.0, 1) + 150.0),
+            position
+        );
     }
 }

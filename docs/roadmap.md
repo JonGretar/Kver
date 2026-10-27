@@ -10,16 +10,28 @@ the daily reader are goals, not a fixed release sequence. See
 **Outcome:** Evidence that the UI and an initial PDF backend can support the
 reader before committing to a release.
 
-**Current work:** A Rust/GPUI page-at-a-time prototype uses Hayro for PDF
+**Phase 0 decision: complete for the initial macOS prototype, with recorded
+limits.** A Rust/GPUI page-at-a-time prototype uses Hayro for PDF
 rasterization, with the PDF work off the UI thread. The macOS window opens the
 100-page [sample PDF](../examples/readme-sample.pdf). The initial preview
-appeared soft; the prototype now requests display-density-aware images, but
-its quality still needs visual testing with real documents. Text
-selection belongs to the daily-reader milestone. Synthetic crop/rotation
-transforms, text positions on the sample, and a small
-[public-PDF spot check](rendering-validation.md#public-pdf-spot-check) have been
-recorded. [Platform build blockers](rendering-validation.md#platform-feasibility-and-current-build-limits)
-are documented; full real-document, UI, and platform checks remain.
+appeared soft; the prototype now requests display-density-aware images. A
+release build opened a native Mac window, and the user reported that zooming
+the scan-style specimen looked correct. This is qualitative feedback, not a
+native latency measurement.
+Text selection belongs to the daily-reader milestone. Synthetic transforms,
+sample text positions, a [public-PDF spot check](rendering-validation.md#public-pdf-spot-check),
+and [release-mode scan and rotated/cropped backend results](rendering-validation.md#release-mode-scan-and-rotatedcropped-follow-up-linux-cloud-runner)
+have been recorded. The latter exposed mispositioned appearances on a complex
+rotated/cropped annotation specimen; the [known limitation](rendering-validation.md#release-mode-scan-and-rotatedcropped-follow-up-linux-cloud-runner)
+is accepted for now. Hayro is confirmed as the initial backend; remaining
+rendering issues will be handled individually rather than reopening that
+choice by default. A [macOS release-window check](rendering-validation.md#current-release-window-smoke-check-macos)
+opened the sample at 2×, the user accepted scan-style zoom by eye, and the
+real-PDF release headless scenario passed. Full overlapping-render, mixed-
+density, and real-document screen-coordinate checks remain future regression
+work; do not infer they passed from this gate.
+[Platform build blockers](rendering-validation.md#platform-feasibility-and-current-build-limits)
+are documented. Windows remains unbuilt, not certified.
 
 - Bootstrap Rust and GPUI; open a macOS window and render a PDF page at
   several scales without blocking input.

@@ -1,6 +1,7 @@
 # Phase 0 rendering validation
 
-Hayro is the preferred initial backend if it meets the reader's needs.
+Hayro is the confirmed initial backend for the prototype. Known PDF issues
+will be evaluated as they arise rather than blocking that choice.
 The [upstream project](https://github.com/LaurenzV/hayro#development-state)
 reports broad rendering compatibility, but also calls out robustness,
 performance, and API-surface work. Its current README is not a test result
@@ -46,7 +47,7 @@ correct page layout at 2064×1888 window pixels. This is **one static view**:
 real-document display quality, zoom transitions, and input responsiveness
 still need visual testing. The current UI navigates one page at a time.
 
-For the remaining **interactive macOS check**:
+To repeat or extend the **interactive macOS check**:
 
 1. Run `cargo +stable run --release -- examples/readme-sample.pdf` on a Mac display
    and compare the text with a familiar PDF viewer. The `−` and
@@ -71,6 +72,36 @@ to grow wider than the viewport. In a follow-up hands-on check with the
 scan-style PDF, the observer confirmed that the image visibly zooms beyond
 200%. Horizontal scrolling at high zoom and display-density changes remain
 unchecked.
+
+### Current release-window smoke check (macOS)
+
+On an Apple M4 Mac running macOS 27.0.1, `cargo +stable build --locked
+--release --bin kver` completed, then `target/release/kver
+examples/readme-sample.pdf` opened a native 920×832-point window on the built-in
+2× Retina display. A window-only 1840×1664-pixel capture showed page 1 of
+100, the correct page label and legible text at 100% zoom. A later capture
+showed page 83 with its matching label, but this was not a controlled
+key-to-present measurement. In a follow-up, the user ran
+`cargo +stable run --locked --release -- /tmp/kver-scan-validation.pdf`
+(the SHA-256-matched CC0 scan-style specimen below) and reported that
+everything looked as it should to their eyes when asked to try rapid `+`/`−`
+zoom and, if convenient, the two displays. This is a qualitative
+native-window acceptance check for basic visible zoom and responsiveness,
+**not** a measured latency result. The report does not establish whether
+opposing requests overlapped an active render or whether the window was
+moved between monitors; neither was explicitly confirmed. Comparison to a
+familiar viewer on a real document, horizontal scrolling at high zoom,
+mixed-density window moves, and stress under sustained page changes are
+still follow-ups, not claims established by this check.
+
+The release-mode Metal headless scenario also passed with the six-page
+OCR-layered `vicksburg.pdf` from the follow-up below:
+`KVER_TEST_PDF=target/validation-pdfs/vicksburg.pdf
+KVER_CAPTURE_DIR=target/captures/vicksburg-release cargo +stable test --locked
+--release --features screenshot --test visual`. It exercised page navigation,
+zoom, and error reporting with the real-PDF specimen. The captures remain
+under ignored `target/`; headless Metal does not prove the native window
+accepts input promptly during a slow render.
 
 ## Page-turn latency: debug versus release
 
@@ -291,12 +322,97 @@ fresh requests. When comparing PDFium, use the same pages, output pixel
 dimensions, and inspection conditions. A failed render or geometry extraction
 is evidence too.
 
-**Not yet validated:** The rendering command only covers Hayro rasterization.
-It does not measure UI input latency, PDFium, line grouping and reading order,
-document-to-screen transforms (including zoom, scrolling, and display density),
-or Linux/Windows packaging. Follow-up work should test text bounds and full
-forward/inverse screen coordinates on a real rotated-and-cropped document;
-add a PDFium probe if Hayro has a significant gap. No OCR is required for scans.
+**At the time of this spot check:** The rendering command only covered Hayro
+rasterization. The release-mode follow-up below adds a targeted PDFium
+comparison, but still does not measure UI input latency, line grouping and
+reading order, document-to-screen transforms (including zoom, scrolling, and
+display density), or Linux/Windows packaging. Follow-up work should test
+text bounds and full forward/inverse screen coordinates on a real
+rotated-and-cropped document. No OCR is required for scans.
+
+## Release-mode scan and rotated/cropped follow-up (Linux Cloud Runner)
+
+This is a **backend-only** check on a headless Linux x86-64 Cloud Runner
+(`cargo +stable` 1.99.1, Hayro 0.8.0 via `Cargo.lock`); it is not the
+interactive macOS check above. The release binaries were built with
+`cargo +stable build --locked --release --no-default-features --examples`.
+Each `render_validation` invocation reopened the PDF at each scale and timed
+read + parse + raster + PNG encoding, excluding PNG disk write. The table
+reports a first run followed by a repeat in the same session for representative
+pages; these are not cold-cache benchmarks or key-to-present times. Inspection
+used the saved PNGs at their native pixel dimensions. Independent visual
+references were PyMuPDF 1.26.7 (MuPDF) and, **after a visible disagreement**,
+`pypdfium2` 5.6.0 (PDFium 147.0.7713.0). These Python tools were installed
+only under ignored `target/validation-tools/`, not added to Kver.
+
+Reproduce without committing the third-party PDFs:
+
+```sh
+mkdir -p target/validation-pdfs
+curl -fLsS -o target/validation-pdfs/sample-scanned.pdf \
+  https://filedone.ai/sample-files/sample-scanned-page.pdf
+curl -fLsS -o target/validation-pdfs/vicksburg.pdf \
+  https://raw.githubusercontent.com/py-pdf/pypdf/945216fb51835a534ee6712bab34fe24fa91e11e/resources/Seige_of_Vicksburg_Sample_OCR.pdf
+curl -fLsS -o target/validation-pdfs/cropped-rotated-scaled.pdf \
+  https://raw.githubusercontent.com/py-pdf/sample-files/02b8203bf416db3dbdb03438bc8278dfcb0555f3/027-cropped-rotated-scaled/cropped-rotated-scaled.pdf
+curl -fLsS -o target/validation-pdfs/font_ascent_descent.pdf \
+  https://raw.githubusercontent.com/mozilla/pdf.js/c85e80cb42e365ae1e9cd6c10253b9ae0d6dbf71/test/pdfs/font_ascent_descent.pdf
+sha256sum target/validation-pdfs/*.pdf
+cargo +stable build --locked --release --no-default-features --examples
+target/release/examples/render_validation target/validation-pdfs/vicksburg.pdf \
+  target/validation-pdfs/output/vicksburg 4
+target/release/examples/text_geometry_probe target/validation-pdfs/vicksburg.pdf 4
+```
+
+On macOS, replace `sha256sum` with `shasum -a 256`.
+Repeat the last two commands with each PDF and page number below. The filedone
+specimen is CC0 and artificially scan-styled, not an actual archival scan.
+The six-page *Siege of Vicksburg* is an OCR-layered reproduction of printed
+pages from the pypdf test resources (image objects plus text), not proof of
+performance on large photographic scans. The four-page py-pdf
+`cropped-rotated-scaled.pdf` is a deliberately **complex generated**
+annotation/crop/rotation test (the source README says CC-BY-SA-4.0), not an
+ordinary production document. The pdf.js `font_ascent_descent.pdf` is an
+actual presentation page with `/Rotate 90` but no offset crop. SHA-256 values
+in the table identify exactly the downloaded files. No PDF fixtures were
+committed.
+
+| PDF (SHA-256) / page; MediaBox, CropBox, `/Rotate` | Hayro 1× / 2× / 3× output pixels; first-run elapsed ms (repeat where measured) | Native-size visual and geometry findings |
+| --- | --- | --- |
+| `sample-scanned.pdf` (`79f6bf12b046ac134a11fd35758d72d39715b4ff97a2153216233413aed4b0e3`), p1; `[0,0,595.44,842.04]`, same, 0° | 595×842 / 1190×1684 / 1786×2526; 70/234/391 (repeat 70/231/392) | Grain, skew, table lines and page edges present and aligned with MuPDF at 1×; MuPDF rounds to 596×843. Hayro and PDFium find zero text characters. No OCR is expected. |
+| `vicksburg.pdf` (`e8b9d461f035f8ce2440f9061d35b2164148eb3511a487aacfc26a94cb9d90fe`), p1, p4, p6; `[0,0,432,648]`, same, 0° | All: 432×648 / 864×1296 / 1296×1944. p1: 58/74/137; p4: 67/92/125 (repeat 49/75/134); p6: 53/75/144 | Inspected early/middle/late pages at 1× and p4 at 2×: headers, folios (49, 53, 55), body and scan-style print detail present and aligned with MuPDF; no missing blocks observed. Hayro decoded 2101/2101, 2340/2340, 1996/1996 positioned glyphs respectively, all in crop. On p4 the first header glyph has document origin (163.0, 598.8), page origin (163.0, 49.2) and document outline x≈163.1–168.2, y≈598.8–604.8; the rendered header is near the top at y≈43–49. This is a plausible text-overlay position, not an OCR accuracy or line-grouping test. |
+| `cropped-rotated-scaled.pdf` (`cc195eac510b81123de4f55ac9f8185f2120975a7b75a106460b98615737aacd`), p1; `[12,12,612,732]`, `[132,108,516,612]`, 0° | 384×504 / 768×1008 / 1152×1512; 6/10/15 | Four corner labels and crop boundary visible. Hayro probe: 192 glyphs, 176 mapped, 80 mapped glyphs intersect crop (same counts on p2–4). Decorative/form glyphs without Unicode and off-crop glyphs need separate handling. |
+| Same PDF, p2; `[9,9,459,549]`, `[99,81,387,459]`, 90° | 378×288 / 756×576 / 1134×864; 5/7/10 (repeat 5/7/11) | **Significant visual discrepancy at 2×:** Hayro places yellow shapes and red triangular marks detached in the blank page interior and draws extra form labels/marks over corner content; PDFium and MuPDF place the four corner groups together without the detached shapes. PDFium was rendered at exactly 756×576 with `draw_annots=True` and also with `False`; with annotations disabled PDFium omits the extra annotation content entirely. PDFium and MuPDF themselves differ on some form/annotation appearances, so do not attribute every difference to the page-content rasterizer. Hayro's first in-crop `t` has document origin (112.5,436.5) and page origin (355.5,13.5), near the top-right label at 2× (711,27); the base text mapping is plausible despite misplaced annotation appearances. |
+| Same PDF, p3; `[11,7,561,427]`, `[121,63,473,357]`, 180° | 352×294 / 704×588 / 1056×882; 5/6/9 | Upside-down corner labels and expected crop present; Hayro again draws detached yellow/red shapes in white space at 2×, unlike PDFium's annotations-on render of the same size. |
+| Same PDF, p4; `[11,13,561,793]`, `[121,117,473,663]`, 270° | 546×352 / 1092×704 / 1638×1056; 5/9/14 | Corner content has the expected orientation, but Hayro places two large yellow marks in the white interior at 2×; PDFium keeps them with the corner groups. |
+| `font_ascent_descent.pdf` (`ac32f419e728d1fa96daa24172871f8d38cf7ad6a7f3076a2f86b76a6811517e`), p1; `[0,0,595,842]`, same, 90° | 842×595 / 1684×1190 / 2526×1785; 5/12/23 | The orange Odfjell heading and black subtitle appear upright at 1× and match MuPDF's placement. Hayro reports 104 glyphs but **0 Unicode mappings**. PDFium and MuPDF extract control characters rather than readable text on this file as well; this is not evidence that PDFium fixes its text layer. |
+
+The rotated/cropped file's probe preserves PDF document coordinates even when
+text is outside the crop. For example, p1's first visible `t` is at
+document (150,582), page (18,30); p2's first visible `t` is at
+(112.5,436.5), page (355.5,13.5). Those placements agree with the visible
+corner labels. This checks the backend's crop/rotation transform for selected
+glyphs, **not** screen-space placement after scrolling/zoom or accurate
+visibility behind arbitrary clips/annotations. The 16 unmapped glyphs on each
+complex specimen page and the real presentation's unmapped text mean a search
+or visual ruler cannot assume Unicode is always available.
+
+**Phase 0 backend decision:** Hayro 0.8.0 is the chosen initial backend.
+This pass found it viable for ordinary text, these scan-style pages, and base rotated
+text/crop coordinates in release mode. Do **not** call annotation-heavy
+rotated/cropped pages validated: PDFium comparison confirms a material
+appearance-placement gap on this complex specimen (and has its own form
+differences from MuPDF). **Accepted limitation for now:** mispositioned
+annotation/form appearances on this stress fixture do not block continuing
+with Hayro as the initial backend. Defer investigation and a fix or explicit
+annotation-support policy until annotation fidelity is in scope, or revisit
+sooner if ordinary reading documents show misplaced content. This is not a
+claim that all annotations or real rotated-and-cropped documents render
+correctly; test an intact real document with both rotation and offset crop
+when broad fidelity is evaluated. No backend change was made. This Cloud
+Runner pass could not establish interactive input
+responsiveness, macOS display quality, native key-to-present latency, memory
+under sustained scrolling, or a representative sample of photographic scans.
 
 ## Platform feasibility and current build limits
 

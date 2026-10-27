@@ -56,6 +56,18 @@ jobs:
       - name: Build normal GUI binary
         run: cargo +stable build --locked --bin kver
 
+      - name: Build and inspect unsigned macOS app
+        if: runner.os == 'macOS'
+        run: |
+          sh scripts/build-macos-app.sh
+          app=target/release/Kver.app/Contents
+          plutil -lint "$app/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")" = kver
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Info.plist")" = kver.icns
+          test -x "$app/MacOS/kver"
+          test -s "$app/Resources/kver.icns"
+          file "$app/MacOS/kver" | grep -q 'Mach-O'
+
       - name: Upload captures for visual review
         if: always()
         uses: actions/upload-artifact@v6

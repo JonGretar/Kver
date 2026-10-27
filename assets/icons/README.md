@@ -12,14 +12,10 @@ Contents:
 
 ## macOS
 
-Package the executable in `Kver.app/Contents/MacOS/` and copy `kver.icns` to `Kver.app/Contents/Resources/`. In the bundle's existing Info.plist add:
-
-```xml
-<key>CFBundleIconFile</key>
-<string>kver.icns</string>
-```
-
-This is a fragment, not a complete Info.plist. A plain `cargo run` executable is not an app bundle; inspect the packaged .app in Finder/Dock.
+Run `sh scripts/build-macos-app.sh` on a Mac to build the release binary and
+package it with `kver.icns`. See the [unsigned app guide](../../docs/macos-app.md)
+for launch, inspection, and security instructions. A plain `cargo run`
+executable is not an app bundle.
 
 ## Windows
 

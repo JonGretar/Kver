@@ -1,8 +1,9 @@
-//! The single-page reader preview shared by the desktop app and visual tests.
+//! The reader preview shared by the desktop app and visual tests.
 
 use std::{path::PathBuf, sync::Arc};
 
-use gpui::{Context, Image, ImageFormat, Window, div, img, prelude::*, px, rgb};
+use gpui::{Context, FocusHandle, RenderImage, Window, div, img, prelude::*, px, rgb};
+use image::{Frame, RgbaImage};
 
 use crate::pdf;
 
@@ -11,9 +12,14 @@ pub struct Preview {
     scale: f32,
     display_scale: f32,
     request: u64,
+    page_index: usize,
+    page_count: Option<usize>,
+    focus: FocusHandle,
+    focus_initialized: bool,
     status: String,
-    // Cached image and unscaled page dimensions, in PDF points.
-    page: Option<(Arc<Image>, f32, f32)>,
+    // Last completed image (which can be the previous page while rendering).
+    // Dimensions are unscaled PDF points.
+    page: Option<(Arc<RenderImage>, usize, f32, f32)>,
 }
 
 fn raster_scale(zoom: f32, display_scale: f32, page_size: Option<(f32, f32)>) -> f32 {
@@ -37,6 +43,10 @@ impl Preview {
             scale: 1.0,
             display_scale,
             request: 0,
+            page_index: 0,
+            page_count: None,
+            focus: cx.focus_handle(),
+            focus_initialized: false,
             status: String::new(),
             page: None,
         };
@@ -46,6 +56,37 @@ impl Preview {
 
     pub fn status(&self) -> &str {
         &self.status
+    }
+
+    pub fn page_index(&self) -> usize {
+        self.page_index
+    }
+
+    pub fn page_count(&self) -> Option<usize> {
+        self.page_count
+    }
+
+    /// The page currently on screen, which may lag behind the requested page.
+    pub fn displayed_page_index(&self) -> Option<usize> {
+        self.page.as_ref().map(|(_, index, _, _)| *index)
+    }
+
+    pub fn next_page(&mut self, cx: &mut Context<Self>) {
+        self.select_page(self.page_index.saturating_add(1), cx);
+    }
+
+    pub fn previous_page(&mut self, cx: &mut Context<Self>) {
+        if let Some(index) = self.page_index.checked_sub(1) {
+            self.select_page(index, cx);
+        }
+    }
+
+    /// Select a zero-based page; out-of-range requests leave the view unchanged.
+    pub fn select_page(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.page_count.is_some_and(|count| index < count) && index != self.page_index {
+            self.page_index = index;
+            self.request_render(cx);
+        }
     }
 
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
@@ -65,6 +106,7 @@ impl Preview {
         let request = self.request;
         let path = self.path.clone();
         let scale = self.scale;
+        let page_index = self.page_index;
         // Zoom determines the logical image size; display density determines
         // how many pixels we need to rasterize for that size.
         let raster_scale = raster_scale(
@@ -72,30 +114,50 @@ impl Preview {
             self.display_scale,
             self.page
                 .as_ref()
-                .map(|(_, width, height)| (*width, *height)),
+                .filter(|(_, index, _, _)| *index == page_index)
+                .map(|(_, _, width, height)| (*width, *height)),
         );
-        self.status = format!("Rendering at {}%…", (scale * 100.0).round());
+        self.status = format!(
+            "Rendering page {} at {}%…",
+            page_index + 1,
+            (scale * 100.0).round()
+        );
         cx.notify();
 
-        // Parsing, rasterization, and PNG encoding happen off the UI thread.
+        // Parsing, rasterization, and conversion to display pixels happen off the UI thread.
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::render_first_page(&path, raster_scale) });
+            .spawn(async move { pdf::render_bitmap(&path, page_index, raster_scale) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                // A slower earlier zoom must never overwrite the latest image.
+                // A slower earlier page or zoom must never overwrite the latest request.
                 if this.request != request {
                     return;
                 }
                 match result {
                     Ok(rendered) => {
+                        let Some(pixels) =
+                            RgbaImage::from_raw(rendered.width, rendered.height, rendered.bgra)
+                        else {
+                            this.status =
+                                "Cannot display page image: invalid pixel dimensions".into();
+                            cx.notify();
+                            return;
+                        };
+                        this.page_count = Some(rendered.page_count);
                         this.page = Some((
-                            Arc::new(Image::from_bytes(ImageFormat::Png, rendered.png)),
+                            Arc::new(RenderImage::new(vec![Frame::new(pixels)])),
+                            page_index,
                             rendered.page_width,
                             rendered.page_height,
                         ));
-                        this.status = format!("First page · {}%", (scale * 100.0).round());
+                        this.status = format!(
+                            "Page {} of {} · {}%",
+                            page_index + 1,
+                            rendered.page_count,
+                            (scale * 100.0).round()
+                        );
                     }
                     Err(error) => {
                         this.status = error;
@@ -110,6 +172,10 @@ impl Preview {
 
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.focus_initialized {
+            window.focus(&self.focus, cx);
+            self.focus_initialized = true;
+        }
         // A window moved between displays needs a new bitmap, but retains its
         // logical size and keeps showing the old one until rendering completes.
         let display_scale = window.scale_factor();
@@ -117,7 +183,7 @@ impl Render for Preview {
             self.display_scale = display_scale;
             self.request_render(cx);
         }
-        let page = self.page.as_ref().map(|(image, width, height)| {
+        let page = self.page.as_ref().map(|(image, _, width, height)| {
             let page_width = px(*width * self.scale);
             div()
                 .w_full()
@@ -134,6 +200,16 @@ impl Render for Preview {
 
         div()
             .size_full()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                if event.keystroke.modifiers == gpui::Modifiers::default() {
+                    match event.keystroke.key.as_str() {
+                        "right" | "n" => this.next_page(cx),
+                        "left" | "p" => this.previous_page(cx),
+                        _ => {}
+                    }
+                }
+            }))
             .flex()
             .flex_col()
             .bg(rgb(0x30343b))
@@ -145,6 +221,24 @@ impl Render for Preview {
                     .gap_4()
                     .p_3()
                     .child(self.path.display().to_string())
+                    .child(
+                        div()
+                            .id("previous-page")
+                            .cursor_pointer()
+                            .px_3()
+                            .bg(rgb(0x545b65))
+                            .child("←")
+                            .on_click(cx.listener(|this, _, _, cx| this.previous_page(cx))),
+                    )
+                    .child(
+                        div()
+                            .id("next-page")
+                            .cursor_pointer()
+                            .px_3()
+                            .bg(rgb(0x545b65))
+                            .child("→")
+                            .on_click(cx.listener(|this, _, _, cx| this.next_page(cx))),
+                    )
                     .child(
                         div()
                             .id("zoom-out")

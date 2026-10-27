@@ -10,9 +10,9 @@ the daily reader are goals, not a fixed release sequence. See
 **Outcome:** Evidence that the UI and an initial PDF backend can support the
 reader before committing to a release.
 
-**Current work:** A Rust/GPUI single-page prototype uses Hayro for PDF
+**Current work:** A Rust/GPUI page-at-a-time prototype uses Hayro for PDF
 rasterization, with the PDF work off the UI thread. The macOS window opens the
-README-derived [sample PDF](../examples/readme-sample.pdf). The initial preview
+100-page [sample PDF](../examples/readme-sample.pdf). The initial preview
 appeared soft; the prototype now requests display-density-aware images, but
 its quality still needs visual testing with real documents. Text
 selection belongs to the daily-reader milestone. Synthetic crop/rotation

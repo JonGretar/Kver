@@ -2,7 +2,7 @@
 
 ## Overview
 
-Kver is a native PDF reader in Rust using GPUI. Its current single-page
+Kver is a native PDF reader in Rust using GPUI. Its current page-at-a-time
 prototype renders with Hayro; the production PDF backend remains undecided.
 macOS is the first delivery target; Linux and Windows are separate targets.
 
@@ -33,10 +33,20 @@ captured using Metal. The normal macOS GUI binary built and launched, and its
 sample PDF window was confirmed on a local Mac.
 The `tests/visual.rs` Cargo integration target runs on the process main thread
 (required by macOS Metal), opens the same reader as the desktop binary, waits
-for asynchronous PDF rendering, and captures before/after zoom frames. Tests
+for asynchronous PDF rendering, and captures first/middle/last page frames. Tests
 can call reader commands, inspect state, or dispatch GPUI input events; the
-zoom test does not verify button hit-testing. Add an input-event test when
+visual test does not verify button hit-testing. Add an input-event test when
 that interaction becomes a regression risk. There is no scenario language.
+
+The prototype reads and parses the PDF in background work for each page/zoom
+request, rasterizes only the requested page, and reports its document page count
+with the result. The UI receives premultiplied BGRA pixels directly rather than
+encoding and decoding PNG for every turn; PNG remains available for rendering
+validation. The reader accepts a result only when its request generation is
+still current. Page and zoom changes keep the last image visible until the
+replacement is ready; the rendering status identifies the pending page. This is
+not yet a parsed-document cache, a render queue with cancellation, or
+continuous-scroll virtualization.
 
 [GPUI Kit](https://github.com/longbridge/gpui-kit) bundles styled controls,
 themes, and accessibility helpers and may be useful for future search or

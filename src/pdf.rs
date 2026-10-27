@@ -1,17 +1,22 @@
-//! Provisional PDF backend for the single-page prototype.
+//! Provisional PDF backend for the reader prototype.
 //!
-//! The UI receives only PNG bytes and dimensions; Hayro is not part of its API.
+//! The UI receives only premultiplied BGRA pixels and dimensions; Hayro is not part of its API.
 use std::path::Path;
 
 use hayro::{
-    PixmapSettings, RenderCache, RenderSettings, hayro_interpret::InterpreterSettings,
-    hayro_syntax::Pdf, render, vello_cpu::color::palette::css::WHITE,
+    PixmapSettings, RenderCache, RenderSettings,
+    hayro_interpret::InterpreterSettings,
+    hayro_syntax::{LoadPdfError, Pdf},
+    render,
+    vello_cpu::{Pixmap, color::palette::css::WHITE},
 };
 
 use crate::coordinates::PageTransform;
 
 pub struct RenderedPage {
     pub png: Vec<u8>,
+    /// Number of pages in the opened document.
+    pub page_count: usize,
     /// Actual bitmap width in image pixels.
     pub width: f32,
     /// Actual bitmap height in image pixels.
@@ -22,15 +27,22 @@ pub struct RenderedPage {
     pub page_height: f32,
 }
 
+/// Raw bitmap for direct display by the UI (premultiplied BGRA, row-major).
+#[cfg(feature = "gui")]
+pub struct RenderedBitmap {
+    pub bgra: Vec<u8>,
+    pub page_count: usize,
+    pub width: u32,
+    pub height: u32,
+    pub page_width: f32,
+    pub page_height: f32,
+}
+
 /// Rendered page size in PDF points, with the PDF-to-page transform.
 pub struct PageGeometry {
     pub width: f32,
     pub height: f32,
     pub transform: PageTransform,
-}
-
-pub fn render_first_page(path: &Path, scale: f32) -> Result<RenderedPage, String> {
-    render_page(path, 0, scale)
 }
 
 /// Renders a zero-based page index, independently of the UI.
@@ -40,6 +52,28 @@ pub fn render_page(path: &Path, page_index: usize, scale: f32) -> Result<Rendere
     render_bytes(data, page_index, scale)
 }
 
+/// Render directly into display pixels, avoiding PNG encoding and decoding on page turns.
+#[cfg(feature = "gui")]
+pub fn render_bitmap(path: &Path, page_index: usize, scale: f32) -> Result<RenderedBitmap, String> {
+    let data =
+        std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    let (pixmap, page_count, page_width, page_height) = rasterize(data, page_index, scale)?;
+    let width = u32::from(pixmap.width());
+    let height = u32::from(pixmap.height());
+    let mut bgra = pixmap.data_as_u8_slice().to_vec();
+    for pixel in bgra.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    Ok(RenderedBitmap {
+        bgra,
+        page_count,
+        width,
+        height,
+        page_width,
+        page_height,
+    })
+}
+
 pub fn page_geometry(path: &Path, page_index: usize) -> Result<PageGeometry, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
@@ -47,7 +81,7 @@ pub fn page_geometry(path: &Path, page_index: usize) -> Result<PageGeometry, Str
 }
 
 fn geometry_bytes(data: Vec<u8>, page_index: usize) -> Result<PageGeometry, String> {
-    let pdf = Pdf::new(data).map_err(|error| format!("Cannot open PDF: {error:?}"))?;
+    let pdf = open_pdf(data)?;
     let page = pdf
         .pages()
         .get(page_index)
@@ -60,12 +94,41 @@ fn geometry_bytes(data: Vec<u8>, page_index: usize) -> Result<PageGeometry, Stri
     })
 }
 
+fn open_pdf(data: Vec<u8>) -> Result<Pdf, String> {
+    Pdf::new(data).map_err(|error| match error {
+        LoadPdfError::Invalid => "Cannot open PDF: invalid or unsupported PDF file".into(),
+        other => format!("Cannot open PDF: {other:?}"),
+    })
+}
+
 fn render_bytes(data: Vec<u8>, page_index: usize, scale: f32) -> Result<RenderedPage, String> {
+    let (pixmap, page_count, width, height) = rasterize(data, page_index, scale)?;
+    let bitmap_width = f32::from(pixmap.width());
+    let bitmap_height = f32::from(pixmap.height());
+    let png = pixmap
+        .into_png()
+        .map_err(|error| format!("Cannot encode page image: {error}"))?;
+    Ok(RenderedPage {
+        png,
+        page_count,
+        width: bitmap_width,
+        height: bitmap_height,
+        page_width: width,
+        page_height: height,
+    })
+}
+
+fn rasterize(
+    data: Vec<u8>,
+    page_index: usize,
+    scale: f32,
+) -> Result<(Pixmap, usize, f32, f32), String> {
     if !scale.is_finite() || !(0.25..=8.0).contains(&scale) {
         return Err("Raster scale must be between 0.25 and 8".into());
     }
 
-    let pdf = Pdf::new(data).map_err(|error| format!("Cannot open PDF: {error:?}"))?;
+    let pdf = open_pdf(data)?;
+    let page_count = pdf.pages().len();
     let page = pdf
         .pages()
         .get(page_index)
@@ -97,20 +160,7 @@ fn render_bytes(data: Vec<u8>, page_index: usize, scale: f32) -> Result<Rendered
             bg_color: WHITE,
         },
     );
-    // Hayro truncates fractional pixel dimensions to u16. Report the actual
-    // bitmap size so GPUI does not stretch it to a different size.
-    let bitmap_width = f32::from(pixmap.width());
-    let bitmap_height = f32::from(pixmap.height());
-    let png = pixmap
-        .into_png()
-        .map_err(|error| format!("Cannot encode page image: {error}"))?;
-    Ok(RenderedPage {
-        png,
-        width: bitmap_width,
-        height: bitmap_height,
-        page_width: width,
-        page_height: height,
-    })
+    Ok((pixmap, page_count, width, height))
 }
 
 #[cfg(test)]
@@ -336,6 +386,21 @@ mod tests {
         assert!(page.png.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
+    #[cfg(feature = "gui")]
+    #[test]
+    fn renders_display_pixels_without_png_round_trip() {
+        let start = std::time::Instant::now();
+        let page = render_bitmap(Path::new("examples/readme-sample.pdf"), 49, 2.0).unwrap();
+        println!(
+            "2x bitmap elapsed_ms: {:.1}",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+        assert_eq!(page.page_count, 100);
+        assert_eq!((page.width, page.height), (1224, 1584));
+        assert_eq!(page.bgra.len(), 1224 * 1584 * 4);
+        assert_eq!(&page.bgra[..4], &[255, 255, 255, 255]);
+    }
+
     #[test]
     fn rejects_invalid_pdf_and_scale() {
         assert!(render_bytes(b"not a PDF".to_vec(), 0, 1.0).is_err());
@@ -351,7 +416,7 @@ mod tests {
 
     #[test]
     fn reports_missing_file() {
-        let error = render_first_page(Path::new("/this-file-does-not-exist.pdf"), 1.0)
+        let error = render_page(Path::new("/this-file-does-not-exist.pdf"), 0, 1.0)
             .err()
             .unwrap();
         assert!(error.starts_with("Cannot read "));

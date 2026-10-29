@@ -16,6 +16,28 @@ use crate::pdf;
 
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
+const PAGE_PADDING: f32 = 16.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomMode {
+    Fixed,
+    FitWidth,
+    FitPage,
+}
+
+fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32)) -> Option<f32> {
+    let (width, height) = viewport;
+    if width <= PAGE_PADDING * 2.0 || height <= PAGE_PADDING * 2.0 {
+        return None;
+    }
+    let width_scale = (width - PAGE_PADDING * 2.0) / page.0;
+    let scale = match mode {
+        ZoomMode::Fixed => return None,
+        ZoomMode::FitWidth => width_scale,
+        ZoomMode::FitPage => width_scale.min((height - PAGE_PADDING * 2.0) / page.1),
+    };
+    Some(scale.clamp(0.25, 4.0))
+}
 
 fn document_name(path: &Path) -> String {
     path.file_name()
@@ -82,6 +104,7 @@ struct Bitmap {
 pub struct Preview {
     path: Option<PathBuf>,
     scale: f32,
+    zoom_mode: ZoomMode,
     display_scale: f32,
     pages: Vec<(f32, f32)>,
     images: HashMap<usize, Bitmap>,
@@ -91,7 +114,7 @@ pub struct Preview {
     generation: u64,
     failed: Option<usize>,
     page_index: usize,
-    last_viewport: (f32, f32),
+    last_viewport: (f32, f32, f32),
     scroll: ScrollHandle,
     focus: FocusHandle,
     focus_initialized: bool,
@@ -103,6 +126,7 @@ impl Preview {
         let mut reader = Self {
             path,
             scale: 1.0,
+            zoom_mode: ZoomMode::Fixed,
             display_scale,
             pages: Vec::new(),
             images: HashMap::new(),
@@ -110,7 +134,7 @@ impl Preview {
             generation: 0,
             failed: None,
             page_index: 0,
-            last_viewport: (f32::NAN, f32::NAN),
+            last_viewport: (f32::NAN, f32::NAN, f32::NAN),
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
@@ -128,13 +152,14 @@ impl Preview {
         self.generation += 1;
         self.path = Some(path);
         self.scale = 1.0;
+        self.zoom_mode = ZoomMode::Fixed;
         self.pages.clear();
         self.images.clear();
         self.in_flight = None;
         self.failed = None;
         self.page_index = 0;
         self.scroll.set_offset(point(px(0.0), px(0.0)));
-        self.last_viewport = (f32::NAN, f32::NAN);
+        self.last_viewport = (f32::NAN, f32::NAN, f32::NAN);
         self.status = "Loading document…".into();
         self.load(cx);
         cx.notify();
@@ -205,7 +230,7 @@ impl Preview {
     fn install_pages(&mut self, pages: Vec<(f32, f32)>, cx: &mut Context<Self>) {
         self.pages = pages;
         self.status = self.ready_status();
-        self.schedule(cx);
+        self.sync_viewport(cx);
     }
 
     fn ready_status(&self) -> String {
@@ -223,9 +248,15 @@ impl Preview {
     pub fn page_index(&self) -> usize {
         self.page_index
     }
+    pub fn zoom_mode(&self) -> ZoomMode {
+        self.zoom_mode
+    }
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
     /// Page and PDF-point offset at the top of the viewport.
     pub fn reading_position(&self) -> (usize, f32) {
-        let (top, _) = self.viewport();
+        let (top, _, _) = self.viewport();
         let position = position_at(&self.pages, self.scale, top);
         (position.page, position.y)
     }
@@ -245,22 +276,46 @@ impl Preview {
         self.images.values().map(|image| image.bytes).sum()
     }
 
-    fn viewport(&self) -> (f32, f32) {
+    fn viewport(&self) -> (f32, f32, f32) {
         let top = (-f32::from(self.scroll.offset().y)).max(0.0);
+        let width = f32::from(self.scroll.bounds().size.width);
         let measured = f32::from(self.scroll.bounds().size.height);
         let height = if measured > 0.0 { measured } else { 700.0 };
-        (top, height)
+        (top, width, height)
     }
 
     fn sync_viewport(&mut self, cx: &mut Context<Self>) {
         if self.pages.is_empty() {
             return;
         }
-        let (top, height) = self.viewport();
-        self.last_viewport = (top, height);
-        self.page_index = position_at(&self.pages, self.scale, top).page;
+        let (top, width, height) = self.viewport();
+        let position = position_at(&self.pages, self.scale, top);
+        self.page_index = position.page;
+        self.apply_fit(position, (width, height));
+        self.last_viewport = self.viewport();
         self.schedule(cx);
         cx.notify();
+    }
+
+    fn apply_fit(&mut self, position: Position, viewport: (f32, f32)) {
+        if let Some(scale) = fit_scale(self.zoom_mode, self.pages[position.page], viewport) {
+            self.set_scale(scale, position);
+        }
+    }
+
+    fn set_scale(&mut self, next: f32, position: Position) {
+        if next == self.scale {
+            return;
+        }
+        self.scale = next;
+        self.generation += 1;
+        self.images.clear();
+        self.in_flight = None;
+        self.failed = None;
+        self.scroll.set_offset(point(
+            self.scroll.offset().x,
+            px(-page_top(&self.pages, next, position.page) - position.y * next),
+        ));
     }
 
     pub fn next_page(&mut self, cx: &mut Context<Self>) {
@@ -279,6 +334,14 @@ impl Preview {
         if self.failed != Some(index) {
             self.failed = None;
         }
+        let (_, width, height) = self.viewport();
+        self.apply_fit(
+            Position {
+                page: index,
+                y: 0.0,
+            },
+            (width, height),
+        );
         self.scroll.set_offset(point(
             self.scroll.offset().x,
             px(-page_top(&self.pages, self.scale, index)),
@@ -292,22 +355,32 @@ impl Preview {
     pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
         self.change_scale(0.8, cx);
     }
+    pub fn fit_width(&mut self, cx: &mut Context<Self>) {
+        self.set_zoom_mode(ZoomMode::FitWidth, cx);
+    }
+    pub fn fit_page(&mut self, cx: &mut Context<Self>) {
+        self.set_zoom_mode(ZoomMode::FitPage, cx);
+    }
+    fn set_zoom_mode(&mut self, mode: ZoomMode, cx: &mut Context<Self>) {
+        self.zoom_mode = mode;
+        if !self.pages.is_empty() {
+            let (top, width, height) = self.viewport();
+            let position = position_at(&self.pages, self.scale, top);
+            self.page_index = position.page;
+            self.apply_fit(position, (width, height));
+            self.schedule(cx);
+        }
+        cx.notify();
+    }
     fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
         let next = (self.scale * factor).clamp(0.25, 4.0);
-        if next == self.scale {
+        if next == self.scale && self.zoom_mode == ZoomMode::Fixed {
             return;
         }
-        let (top, _) = self.viewport();
+        let (top, _, _) = self.viewport();
         let position = position_at(&self.pages, self.scale, top);
-        self.scale = next;
-        self.generation += 1;
-        self.images.clear();
-        self.in_flight = None;
-        self.failed = None;
-        self.scroll.set_offset(point(
-            self.scroll.offset().x,
-            px(-page_top(&self.pages, next, position.page) - position.y * next),
-        ));
+        self.zoom_mode = ZoomMode::Fixed;
+        self.set_scale(next, position);
         self.schedule(cx);
         cx.notify();
     }
@@ -316,7 +389,7 @@ impl Preview {
         if self.pages.is_empty() {
             return;
         }
-        let (top, height) = self.viewport();
+        let (top, _, height) = self.viewport();
         let range = visible_range(&self.pages, self.scale, top, height);
         if self.failed.is_some_and(|index| !range.contains(&index)) {
             self.failed = None;
@@ -364,7 +437,7 @@ impl Preview {
                     return;
                 }
                 this.in_flight = None;
-                let (top, height) = this.viewport();
+                let (top, _, height) = this.viewport();
                 if visible_range(&this.pages, this.scale, top, height).contains(&index) {
                     match result {
                         Ok(rendered) => {
@@ -404,6 +477,12 @@ impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
+            cx.observe_window_bounds(window, |_, window, cx| {
+                // The scroll area's bounds are laid out in the resize frame.
+                // Refit after that frame, using its measured content viewport.
+                cx.on_next_frame(window, |this, _, cx| this.sync_viewport(cx));
+            })
+            .detach();
             self.focus_initialized = true;
         }
         let density = window.scale_factor();
@@ -417,7 +496,7 @@ impl Render for Preview {
         if !self.pages.is_empty() && self.viewport() != self.last_viewport {
             self.sync_viewport(cx);
         }
-        let (top, height) = self.viewport();
+        let (top, _, height) = self.viewport();
         let range = visible_range(&self.pages, self.scale, top, height);
         let top_space = page_top(&self.pages, self.scale, range.start);
         let end_space = page_top(&self.pages, self.scale, self.pages.len())
@@ -465,6 +544,8 @@ impl Render for Preview {
                         "up" | "k" => this.scroll_by(-100.0, cx),
                         "=" | "+" => this.zoom_in(cx),
                         "-" => this.zoom_out(cx),
+                        "w" => this.fit_width(cx),
+                        "f" => this.fit_page(cx),
                         _ => {}
                     }
                 } else if event.keystroke.modifiers
@@ -484,53 +565,93 @@ impl Render for Preview {
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .gap_4()
+                    .flex_col()
+                    .gap_1()
                     .p_3()
                     .child(
                         div()
-                            .id("open-pdf")
-                            .cursor_pointer()
-                            .px_3()
-                            .bg(rgb(0x545b65))
-                            .child("Open PDF")
-                            .on_click(cx.listener(|this, _, _, cx| this.open_dialog(cx))),
-                    )
-                    .child(
-                        div()
-                            .id("previous-page")
-                            .cursor_pointer()
-                            .px_3()
-                            .bg(rgb(0x545b65))
-                            .child("←")
-                            .on_click(cx.listener(|this, _, _, cx| this.previous_page(cx))),
-                    )
-                    .child(
-                        div()
-                            .id("next-page")
-                            .cursor_pointer()
-                            .px_3()
-                            .bg(rgb(0x545b65))
-                            .child("→")
-                            .on_click(cx.listener(|this, _, _, cx| this.next_page(cx))),
-                    )
-                    .child(
-                        div()
-                            .id("zoom-out")
-                            .cursor_pointer()
-                            .px_3()
-                            .bg(rgb(0x545b65))
-                            .child("−")
-                            .on_click(cx.listener(|this, _, _, cx| this.zoom_out(cx))),
-                    )
-                    .child(
-                        div()
-                            .id("zoom-in")
-                            .cursor_pointer()
-                            .px_3()
-                            .bg(rgb(0x545b65))
-                            .child("+")
-                            .on_click(cx.listener(|this, _, _, cx| this.zoom_in(cx))),
+                            .flex()
+                            .items_center()
+                            .gap_4()
+                            .child(
+                                div()
+                                    .id("open-pdf")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(0x545b65))
+                                    .child("Open PDF")
+                                    .on_click(cx.listener(|this, _, _, cx| this.open_dialog(cx))),
+                            )
+                            .child(
+                                div()
+                                    .id("previous-page")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(0x545b65))
+                                    .child("←")
+                                    .on_click(cx.listener(|this, _, _, cx| this.previous_page(cx))),
+                            )
+                            .child(
+                                div()
+                                    .id("next-page")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(0x545b65))
+                                    .child("→")
+                                    .on_click(cx.listener(|this, _, _, cx| this.next_page(cx))),
+                            )
+                            .child(
+                                div()
+                                    .id("zoom-out")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(0x545b65))
+                                    .child("−")
+                                    .on_click(cx.listener(|this, _, _, cx| this.zoom_out(cx))),
+                            )
+                            .child(
+                                div()
+                                    .id("zoom-in")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(0x545b65))
+                                    .child("+")
+                                    .on_click(cx.listener(|this, _, _, cx| this.zoom_in(cx))),
+                            )
+                            .child(
+                                div()
+                                    .id("fit-width")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(if self.zoom_mode == ZoomMode::FitWidth {
+                                        0x35768a
+                                    } else {
+                                        0x545b65
+                                    }))
+                                    .child(if f32::from(window.bounds().size.width) < 560.0 {
+                                        "W"
+                                    } else {
+                                        "Width"
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| this.fit_width(cx))),
+                            )
+                            .child(
+                                div()
+                                    .id("fit-page")
+                                    .cursor_pointer()
+                                    .px_3()
+                                    .bg(rgb(if self.zoom_mode == ZoomMode::FitPage {
+                                        0x35768a
+                                    } else {
+                                        0x545b65
+                                    }))
+                                    .child(if f32::from(window.bounds().size.width) < 560.0 {
+                                        "F"
+                                    } else {
+                                        "Page"
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| this.fit_page(cx))),
+                            ),
                     )
                     .child(
                         div()
@@ -576,7 +697,7 @@ impl Preview {
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
         let maximum =
-            (page_top(&self.pages, self.scale, self.pages.len()) - self.viewport().1).max(0.0);
+            (page_top(&self.pages, self.scale, self.pages.len()) - self.viewport().2).max(0.0);
         self.scroll
             .set_offset(point(self.scroll.offset().x, px(-top.min(maximum))));
         self.sync_viewport(cx);
@@ -634,6 +755,44 @@ mod tests {
         assert_eq!(
             position_at(&pages, 2.0, page_top(&pages, 2.0, 1) + 150.0),
             position
+        );
+    }
+
+    #[test]
+    fn fit_uses_current_page_and_inner_viewport() {
+        let viewport = (632.0, 832.0);
+        assert_eq!(
+            fit_scale(ZoomMode::FitWidth, (600.0, 1200.0), viewport),
+            Some(1.0)
+        );
+        assert_eq!(
+            fit_scale(ZoomMode::FitPage, (600.0, 1200.0), viewport),
+            Some(2.0 / 3.0)
+        );
+        assert_eq!(
+            fit_scale(ZoomMode::FitWidth, (300.0, 400.0), viewport),
+            Some(2.0)
+        );
+        assert_eq!(
+            fit_scale(ZoomMode::FitPage, (300.0, 400.0), viewport),
+            Some(2.0)
+        );
+        assert_eq!(fit_scale(ZoomMode::Fixed, (300.0, 400.0), viewport), None);
+        assert_eq!(
+            fit_scale(ZoomMode::FitWidth, (300.0, 400.0), (0.0, 800.0)),
+            None
+        );
+        assert_eq!(
+            fit_scale(ZoomMode::FitPage, (300.0, 400.0), (632.0, 20.0)),
+            None
+        );
+        assert_eq!(
+            fit_scale(ZoomMode::FitWidth, (600.0, 1200.0), (332.0, 832.0)),
+            Some(0.5)
+        );
+        assert_eq!(
+            fit_scale(ZoomMode::FitPage, (600.0, 1200.0), (632.0, 632.0)),
+            Some(0.5)
         );
     }
 }

@@ -627,7 +627,9 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
                 ZoomMode::FitWidth,
                 "fit-width button must remain reachable at width {width}"
             );
-            let fit_page_x = if width < 560.0 { 400.0 } else { 450.0 };
+            // Both platform fonts fit the compact button at this point; the
+            // left edge differs slightly between Linux and macOS.
+            let fit_page_x = if width < 560.0 { 408.0 } else { 450.0 };
             click(&mut cx, window.into(), point(px(fit_page_x), px(25.0)))?;
             assert_eq!(
                 cx.update(|app| window.read(app).unwrap().zoom_mode()),

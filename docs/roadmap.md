@@ -14,49 +14,22 @@ Capabilities beyond the daily reader are goals, not a fixed release sequence. Se
 | 2. Make it a daily reader | **Not started** | Search, selection, links, outline, history, and position restoration follow the MVP. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** The approved [macOS MVP spec (#11)](https://github.com/JonGretar/Kver/issues/11)
-has seven linked child tickets. The initial independent frontier is
-[open from the app (#12)](https://github.com/JonGretar/Kver/issues/12),
-[keyboard zoom (#13)](https://github.com/JonGretar/Kver/issues/13),
-[fit modes (#14)](https://github.com/JonGretar/Kver/issues/14),
-[text-selection investigation (#15)](https://github.com/JonGretar/Kver/issues/15),
-and [release automation (#16)](https://github.com/JonGretar/Kver/issues/16).
-Check the GitHub child issues for live owners and blockers:
-[PDF validation (#17)](https://github.com/JonGretar/Kver/issues/17)
-waits for #12–#14; [first download (#18)](https://github.com/JonGretar/Kver/issues/18)
-waits for #16–#17. The [feature workflow](agents/workflow.md) explains
-ready, active, blocked, and done work. This is the starting task graph, not
-a live issue-board view.
-This snapshot reflects the continuous-scroll prototype ([PR #10](https://github.com/JonGretar/Kver/pull/10));
-it does not assert that any MVP ticket has been completed.
+**Next work:** See the open child issues of the approved
+[macOS MVP spec (#11)](https://github.com/JonGretar/Kver/issues/11) for live
+ownership, blockers, and the next ready ticket. The
+[feature workflow](agents/workflow.md) explains how to check work status.
 
 ## 0. Validate the stack
 
 **Outcome:** Evidence that the UI and an initial PDF backend can support the
 reader before committing to a release.
 
-**Phase 0 decision: complete for the initial macOS prototype, with recorded
-limits.** A Rust/GPUI page-at-a-time prototype uses Hayro for PDF
-rasterization, with the PDF work off the UI thread. The macOS window opens the
-100-page [sample PDF](../examples/readme-sample.pdf). The initial preview
-appeared soft; the prototype now requests display-density-aware images. A
-release build opened a native Mac window, and the user reported that zooming
-the scan-style specimen looked correct. This is qualitative feedback, not a
-native latency measurement.
-Text selection belongs to the daily-reader milestone. Synthetic transforms,
-sample text positions, a [public-PDF spot check](rendering-validation.md#public-pdf-spot-check),
-and [release-mode scan and rotated/cropped backend results](rendering-validation.md#release-mode-scan-and-rotatedcropped-follow-up-linux-cloud-runner)
-have been recorded. The latter exposed mispositioned appearances on a complex
-rotated/cropped annotation specimen; the [known limitation](rendering-validation.md#release-mode-scan-and-rotatedcropped-follow-up-linux-cloud-runner)
-is accepted for now. Hayro is confirmed as the initial backend; remaining
-rendering issues will be handled individually rather than reopening that
-choice by default. A [macOS release-window check](rendering-validation.md#current-release-window-smoke-check-macos)
-opened the sample at 2×, the user accepted scan-style zoom by eye, and the
-real-PDF release headless scenario passed. Full overlapping-render, mixed-
-density, and real-document screen-coordinate checks remain future regression
-work; do not infer they passed from this gate.
-[Platform build blockers](rendering-validation.md#platform-feasibility-and-current-build-limits)
-are documented. Windows remains unbuilt, not certified.
+**Phase 0 decision:** Hayro is the chosen initial backend for the macOS
+prototype; PDFium is a comparator if a concrete gap warrants revisiting it.
+The [validation record](rendering-validation.md) contains the rendering and
+coordinate evidence, accepted annotation-appearance limitation, and platform
+checks. It does not certify all real PDFs or a Windows build. Text selection
+remains in the daily-reader milestone.
 
 - Bootstrap Rust and GPUI; open a macOS window and render a PDF page at
   several scales without blocking input.
@@ -82,12 +55,10 @@ implement the visual ruler.
 
 **Outcome:** A buildable, downloadable PDF reader for macOS.
 
-**Already in the prototype:** Open a PDF supplied as a command-line path;
-show loading errors in the reader; scroll continuously through lightweight
-page placeholders while rendering visible pages in background work; bound
-retained bitmaps; navigate pages with keys or toolbar controls; zoom with
-toolbar controls. A [local unsigned `.app`](macos-app.md) can be built and
-opened without a PDF path; the reader offers an Open PDF action.
+**Already in the prototype:** Open a PDF by path or from the app; show loading
+errors; scroll continuously through pages rendered in background work with
+bounded bitmaps; navigate and zoom with keys or toolbar controls. A
+[local unsigned `.app`](macos-app.md) can be built, but is not a download.
 
 **Still needed for this gate:**
 

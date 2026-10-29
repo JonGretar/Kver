@@ -39,11 +39,14 @@ version-control operations in this repository.
    as a stable regression gate. Preserve other work in the file when removing
    your probe.
 4. **Review, then land.** Inspect **Review Changes** in Delta and resolve
-   feedback. Publish an ordinary feature branch and pull request for review
-   when needed. Require the passing macOS and Linux PR checks before landing. An
-   independent thread's changes reach the project through version control;
-   an isolated subthread's changes require an explicit worktree pull into its
-   parent. Landing on `main` requires approval for that specific change.
+   feedback. Implementation threads create PRs only when explicitly instructed;
+   orchestrators should not ask them to create PRs by default. During an
+   explicitly requested landing, the Land skill creates a PR if needed; an
+   existing PR can also be used. Require the passing macOS and Linux PR checks
+   before landing. An independent thread's changes reach the project through
+   version control; an isolated subthread's changes require an explicit worktree
+   pull into its parent. Landing on `main` requires approval for that specific
+   change.
    Put `#<ticket number>` in commits for ticketed work. In the PR body, use
    `Closes #<number>` only when merging that PR will satisfy the ticket's
    acceptance criteria; otherwise use `Refs #<number>` and keep the issue

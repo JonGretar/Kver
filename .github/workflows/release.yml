@@ -1,0 +1,45 @@
+name: macOS release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate tag, package version, and dated changelog
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/release-metadata.py --tag "$RELEASE_TAG"
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Ensure macOS Metal toolchain is available
+        run: |
+          if ! xcrun --find metal; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
+      - name: Build and verify Apple silicon archive
+        run: sh scripts/package-macos-app.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
+          gh release create "$RELEASE_TAG" \
+            "target/release/Kver-v${version}-macos-arm64.zip" \
+            --verify-tag --title "Kver $version" \
+            --notes "Unsigned Apple silicon macOS app. See the [changelog](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/CHANGELOG.md) and [download/security instructions](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/docs/macos-app.md)."

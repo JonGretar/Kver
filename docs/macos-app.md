@@ -1,7 +1,7 @@
 # Build an unsigned macOS app locally
 
-This packages the **current continuous reader prototype**, not a downloadable
-release or a completed MVP. The bundle contains the optimized `kver` binary and
+This packages the **current continuous reader prototype**, not a completed MVP.
+The bundle contains the optimized `kver` binary and
 the existing macOS icon; it has no Developer ID signature or notarization
 (the macOS linker may apply an ad-hoc signature). Build on the Mac where you
 intend to run it (Apple silicon and Intel builds are architecture-specific).
@@ -20,6 +20,46 @@ The script runs `cargo +stable build --release --locked --bin kver` and creates
 and icon. If `CARGO_TARGET_DIR` is set, the bundle and release binary are instead
 under `$CARGO_TARGET_DIR/release/`. The app has no bundled PDF and no PDF file
 association.
+
+For a versioned Apple silicon archive, run `sh scripts/package-macos-app.sh`
+on an Apple silicon Mac. It builds the same app, checks the bundle version
+against `Cargo.toml` and the executable's `arm64` architecture, then extracts
+and checks `target/release/Kver-vX.Y.Z-macos-arm64.zip`. It does not upload
+or publish anything. The macOS PR CI job runs this same packaging path.
+
+## Download an unsigned release
+
+When a release is available, download `Kver-vX.Y.Z-macos-arm64.zip` from
+the project's [GitHub Releases](https://github.com/JonGretar/Kver/releases).
+Use an Apple silicon Mac; this is not an Intel or supported Linux build.
+Extract the archive and move `Kver.app` to Applications, or run it directly
+from the extracted folder. Open it and choose a PDF with **Open PDF**.
+
+Kver is **not Developer ID signed or notarized**. macOS may block a downloaded
+copy with a security warning. Check that you obtained the archive from the
+project's release page before overriding the warning. If you trust it,
+control-click `Kver.app` in Finder and choose **Open**, or, after a blocked
+launch, go to **System Settings → Privacy & Security → Open Anyway** and
+confirm. Do not disable Gatekeeper globally. The release workflow checks the
+archive's structure and architecture; it does not establish the identity of
+a signed developer or guarantee that a document is safe.
+
+## Release trigger (maintainers)
+
+The [release workflow](../.github/workflows/release.yml) runs **only** when a
+`vX.Y.Z` tag is pushed. A normal push to `main` and PR CI cannot publish a
+release. Do not push a release tag without explicit authorization for that
+release. Before an authorized tag, move release notes from `Unreleased` into
+`## [X.Y.Z] - YYYY-MM-DD`, leave a new `Unreleased` section, and set the
+`Cargo.toml` package version to `X.Y.Z`. Publish the tag only after the
+release commit has been reviewed. The job rejects any tag that does not
+match the package version and exactly one valid dated changelog heading
+before it builds or publishes. It then builds and inspects the archive
+with `scripts/package-macos-app.sh` and creates the GitHub Release.
+This does not replace the real-Mac window and reading check in issue #18.
+No experimental Linux artifact is attached: the current Linux build depends
+on host GUI and software-rendering libraries, and portable packaging/runtime
+instructions have not been validated. Linux retains its separate delivery gate.
 
 ## Open and check it
 
@@ -55,8 +95,8 @@ file target/release/Kver.app/Contents/MacOS/kver
 ls -l target/release/Kver.app/Contents/Resources/kver.icns
 ```
 
-The [macOS CI job](../.github/workflows/ci.yml) builds the same bundle and checks
-the plist, executable, and icon. On a local Apple silicon Mac, the build
+The [macOS CI job](../.github/workflows/ci.yml) builds the same archive and checks
+its plist, executable architecture, and icon. On a local Apple silicon Mac, the build
 completed, `open` launched the bundled executable with the sample PDF, and
 macOS reported an on-screen window. The local user confirmed the app worked
 and the icon appeared. CI's structural checks do not replace this visual check

@@ -36,7 +36,11 @@ Results from an old zoom or an offscreen page are discarded. Only visible
 bitmaps are retained, subject to a 128 MiB budget; offscreen pages remain
 placeholders. The UI receives premultiplied BGRA pixels directly rather than
 encoding/decoding PNG. Zoom preserves the page-local reading position in PDF
-points. The adapter currently reparses the PDF for each raster request; a
+points. Fixed zoom and fit-width/fit-page share one scale for continuous layout;
+fit modes recalculate from the current page's dimensions and the measured scroll
+viewport on navigation and window resize. Manual zoom exits fit mode. A scale
+change invalidates obsolete bitmaps before background rendering, without waiting
+on the UI thread. The adapter currently reparses the PDF for each raster request; a
 parsed-document worker and prefetch are deferred until measurements justify them.
 
 ## Boundaries

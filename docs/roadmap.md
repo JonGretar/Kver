@@ -64,7 +64,7 @@ bounded bitmaps; navigate and zoom with keys or toolbar controls. A
 
 - [x] Open a local PDF from the app without a command-line argument, with
   understandable failures ([#12](https://github.com/JonGretar/Kver/issues/12)).
-- [ ] Fit width, fit page, and predefined keyboard zoom controls, with
+- [x] Fit width, fit page, and predefined keyboard zoom controls, with
   predictable position across changes in zoom and viewport size
   ([#13](https://github.com/JonGretar/Kver/issues/13),
   [#14](https://github.com/JonGretar/Kver/issues/14)).

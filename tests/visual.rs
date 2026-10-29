@@ -9,7 +9,7 @@ use gpui::{
     Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
     WindowHandle, point, px, size,
 };
-use kver::reader::Preview;
+use kver::reader::{Preview, ZoomMode};
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -89,6 +89,110 @@ fn press_key(
             app,
         );
     })?;
+    Ok(())
+}
+
+// Exercise mixed page sizes through the reader, not only the fit calculation.
+fn mixed_page_pdf() -> Vec<u8> {
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 1200] /Resources << >> >>",
+    ];
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+    pdf
+}
+
+fn fit_modes_follow_page_and_window() -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all("target/captures")?;
+    let path = PathBuf::from("target/captures/mixed-page.pdf");
+    std::fs::write(&path, mixed_page_pdf())?;
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
+    window.update(&mut cx, |reader, _, cx| reader.fit_width(cx))?;
+    let first = cx.update(|app| window.read(app).unwrap().scale());
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().zoom_mode()),
+        ZoomMode::FitWidth
+    );
+    assert!(first > 1.0, "first page should fit the available width");
+    window.update(&mut cx, |reader, _, cx| reader.select_page(1, cx))?;
+    let second = cx.update(|app| window.read(app).unwrap().scale());
+    assert!((second - first * 612.0 / 300.0).abs() < 0.01);
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().reading_position()),
+        (1, 0.0)
+    );
+    window.update(&mut cx, |reader, _, cx| reader.select_page(2, cx))?;
+    let third = cx.update(|app| window.read(app).unwrap().scale());
+    assert!((third - first * 612.0 / 600.0).abs() < 0.01);
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().reading_position()),
+        (2, 0.0)
+    );
+
+    window.update(&mut cx, |reader, _, cx| {
+        reader.select_page(0, cx);
+        reader.scroll_by(120.0, cx);
+    })?;
+    let position = cx.update(|app| window.read(app).unwrap().reading_position());
+    assert_eq!(position.0, 0);
+    window.update(&mut cx, |reader, _, cx| reader.fit_page(cx))?;
+    let fitted = cx.update(|app| window.read(app).unwrap().scale());
+    assert!(fitted < first);
+    let after_fit = cx.update(|app| window.read(app).unwrap().reading_position());
+    assert_eq!(after_fit.0, position.0);
+    assert!((after_fit.1 - position.1).abs() < 0.01);
+
+    // The headless platform's resize does not emit its native callback;
+    // explicitly deliver it as a real window does.
+    cx.update_window(window.into(), |_, window, app| {
+        window.resize(size(px(600.0), px(700.0)));
+        window.bounds_changed(app);
+    })?;
+    cx.run_until_parked();
+    let resized = cx.update(|app| window.read(app).unwrap().scale());
+    assert!(resized < fitted, "fit page must respond to window resize");
+    let after_resize = cx.update(|app| window.read(app).unwrap().reading_position());
+    assert_eq!(after_resize.0, position.0);
+    assert!((after_resize.1 - position.1).abs() < 0.01);
+    press_key(&mut cx, window, "=")?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().zoom_mode()),
+        ZoomMode::Fixed
+    );
+    let manual = cx.update(|app| window.read(app).unwrap().scale());
+    assert!((manual - resized * 1.25).abs() < 0.01);
+    cx.update_window(window.into(), |_, window, app| {
+        window.resize(size(px(920.0), px(800.0)));
+        window.bounds_changed(app);
+    })?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| window.read(app).unwrap().scale()), manual);
+    window.update(&mut cx, |reader, _, cx| reader.select_page(1, cx))?;
+    assert_eq!(cx.update(|app| window.read(app).unwrap().scale()), manual);
     Ok(())
 }
 
@@ -500,8 +604,7 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
             wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
             let capture = cx.capture_screenshot(window.into())?;
             capture.save(format!("target/captures/{name}-{width}.png"))?;
-            // The four controls occupy a stable position after Open PDF, even
-            // when the filename needs to give up space.
+            // Controls occupy stable positions even when the filename is long.
             click(&mut cx, window.into(), point(px(200.0), px(25.0)))?;
             wait_for_page(&mut cx, &window, "Page 2 of 100 · 100%").map_err(|error| {
                 format!("next-page must remain reachable at width {width}: {error}")
@@ -518,6 +621,25 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
             wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
                 format!("zoom-out must remain reachable at width {width}: {error}")
             })?;
+            click(&mut cx, window.into(), point(px(350.0), px(25.0)))?;
+            assert_eq!(
+                cx.update(|app| window.read(app).unwrap().zoom_mode()),
+                ZoomMode::FitWidth,
+                "fit-width button must remain reachable at width {width}"
+            );
+            let fit_page_x = if width < 560.0 { 400.0 } else { 450.0 };
+            click(&mut cx, window.into(), point(px(fit_page_x), px(25.0)))?;
+            assert_eq!(
+                cx.update(|app| window.read(app).unwrap().zoom_mode()),
+                ZoomMode::FitPage,
+                "fit-page button must remain reachable at width {width}"
+            );
+            click(&mut cx, window.into(), point(px(300.0), px(25.0)))?;
+            assert_eq!(
+                cx.update(|app| window.read(app).unwrap().zoom_mode()),
+                ZoomMode::Fixed,
+                "manual zoom must leave fit mode at width {width}"
+            );
         }
     }
     Ok(())
@@ -607,6 +729,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return measure_page_turns();
     }
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
+    fit_modes_follow_page_and_window()?;
     loading_errors_are_visible()?;
     opening_from_empty_window_and_replacing_documents()?;
     long_path_keeps_toolbar_clickable()

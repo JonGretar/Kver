@@ -8,8 +8,8 @@ intend to run it (Apple silicon and Intel builds are architecture-specific).
 
 ## Build
 
-Install Rust 1.92 or newer and Xcode with its Metal Toolchain component (see
-the [README](../README.md#status)). From a checkout of this repository:
+Install Rust 1.92 or newer and Xcode with its Metal Toolchain component.
+From a checkout of this repository:
 
 ```sh
 sh scripts/build-macos-app.sh

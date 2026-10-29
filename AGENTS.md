@@ -27,11 +27,13 @@ Preferred stack:
 
 - Rust
 - GPUI
-- PDFium through `pdfium-render` (provisional)
+- Hayro for PDF rendering; compare PDFium only if a concrete limitation
+  warrants revisiting the backend
 - SQLite for persistent state
 - TOML for user configuration
 
-The PDF engine choice is not finalized.
+Hayro is the chosen initial backend. SQLite and TOML are planned, not yet
+implemented.
 
 Do not introduce major frameworks or dependencies without explaining their purpose and tradeoffs.
 
@@ -41,7 +43,7 @@ Do not introduce major frameworks or dependencies without explaining their purpo
 
 The PDF engine must be accessed through an internal abstraction.
 
-Do not expose PDFium-specific types throughout the application.
+Do not expose Hayro-specific types throughout the application.
 
 The architecture should allow replacement of the PDF engine without rewriting the UI or navigation system.
 
@@ -139,12 +141,10 @@ Use representative real-world PDFs during development.
 
 ## Documentation
 
-Keep these documents updated when decisions change:
-
-- `README.md`
-- `docs/architecture.md`
-- `docs/features.md`
-- `docs/roadmap.md`
+Keep `README.md` focused on the reader-facing project description and quick
+start, not agent memory or work status. Record architecture changes in
+`docs/architecture.md`, scope changes in `docs/features.md`, and release-gate
+progress in `docs/roadmap.md`; GitHub Issues track live ticket status.
 
 Document important architectural decisions and tradeoffs.
 
@@ -176,6 +176,10 @@ ready work. For specs, tickets, work status, parallel implementation, review,
 or landing in Delta, see `docs/agents/workflow.md`. Use isolated Delta
 worktrees for independent implementation; Git and `jj` are both acceptable
 in this project.
+
+Implementation threads leave PR creation to explicitly requested landing
+unless told to open one. Orchestrators should not request PRs from them by
+default.
 
 ## Scope
 

@@ -304,8 +304,9 @@ The [CC0 500-page specimen](https://pdftoolskit.org/sample-pdfs)
 rendered pages 1, 250, and 500 at 1x/2x/3x. The 1x images visibly carried
 the correct page numbers. Requests took about 264–268 ms at 1x and
 1,071–1,080 ms at 3x. Its repetitive, machine-generated pages do not test
-memory use during sustained scrolling, and the current GPUI window still
-shows only page one.
+memory use during sustained scrolling, and the GPUI window showed only page
+one at the time of this spot check. The subsequent
+continuous-scroll reader renders visible pages throughout the document.
 
 No clear missing content appeared in the inspected 1x images. This is a
 small qualitative check, not pixel equality or proof that complete documents

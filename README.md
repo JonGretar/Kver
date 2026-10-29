@@ -28,136 +28,38 @@ Although particularly suited to developers, researchers, and technical users, Kv
 
 Kver is written in Rust.
 
-The proposed technology stack is:
+The current prototype uses:
 
 - **UI:** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
-- **PDF engine:** Hayro preferred, pending validation; PDFium as a fallback
-- **Persistence:** SQLite
-- **Configuration:** TOML
+- **PDF engine:** [Hayro](https://github.com/LaurenzV/hayro)
 
-The prototype uses Hayro to render a requested page without requiring a native PDF
-library, and the pinned `gpui-pre` 0.3.10 GPUI snapshot for the UI and headless
-screenshot renderer. Hayro is the preferred initial backend if validation
-confirms rendering quality, positioned text, and responsive operation on
-representative PDFs. PDFium remains the comparison/fallback on meaningful gaps.
-GPUI provides the window; Hayro rasterizes the PDF page in background work.
+Hayro is the chosen initial backend. PDFium is a comparison option if a
+significant limitation calls for revisiting that choice. SQLite persistence and
+TOML configuration are future plans, not part of the prototype.
 
-See [Architecture](docs/architecture.md) for details.
+See [Architecture](docs/architecture.md) for implementation details.
 
-## Plan
+The first goal is a downloadable unsigned macOS reader. See
+[Features](docs/features.md) for scope and [Roadmap](docs/roadmap.md) for
+release gates and current progress.
 
-1. Validate the UI and PDF backends with representative documents, including
-   text geometry and coordinates needed for future features.
-2. Release a buildable, downloadable **unsigned macOS MVP** that opens and
-   reads PDFs smoothly, with basic predefined keyboard and mouse controls.
-3. Add search, selection/copy, links, outline, history, and reading-position
-   restoration to make it a daily reader.
+## Try the prototype
 
-The visual ruler, configurable bindings, annotations, and LaTeX/SyncTeX
-integration remain goals without assigned release dates. Password-protected
-PDFs are required eventually, but do not block the first download unless
-support is straightforward. See [Features](docs/features.md) and
-[Roadmap](docs/roadmap.md) for the gates and later goals.
-
-## Status
-
-The prototype opens without an argument or accepts a local PDF path. Use
-**Open PDF** in the window to choose or replace a document; unreadable and
-unsupported files show an error without closing the window. It lays out all pages
-as lightweight placeholders, rendering only those in the viewport at the
-window's display density. Scroll with a wheel/trackpad or `j`/`k` and up/down;
-use left/right, `p`/`n`, or toolbar arrows to jump to page boundaries. Use `=`
-(or `Shift`+`=` for `+`) to zoom in and `-` to zoom out, or use the toolbar
-`−`/`+` buttons. Each zoom step changes scale by 25% in or 20% out (25%–400%
-limits), keeping the same page-local position at the top of the viewport when
-possible.
-Bitmaps outside the viewport are released (up to 128 MiB of visible bitmaps).
-It does not yet satisfy the macOS MVP gate; broader rendering quality and
-scan-heavy document checks remain.
-
-To package the current prototype as an unsigned macOS `.app` from the release
-binary and existing icon, follow the [local build and launch guide](docs/macos-app.md).
-This is not a published download or an MVP release; the bundle opens a window
-without a command-line PDF path.
-
-On macOS, install Rust 1.92 or newer (Hayro 0.8's minimum) and Xcode with the
-Metal Toolchain component, then open the bundled 100-page sample PDF.
-`rustup update stable` installs or updates the
-stable toolchain; `cargo +stable` uses it even when the default is an older
-nightly:
+On macOS, install Rust 1.92 or newer and Xcode with the Metal Toolchain
+component. From a checkout of this repository, run:
 
 ```sh
 cargo +stable run -- examples/readme-sample.pdf
 ```
 
-This default **debug build is much slower** than the optimized build; use
-`cargo +stable run --release -- examples/readme-sample.pdf` when judging page
-turn speed against other readers. The first release build takes longer to
-compile. See the [page-turn measurements](docs/rendering-validation.md#page-turn-latency-debug-versus-release)
-for the headless comparison and its limitations.
+Run `cargo +stable run` without a path to choose a PDF from the window. Scroll
+with a wheel/trackpad or `j`/`k`; jump between pages with left/right or `p`/`n`.
+Use `=` and `-` or the toolbar buttons to zoom. The prototype renders visible
+pages in background work, but is not yet the downloadable macOS MVP.
 
-Run `cargo +stable run` to launch without a document and choose a PDF in the
-window. You can also pass another local PDF path. To rebuild the sample (requires
-[Typst](https://typst.app/)), run:
-
-```sh
-typst compile examples/reader-sample.typ examples/readme-sample.pdf
-```
-
-Run `cargo +stable test --no-default-features --lib` to exercise PDF rendering
-without building GPUI. The complete test and Clippy checks also require the
-Metal Toolchain. If Xcode reports it missing, install it with:
-
-```sh
-xcodebuild -downloadComponent MetalToolchain
-```
-
-For new Delta checkouts, `.agents/prepare` fetches locked Rust dependencies
-when Cargo is available (on macOS, install Rust first). On a Cloud Runner,
-`.agents/setup` installs stable Rust, Clippy, rustfmt, Linux XKB and Fontconfig
-development files, and Mesa's software Vulkan driver, then fetches dependencies
-after preparation.
-Both scripts need network access on a fresh machine; neither starts a window.
-For headless Linux validation, run
-`cargo +stable test --locked --no-default-features --lib`. To exercise the
-actual GPUI reader with the sample PDF (no display server required) and save
-first/middle/last page, scrolling, and zoom captures, run:
-
-```sh
-cargo +stable test --locked --features screenshot --test visual
-```
-
-The [visual test](tests/visual.rs) writes `target/captures/before.png`,
-`after.png`, `middle.png`, `last.png`, `scrolled.png`, and `invalid-pdf.png`.
-Set `KVER_TEST_PDF` to check another PDF (at least three pages), and
-`KVER_CAPTURE_DIR` to choose another directory for the page captures.
-Agents can add Rust test
-functions there to drive the reader, assert state, and capture any UI they need
-to inspect; call new functions from the test target's
-`main` so GPUI stays on the process main thread (required by macOS Metal).
-Unlike the old scenario runner, this test opens the normal asynchronous reader,
-not a pre-rendered page. It invokes the same navigation and zoom methods as the
-GUI controls and dispatches zoom keys through GPUI, but does not synthesize a
-toolbar click or prove pointer hit-testing. For an
-exploratory pointer check, capture a frame first (to lay out hitboxes), call
-`click(&mut cx, window.into(), gpui::point(px(x), px(y)))?` with window-local
-**logical** pixel coordinates, then capture again. Screenshot dimensions may
-be scaled by the display density, so screenshot pixel coordinates are not
-necessarily click coordinates. Save probes under `target/` and remove the
-temporary test code after inspecting them; keep only cases intentionally
-promoted to CI.
-
-The `screenshot` feature enables GPUI's test-support renderer; normal GUI
-execution still rasterizes off the UI thread. Headless Linux captures depend
-on a working Vulkan software adapter. Metal headless capture has also been
-validated on a local Mac; the normal GUI binary builds and launches, and the
-sample window's display was confirmed on a local Mac. The
-[PR checks](.github/workflows/ci.yml) build, test, and lint on Linux and macOS;
-the visual integration test is required on both. Captures are uploaded for
-visual review.
-
-The next validation step is to run the window with real PDFs and evaluate
-Hayro's gaps as described in the [Phase 0 validation guide](docs/rendering-validation.md).
+For a local unsigned `.app`, see the [macOS build guide](docs/macos-app.md).
+For rendering evidence and known limitations, see the
+[validation record](docs/rendering-validation.md).
 
 ## Inspiration
 

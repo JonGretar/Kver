@@ -5,12 +5,12 @@ decision, or feature commitment. Sioyek's documentation and source links below
 refer to its `development` branch or published documentation; behavior may
 differ between releases.
 
-## Where Kver stands
+## Kver when this note was written
 
 - Kver aims to be a general-purpose, keyboard-first **but mouse-usable** PDF
   reader. macOS leads; Linux and Windows have separate delivery gates. The
-  proposed stack includes Rust, GPUI, an undecided PDF backend, SQLite, and
-  TOML ([README](../../README.md), [roadmap](../roadmap.md)).
+  proposed stack then included Rust, GPUI, an undecided PDF backend, SQLite, and
+  TOML. Hayro has since been chosen as the initial backend.
 - At the time of this note, there was no Rust application in the repository.
   Phase 0 called for a GPUI window, render and text-geometry experiments, and
   comparison of PDFium with Hayro / `gpui-pdf` before choosing a backend
@@ -18,7 +18,7 @@ differ between releases.
   [architecture](../architecture.md)).
 - The intended boundaries are UI, commands, reader state, rendering, PDF backend,
   and persistence. PDF processing should not block input; document-space positions
-  must survive viewport changes ([architecture](../architecture.md#high-level-architecture),
+  must survive viewport changes ([architecture](../architecture.md#boundaries),
   [coordinate systems](../architecture.md#coordinate-systems)).
 - The visual ruler is a wanted reading feature, not an MVP blocker. Its design
   calls for line-aware movement where text geometry permits, positional

@@ -1,6 +1,10 @@
 //! Continuous reader: geometry drives layout; only the viewport owns bitmaps.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use gpui::{
     Context, FocusHandle, PathPromptOptions, RenderImage, ScrollHandle, Window, div, img, point,
@@ -12,6 +16,12 @@ use crate::pdf;
 
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
+
+fn document_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
 
 fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
     let max_scale = (32_000_000.0 / (width * height))
@@ -487,12 +497,6 @@ impl Render for Preview {
                             .on_click(cx.listener(|this, _, _, cx| this.open_dialog(cx))),
                     )
                     .child(
-                        self.path
-                            .as_ref()
-                            .map(|path| path.display().to_string())
-                            .unwrap_or_default(),
-                    )
-                    .child(
                         div()
                             .id("previous-page")
                             .cursor_pointer()
@@ -528,7 +532,22 @@ impl Render for Preview {
                             .child("+")
                             .on_click(cx.listener(|this, _, _, cx| this.zoom_in(cx))),
                     )
-                    .child(self.status.clone()),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .gap_4()
+                            .child(
+                                div().flex_1().min_w(px(0.0)).truncate().child(
+                                    self.path
+                                        .as_ref()
+                                        .map(|path| document_name(path))
+                                        .unwrap_or_default(),
+                                ),
+                            )
+                            .child(div().min_w(px(0.0)).truncate().child(self.status.clone())),
+                    ),
             )
             .child(
                 div()
@@ -567,6 +586,18 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toolbar_uses_filename_instead_of_parent_directories() {
+        assert_eq!(
+            document_name(Path::new("/long/parent/directory/report.pdf")),
+            "report.pdf"
+        );
+        assert_eq!(
+            document_name(Path::new("/long/parent/directory/very-long-file-name.pdf")),
+            "very-long-file-name.pdf"
+        );
+    }
 
     #[test]
     fn display_density_changes_bitmap_resolution_not_logical_zoom() {

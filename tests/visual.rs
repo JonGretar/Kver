@@ -474,6 +474,55 @@ fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std
     Ok(())
 }
 
+fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = PathBuf::from("target/captures")
+        .join("long-directory-name-for-testing-toolbar-layout".repeat(5));
+    std::fs::create_dir_all(&directory)?;
+    for (name, filename) in [
+        ("long-parent", "reader.pdf".to_string()),
+        (
+            "long-filename",
+            format!("{}.pdf", "long-reader-filename-".repeat(7)),
+        ),
+    ] {
+        let path = directory.join(filename);
+        std::fs::copy("examples/readme-sample.pdf", &path)?;
+        for width in [920.0, 440.0] {
+            let mut cx = HeadlessAppContext::with_platform(
+                gpui_platform::current_platform(true).text_system(),
+                Arc::new(()),
+                gpui_platform::current_headless_renderer,
+            );
+            let path = path.clone();
+            let window = cx.open_window(size(px(width), px(800.0)), |window, cx| {
+                cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+            })?;
+            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+            let capture = cx.capture_screenshot(window.into())?;
+            capture.save(format!("target/captures/{name}-{width}.png"))?;
+            // The four controls occupy a stable position after Open PDF, even
+            // when the filename needs to give up space.
+            click(&mut cx, window.into(), point(px(200.0), px(25.0)))?;
+            wait_for_page(&mut cx, &window, "Page 2 of 100 · 100%").map_err(|error| {
+                format!("next-page must remain reachable at width {width}: {error}")
+            })?;
+            click(&mut cx, window.into(), point(px(145.0), px(25.0)))?;
+            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
+                format!("previous-page must remain reachable at width {width}: {error}")
+            })?;
+            click(&mut cx, window.into(), point(px(300.0), px(25.0)))?;
+            wait_for_page(&mut cx, &window, "Page 1 of 100 · 125%").map_err(|error| {
+                format!("zoom-in must remain reachable at width {width}: {error}")
+            })?;
+            click(&mut cx, window.into(), point(px(250.0), px(25.0)))?;
+            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
+                format!("zoom-out must remain reachable at width {width}: {error}")
+            })?;
+        }
+    }
+    Ok(())
+}
+
 /// Opt-in diagnostic, not a CI performance gate: Metal screenshot readback is
 /// not equivalent to an onscreen frame present.
 fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
@@ -559,5 +608,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
     loading_errors_are_visible()?;
-    opening_from_empty_window_and_replacing_documents()
+    opening_from_empty_window_and_replacing_documents()?;
+    long_path_keeps_toolbar_clickable()
 }

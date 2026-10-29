@@ -83,7 +83,7 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         gpui_platform::current_headless_renderer,
     );
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
-        cx.new(|cx| Preview::new(path, window.scale_factor(), cx))
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
 
     cx.allow_parking();
@@ -292,7 +292,7 @@ fn loading_error_is_visible(
         gpui_platform::current_headless_renderer,
     );
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
-        cx.new(|cx| Preview::new(path, window.scale_factor(), cx))
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
     cx.allow_parking();
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -335,6 +335,102 @@ fn loading_errors_are_visible() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().page_count()),
+        None
+    );
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().status().to_owned()),
+        "Open a PDF to start reading"
+    );
+    // The headless file picker cancels. Native selection needs a real window.
+    cx.capture_screenshot(window.into())?;
+    click(&mut cx, window.into(), point(px(62.0), px(25.0)))?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().status().to_owned()),
+        "Open a PDF to start reading"
+    );
+
+    let sample = PathBuf::from("examples/readme-sample.pdf");
+    let invalid = PathBuf::from("target/captures/not-a-pdf.pdf");
+    std::fs::create_dir_all("target/captures")?;
+    std::fs::write(&invalid, b"This is not a PDF")?;
+    window.update(&mut cx, |reader, _, cx| {
+        reader.open_path(sample.clone(), cx)
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().displayed_page_index()),
+        Some(0)
+    );
+    window.update(&mut cx, |reader, _, cx| {
+        reader.select_page(50, cx);
+        reader.open_path(invalid.clone(), cx);
+    })?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().page_count()),
+        None
+    );
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().displayed_page_index()),
+        None
+    );
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().retained_bitmap_bytes()),
+        0
+    );
+    wait_for_page(
+        &mut cx,
+        &window,
+        "Cannot open PDF: invalid or unsupported PDF file",
+    )?;
+    window.update(&mut cx, |reader, _, cx| {
+        reader.open_path(PathBuf::from("examples/missing.pdf"), cx)
+    })?;
+    cx.allow_parking();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        cx.run_until_parked();
+        let status = cx.update(|app| window.read(app).unwrap().status().to_owned());
+        if status.starts_with("Cannot read examples/missing.pdf") {
+            break;
+        }
+        if status != "Loading document…" || Instant::now() >= deadline {
+            return Err(format!("Missing file error not shown: {status}").into());
+        }
+    }
+    cx.forbid_parking();
+    window.update(&mut cx, |reader, _, cx| {
+        reader.open_path(sample.clone(), cx)
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+    assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 0);
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().path().map(|p| p.to_path_buf())),
+        Some(sample)
+    );
+    // Both loads can be outstanding; only the newest document may win.
+    window.update(&mut cx, |reader, _, cx| {
+        reader.open_path(invalid, cx);
+        reader.open_path(PathBuf::from("examples/readme-sample.pdf"), cx);
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().page_count()),
+        Some(100)
+    );
+    Ok(())
+}
+
 /// Opt-in diagnostic, not a CI performance gate: Metal screenshot readback is
 /// not equivalent to an onscreen frame present.
 fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
@@ -347,7 +443,7 @@ fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
         gpui_platform::current_headless_renderer,
     );
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
-        cx.new(|cx| Preview::new(path, window.scale_factor(), cx))
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
     let density = cx.update_window(window.into(), |_, window, _| window.scale_factor())?;
     cx.allow_parking();
@@ -419,5 +515,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return measure_page_turns();
     }
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
-    loading_errors_are_visible()
+    loading_errors_are_visible()?;
+    opening_from_empty_window_and_replacing_documents()
 }

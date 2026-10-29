@@ -3,7 +3,8 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use gpui::{
-    Context, FocusHandle, RenderImage, ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
+    Context, FocusHandle, PathPromptOptions, RenderImage, ScrollHandle, Window, div, img, point,
+    prelude::*, px, rgb,
 };
 use image::{Frame, RgbaImage};
 
@@ -69,7 +70,7 @@ struct Bitmap {
 }
 
 pub struct Preview {
-    path: PathBuf,
+    path: Option<PathBuf>,
     scale: f32,
     display_scale: f32,
     pages: Vec<(f32, f32)>,
@@ -88,7 +89,7 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn new(path: PathBuf, display_scale: f32, cx: &mut Context<Self>) -> Self {
+    pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
         let mut reader = Self {
             path,
             scale: 1.0,
@@ -103,20 +104,81 @@ impl Preview {
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
-            status: "Loading document…".into(),
+            status: "Open a PDF to start reading".into(),
         };
-        reader.load(cx);
+        if reader.path.is_some() {
+            reader.status = "Loading document…".into();
+            reader.load(cx);
+        }
         reader
     }
 
+    /// Replace the active document immediately, before any asynchronous work completes.
+    pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.generation += 1;
+        self.path = Some(path);
+        self.scale = 1.0;
+        self.pages.clear();
+        self.images.clear();
+        self.in_flight = None;
+        self.failed = None;
+        self.page_index = 0;
+        self.scroll.set_offset(point(px(0.0), px(0.0)));
+        self.last_viewport = (f32::NAN, f32::NAN);
+        self.status = "Loading document…".into();
+        self.load(cx);
+        cx.notify();
+    }
+
+    pub fn open_dialog(&mut self, cx: &mut Context<Self>) {
+        let generation = self.generation;
+        let choice = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Open PDF".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let result = choice.await;
+            let _ = this.update(cx, |this, cx| {
+                if generation != this.generation {
+                    return;
+                }
+                match result {
+                    Ok(Ok(Some(paths))) => {
+                        if let Some(path) = paths.into_iter().next() {
+                            this.open_path(path, cx);
+                        }
+                    }
+                    Ok(Ok(None)) => {}
+                    Ok(Err(error)) => {
+                        this.status = format!("Cannot choose PDF: {error}");
+                        cx.notify();
+                    }
+                    Err(_) => {
+                        this.status = "Cannot choose PDF: file picker closed unexpectedly".into();
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
     fn load(&mut self, cx: &mut Context<Self>) {
-        let path = self.path.clone();
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let generation = self.generation;
         let work = cx
             .background_executor()
             .spawn(async move { pdf::document_pages(&path) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
+                if generation != this.generation {
+                    return;
+                }
                 match result {
                     Ok(pages) if !pages.is_empty() => {
                         self::Preview::install_pages(this, pages, cx);
@@ -153,6 +215,9 @@ impl Preview {
     }
     pub fn page_count(&self) -> Option<usize> {
         (!self.pages.is_empty()).then_some(self.pages.len())
+    }
+    pub fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
     }
     pub fn displayed_page_index(&self) -> Option<usize> {
         self.images
@@ -218,6 +283,7 @@ impl Preview {
         self.scale = next;
         self.generation += 1;
         self.images.clear();
+        self.in_flight = None;
         self.failed = None;
         self.scroll.set_offset(point(
             self.scroll.offset().x,
@@ -266,18 +332,21 @@ impl Preview {
             index + 1,
             (self.scale * 100.0).round()
         );
-        let path = self.path.clone();
+        let Some(path) = self.path.clone() else {
+            return;
+        };
         let work = cx
             .background_executor()
             .spawn(async move { pdf::render_bitmap(&path, index, density) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
+                if generation != this.generation {
+                    return;
+                }
                 this.in_flight = None;
                 let (top, height) = this.viewport();
-                if generation == this.generation
-                    && visible_range(&this.pages, this.scale, top, height).contains(&index)
-                {
+                if visible_range(&this.pages, this.scale, top, height).contains(&index) {
                     match result {
                         Ok(rendered) => {
                             let bytes = rendered.bgra.len();
@@ -323,6 +392,7 @@ impl Render for Preview {
             self.display_scale = density;
             self.generation += 1;
             self.images.clear();
+            self.in_flight = None;
             self.schedule(cx);
         }
         if !self.pages.is_empty() && self.viewport() != self.last_viewport {
@@ -388,7 +458,21 @@ impl Render for Preview {
                     .items_center()
                     .gap_4()
                     .p_3()
-                    .child(self.path.display().to_string())
+                    .child(
+                        div()
+                            .id("open-pdf")
+                            .cursor_pointer()
+                            .px_3()
+                            .bg(rgb(0x545b65))
+                            .child("Open PDF")
+                            .on_click(cx.listener(|this, _, _, cx| this.open_dialog(cx))),
+                    )
+                    .child(
+                        self.path
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_default(),
+                    )
                     .child(
                         div()
                             .id("previous-page")
@@ -436,7 +520,16 @@ impl Render for Preview {
                     .track_scroll(&self.scroll)
                     .on_scroll(cx.listener(|this, _, _, cx| this.sync_viewport(cx)))
                     .p_4()
-                    .child(content),
+                    .child(if self.path.is_none() || self.pages.is_empty() {
+                        div()
+                            .w_full()
+                            .flex()
+                            .justify_center()
+                            .child(self.status.clone())
+                            .into_any_element()
+                    } else {
+                        content.into_any_element()
+                    }),
             )
     }
 }

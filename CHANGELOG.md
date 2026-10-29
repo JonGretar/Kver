@@ -14,6 +14,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Render visible pages in background work with bounded bitmap memory for long documents.
 - Build a local unsigned macOS app bundle with an icon; a downloadable release is still forthcoming.
 - Zoom with `=`/`+` and `-` keys as well as toolbar buttons, keeping your reading position in view.
+- Download a versioned Apple silicon macOS app archive from an authorized tagged release, with unsigned-app opening instructions.
 
 ### Fixed
 

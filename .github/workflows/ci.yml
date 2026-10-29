@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Test release metadata validation
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
 
@@ -59,14 +62,7 @@ jobs:
       - name: Build and inspect unsigned macOS app
         if: runner.os == 'macOS'
         run: |
-          sh scripts/build-macos-app.sh
-          app=target/release/Kver.app/Contents
-          plutil -lint "$app/Info.plist"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")" = kver
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Info.plist")" = kver.icns
-          test -x "$app/MacOS/kver"
-          test -s "$app/Resources/kver.icns"
-          file "$app/MacOS/kver" | grep -q 'Mach-O'
+          sh scripts/package-macos-app.sh
 
       - name: Upload captures for visual review
         if: always()

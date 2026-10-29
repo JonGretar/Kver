@@ -213,6 +213,12 @@ impl Preview {
     pub fn page_index(&self) -> usize {
         self.page_index
     }
+    /// Page and PDF-point offset at the top of the viewport.
+    pub fn reading_position(&self) -> (usize, f32) {
+        let (top, _) = self.viewport();
+        let position = position_at(&self.pages, self.scale, top);
+        (position.page, position.y)
+    }
     pub fn page_count(&self) -> Option<usize> {
         (!self.pages.is_empty()).then_some(self.pages.len())
     }
@@ -272,6 +278,9 @@ impl Preview {
     }
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
         self.change_scale(1.25, cx);
+    }
+    pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
+        self.change_scale(0.8, cx);
     }
     fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
         let next = (self.scale * factor).clamp(0.25, 4.0);
@@ -444,8 +453,18 @@ impl Render for Preview {
                         "left" | "p" => this.previous_page(cx),
                         "down" | "j" => this.scroll_by(100.0, cx),
                         "up" | "k" => this.scroll_by(-100.0, cx),
+                        "=" | "+" => this.zoom_in(cx),
+                        "-" => this.zoom_out(cx),
                         _ => {}
                     }
+                } else if event.keystroke.modifiers
+                    == (gpui::Modifiers {
+                        shift: true,
+                        ..Default::default()
+                    })
+                    && matches!(event.keystroke.key.as_str(), "=" | "+")
+                {
+                    this.zoom_in(cx);
                 }
             }))
             .flex()
@@ -498,7 +517,7 @@ impl Render for Preview {
                             .px_3()
                             .bg(rgb(0x545b65))
                             .child("−")
-                            .on_click(cx.listener(|this, _, _, cx| this.change_scale(0.8, cx))),
+                            .on_click(cx.listener(|this, _, _, cx| this.zoom_out(cx))),
                     )
                     .child(
                         div()

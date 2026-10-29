@@ -82,9 +82,9 @@ when the full outcome is complete; GitHub issues hold the finer task graph.
 
 **Non-blocking investigation (not an MVP release gate):**
 
-- [ ] Try mouse text selection and copy on an ordinary text PDF; record whether
-  it is practical to promote into this gate. Until a separate decision,
-  selection remains in the daily-reader milestone
+- [x] Investigate mouse text selection and copy on an ordinary text PDF; document
+  why the current bitmap-only reader cannot demonstrate it and recommend keeping
+  implementation in the daily-reader milestone
   ([#15](https://github.com/JonGretar/Kver/issues/15)).
 
 An experimental Linux binary may accompany the GitHub Release if it is simple

@@ -73,6 +73,25 @@ pub fn click(
     Ok(())
 }
 
+fn press_key(
+    cx: &mut HeadlessAppContext,
+    window: WindowHandle<Preview>,
+    key: &'static str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    cx.update_window(window.into(), |_, window, app| {
+        window.dispatch_event(
+            KeyDownEvent {
+                keystroke: Keystroke::parse(key).unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            }
+            .to_platform_input(),
+            app,
+        );
+    })?;
+    Ok(())
+}
+
 fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::var_os("KVER_TEST_PDF")
         .map(PathBuf::from)
@@ -154,6 +173,30 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
             .any(|(a, b)| a != b),
         "zoom should change the page, not just the toolbar"
     );
+    // Input-level zoom shares the toolbar command and retains the PDF-point
+    // position at the top of a scrolled page (not the same screen pixel).
+    window.update(&mut cx, |reader, _, cx| {
+        reader.select_page(1, cx);
+        reader.scroll_by(100.0, cx);
+    })?;
+    let position = cx.update(|app| window.read(app).unwrap().reading_position());
+    assert_eq!(position.0, 1);
+    assert!(position.1 > 0.0);
+    press_key(&mut cx, window, "=")?;
+    assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 1);
+    let zoomed_position = cx.update(|app| window.read(app).unwrap().reading_position());
+    assert_eq!(zoomed_position.0, position.0);
+    assert!((zoomed_position.1 - position.1).abs() < 0.01);
+    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 156%"))?;
+    press_key(&mut cx, window, "-")?;
+    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 125%"))?;
+    let restored = cx.update(|app| window.read(app).unwrap().reading_position());
+    assert_eq!(restored.0, position.0);
+    assert!((restored.1 - position.1).abs() < 0.01);
+    press_key(&mut cx, window, "shift-=")?;
+    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 156%"))?;
+    press_key(&mut cx, window, "-")?;
+    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 125%"))?;
     // Queue pages quickly, without waiting for any intermediate render.
     // Only the newest request may be installed by the reader.
     window.update(&mut cx, |reader, _, cx| {

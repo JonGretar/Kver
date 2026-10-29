@@ -64,7 +64,10 @@ support is straightforward. See [Features](docs/features.md) and
 The prototype accepts a local PDF path and lays out all pages as lightweight
 placeholders, rendering only those in the viewport at the window's display
 density. Scroll with a wheel/trackpad or `j`/`k` and up/down; use left/right,
-`p`/`n`, or toolbar arrows to jump to page boundaries, and `−`/`+` to zoom.
+`p`/`n`, or toolbar arrows to jump to page boundaries. Use `=` (or `Shift`+`=`
+for `+`) to zoom in and `-` to zoom out, or use the toolbar `−`/`+` buttons.
+Each zoom step changes scale by 25% in or 20% out (25%–400% limits), keeping
+the same page-local position at the top of the viewport when possible.
 Bitmaps outside the viewport are released (up to 128 MiB of visible bitmaps).
 It does not yet satisfy the macOS MVP gate; broader rendering quality and
 scan-heavy document checks remain.
@@ -130,7 +133,8 @@ to inspect; call new functions from the test target's
 `main` so GPUI stays on the process main thread (required by macOS Metal).
 Unlike the old scenario runner, this test opens the normal asynchronous reader,
 not a pre-rendered page. It invokes the same navigation and zoom methods as the
-GUI controls, but does not synthesize a click or prove hit-testing. For an
+GUI controls and dispatches zoom keys through GPUI, but does not synthesize a
+toolbar click or prove pointer hit-testing. For an
 exploratory pointer check, capture a frame first (to lay out hitboxes), call
 `click(&mut cx, window.into(), gpui::point(px(x), px(y)))?` with window-local
 **logical** pixel coordinates, then capture again. Screenshot dimensions may

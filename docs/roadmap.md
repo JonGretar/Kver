@@ -86,12 +86,12 @@ implement the visual ruler.
 show loading errors in the reader; scroll continuously through lightweight
 page placeholders while rendering visible pages in background work; bound
 retained bitmaps; navigate pages with keys or toolbar controls; zoom with
-toolbar controls. A [local unsigned `.app`](macos-app.md) can be built, but
-double-clicking it without a PDF path exits instead of opening a document.
+toolbar controls. A [local unsigned `.app`](macos-app.md) can be built and
+opened without a PDF path; the reader offers an Open PDF action.
 
 **Still needed for this gate:**
 
-- [ ] Open a local PDF from the app without a command-line argument, with
+- [x] Open a local PDF from the app without a command-line argument, with
   understandable failures ([#12](https://github.com/JonGretar/Kver/issues/12)).
 - [ ] Fit width, fit page, and predefined keyboard zoom controls, with
   predictable position across changes in zoom and viewport size

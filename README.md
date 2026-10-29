@@ -61,21 +61,24 @@ support is straightforward. See [Features](docs/features.md) and
 
 ## Status
 
-The prototype accepts a local PDF path and lays out all pages as lightweight
-placeholders, rendering only those in the viewport at the window's display
-density. Scroll with a wheel/trackpad or `j`/`k` and up/down; use left/right,
-`p`/`n`, or toolbar arrows to jump to page boundaries. Use `=` (or `Shift`+`=`
-for `+`) to zoom in and `-` to zoom out, or use the toolbar `−`/`+` buttons.
-Each zoom step changes scale by 25% in or 20% out (25%–400% limits), keeping
-the same page-local position at the top of the viewport when possible.
+The prototype opens without an argument or accepts a local PDF path. Use
+**Open PDF** in the window to choose or replace a document; unreadable and
+unsupported files show an error without closing the window. It lays out all pages
+as lightweight placeholders, rendering only those in the viewport at the
+window's display density. Scroll with a wheel/trackpad or `j`/`k` and up/down;
+use left/right, `p`/`n`, or toolbar arrows to jump to page boundaries. Use `=`
+(or `Shift`+`=` for `+`) to zoom in and `-` to zoom out, or use the toolbar
+`−`/`+` buttons. Each zoom step changes scale by 25% in or 20% out (25%–400%
+limits), keeping the same page-local position at the top of the viewport when
+possible.
 Bitmaps outside the viewport are released (up to 128 MiB of visible bitmaps).
 It does not yet satisfy the macOS MVP gate; broader rendering quality and
 scan-heavy document checks remain.
 
 To package the current prototype as an unsigned macOS `.app` from the release
 binary and existing icon, follow the [local build and launch guide](docs/macos-app.md).
-This is not a published download or an MVP release; launching the bundle
-currently requires passing a PDF path from the command line.
+This is not a published download or an MVP release; the bundle opens a window
+without a command-line PDF path.
 
 On macOS, install Rust 1.92 or newer (Hayro 0.8's minimum) and Xcode with the
 Metal Toolchain component, then open the bundled 100-page sample PDF.
@@ -93,7 +96,8 @@ turn speed against other readers. The first release build takes longer to
 compile. See the [page-turn measurements](docs/rendering-validation.md#page-turn-latency-debug-versus-release)
 for the headless comparison and its limitations.
 
-You can also pass another local PDF path. To rebuild the sample (requires
+Run `cargo +stable run` to launch without a document and choose a PDF in the
+window. You can also pass another local PDF path. To rebuild the sample (requires
 [Typst](https://typst.app/)), run:
 
 ```sh

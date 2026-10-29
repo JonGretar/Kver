@@ -1,6 +1,6 @@
 # Build an unsigned macOS app locally
 
-This packages the **current page-at-a-time prototype**, not a downloadable
+This packages the **current continuous reader prototype**, not a downloadable
 release or a completed MVP. The bundle contains the optimized `kver` binary and
 the existing macOS icon; it has no Developer ID signature or notarization
 (the macOS linker may apply an ad-hoc signature). Build on the Mac where you
@@ -23,23 +23,29 @@ association.
 
 ## Open and check it
 
-From the repository root, supply an **absolute** path to a local PDF when
-launching the app (the current reader requires one argument):
+From the repository root, launch without a PDF path and choose a document
+using **Open PDF** in the window:
+
+```sh
+open -n -a "$PWD/target/release/Kver.app"
+```
+
+If using `CARGO_TARGET_DIR`, substitute its release bundle path. Verify that
+the file picker lets you choose `examples/readme-sample.pdf`, the sample renders,
+the Kver icon appears in Finder/Dock, and left/right or `p`/`n` changes pages
+and `−`/`+` changes zoom. Choose another PDF with **Open PDF**; invalid and
+unreadable documents should show an error and leave the window usable. For
+path-based opening, pass an **absolute** path:
 
 ```sh
 open -n -a "$PWD/target/release/Kver.app" --args "$PWD/examples/readme-sample.pdf"
 ```
 
-If using `CARGO_TARGET_DIR`, substitute its release bundle path. Verify that
-the sample renders, that the Kver icon appears in Finder/Dock, and that
-left/right or `p`/`n` changes pages and `−`/`+` changes zoom. To try another PDF,
-replace the second path with its absolute path. `open` returning successfully
+`open` returning successfully
 only means macOS accepted the launch request; check the visible window as well.
 
-Double-clicking `Kver.app` in Finder currently does **not** open a PDF chooser:
-without a PDF argument the executable prints usage and exits. Opening a PDF
-with the app from Finder is also not supported yet. These are reader entry-point
-limitations, not packaging errors.
+Double-clicking `Kver.app` in Finder opens the empty reader window; use
+**Open PDF** to choose a document. PDF file association in Finder is not yet supported.
 
 To inspect the package independently:
 
@@ -62,9 +68,9 @@ or verify behavior on other Macs.
   run `xcodebuild -downloadComponent MetalToolchain`, then retry the build.
   Use `rustup update stable` if Rust is too old. The first release build can
   take considerably longer than a debug build.
-- If no window opens, check that the PDF path exists and is absolute. Run
+- If no window opens, run
   `target/release/Kver.app/Contents/MacOS/kver /absolute/path/to/file.pdf`
-  directly from Terminal to see usage, PDF loading, or window errors. This
+  directly from Terminal to see PDF loading or window errors. This
   tests the bundled executable but not Launch Services.
 - A local build usually has no quarantine warning. A copied or downloaded
   unsigned bundle may be blocked by Gatekeeper, with wording varying by macOS

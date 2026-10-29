@@ -5,15 +5,12 @@ use kver::reader::Preview;
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
-    let Some(first) = args.next() else {
-        eprintln!("Usage: kver path/to/document.pdf");
-        std::process::exit(2);
-    };
+    let first = args.next();
     if args.next().is_some() {
         eprintln!("Usage: kver path/to/document.pdf");
         std::process::exit(2);
     }
-    let path = PathBuf::from(first);
+    let path = first.map(PathBuf::from);
 
     gpui_platform::application().run(move |cx: &mut App| {
         cx.on_window_closed(|cx, _| {

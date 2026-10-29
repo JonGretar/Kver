@@ -21,6 +21,9 @@ version-control operations in this repository.
    until the parent explicitly pulls them with `merge_worktrees`. Independent
    threads do not use that pull; bring their changes together through reviewed
    branches and PRs instead.
+   Ask working threads to report decisions needed, blockers that change the
+   plan, and confirmed landings or dependency changes to the orchestrator.
+   Keep routine implementation and CI progress in the working thread.
 3. **Build a slice.** Implement one usable behavior per ticket. Follow the
    applicable project skills (such as `tdd` for test-first work), run the
    checks relevant to that behavior, and demonstrate it with a real PDF where

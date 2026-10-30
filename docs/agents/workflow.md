@@ -29,12 +29,15 @@ version-control operations in this repository.
    checks relevant to that behavior, and demonstrate it with a real PDF where
    UI or rendering behavior matters. Local and Cloud Runner threads may have
    different machines and tools; use the checks available in each, and record
-   what was actually run. PR CI builds, tests, and runs the headless visual
-   integration target on both macOS and Linux. These checks validate off-screen
-   rendering, not a visible window or pointer hit-testing. Check a real macOS
-   window for releases or changes to native window/input behavior; a Linux
-   Cloud Runner cannot substitute for that check. Do not require a local Mac
-   for every routine UI PR.
+   what was actually run. While the repository is private, PR CI builds,
+   tests, and runs the headless visual integration target on Linux only; the
+   macOS matrix entry in `.github/workflows/ci.yml` is paused to save billed
+   Actions minutes. These checks validate off-screen rendering, not a visible
+   window or pointer hit-testing. For changes to native window/input behavior,
+   document a real-Mac manual check before landing; a Linux Cloud Runner
+   cannot substitute for that check. Before a downloadable release, validate
+   launch and reading behavior in a real Mac window. Do not require a local
+   Mac for every routine UI PR.
    For exploratory UI probes, temporarily add a Rust case to `tests/visual.rs`,
    run it on the main thread with `cargo +stable test --locked --features screenshot --test visual`,
    and inspect captures under ignored `target/`. Remove the probe code when
@@ -45,8 +48,13 @@ version-control operations in this repository.
    feedback. Implementation threads create PRs only when explicitly instructed;
    orchestrators should not ask them to create PRs by default. During an
    explicitly requested landing, the Land skill creates a PR if needed; an
-   existing PR can also be used. Require the passing macOS and Linux PR checks
-   before landing. An independent thread's changes reach the project through
+   existing PR can also be used. While the repository is private, require the
+   passing Linux PR check before landing, plus the documented real-Mac check
+   for native window/input changes. Check any configured required status checks
+   before landing: a required paused macOS check must be updated explicitly,
+   not treated as passing or bypassed. Once the repository is public, restore
+   `macos-15` in the CI matrix and require passing macOS and Linux PR checks
+   again. An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree
    pull into its parent. Landing on `main` requires approval for that specific
    change.
@@ -122,4 +130,7 @@ under `## [x.y.z] - YYYY-MM-DD`, leave a new `## [Unreleased]` at the top,
 set the package version to `x.y.z`, and use a `vx.y.z` tag. The automated
 release workflow should check that these agree before attaching assets to
 the GitHub Release; creating the tag or publishing the release requires
-authorization for that release.
+authorization for that release. The separate `.github/workflows/release.yml`
+runs a macOS build only for `v*` tag pushes, not for routine PRs or pushes
+to `main`. Keep that release path available during the private-repo CI
+pause; do not push a release tag to test the CI change.

@@ -10,7 +10,10 @@ use gpui::{
     App, Context, Entity, FocusHandle, KeyBinding, PathPromptOptions, RenderImage, ScrollHandle,
     Window, div, img, point, prelude::*, px, rgb,
 };
-use gpui_kit::component::command::{Command, CommandItem, CommandState};
+use gpui_kit::{
+    base::Disableable,
+    component::command::{Command, CommandItem, CommandState},
+};
 use image::{Frame, RgbaImage};
 
 use crate::pdf;
@@ -19,14 +22,43 @@ const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
 const PAGE_PADDING: f32 = 16.0;
 
-gpui::actions!(kver, [OpenPdf, ShowCommandPalette]);
+gpui::actions!(
+    kver,
+    [
+        OpenPdf,
+        ShowCommandPalette,
+        NextPage,
+        PreviousPage,
+        ZoomIn,
+        ZoomOut,
+        FitWidth,
+        FitPage
+    ]
+);
 
-/// Bind the same actions in the app and headless reader windows so Kit
-/// resolves the shortcut displayed beside Open PDF from the active keymap.
+/// Bind reading keys only in a focused reader, not in the palette's text input.
+/// Kit resolves the displayed shortcuts from these active Action bindings.
 pub fn bind_reader_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-o", OpenPdf, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
+        KeyBinding::new("right", NextPage, Some("Reader")),
+        KeyBinding::new("n", NextPage, Some("Reader")),
+        KeyBinding::new("left", PreviousPage, Some("Reader")),
+        KeyBinding::new("p", PreviousPage, Some("Reader")),
+        KeyBinding::new("=", ZoomIn, Some("Reader")),
+        KeyBinding::new("shift-=", ZoomIn, Some("Reader")),
+        KeyBinding::new("-", ZoomOut, Some("Reader")),
+        KeyBinding::new("w", FitWidth, Some("Reader")),
+        KeyBinding::new("f", FitPage, Some("Reader")),
+        // These modified bindings stay active while the palette has focus,
+        // so Kit can show real shortcuts without hijacking search text.
+        KeyBinding::new("cmd-alt-right", NextPage, None),
+        KeyBinding::new("cmd-alt-left", PreviousPage, None),
+        KeyBinding::new("cmd-alt-=", ZoomIn, None),
+        KeyBinding::new("cmd-alt--", ZoomOut, None),
+        KeyBinding::new("cmd-alt-w", FitWidth, None),
+        KeyBinding::new("cmd-alt-f", FitPage, None),
     ]);
 }
 
@@ -311,6 +343,16 @@ impl Preview {
             .as_ref()
             .map(|palette| palette.read(cx).query(cx))
     }
+    #[cfg(feature = "screenshot")]
+    pub fn palette_matches(&self, cx: &gpui::App) -> Option<usize> {
+        self.palette
+            .as_ref()
+            .map(|palette| palette.read(cx).matched_count())
+    }
+    #[cfg(feature = "screenshot")]
+    pub fn reader_focus(&self) -> FocusHandle {
+        self.focus.clone()
+    }
     pub fn page_index(&self) -> usize {
         self.page_index
     }
@@ -587,6 +629,7 @@ impl Render for Preview {
         }
         let (top, _, height) = self.viewport();
         let range = visible_range(&self.pages, self.scale, top, height);
+        let has_document = !self.pages.is_empty();
         let top_space = page_top(&self.pages, self.scale, range.start);
         let end_space = page_top(&self.pages, self.scale, self.pages.len())
             - page_top(&self.pages, self.scale, range.end);
@@ -624,8 +667,41 @@ impl Render for Preview {
         div()
             .size_full()
             .track_focus(&self.focus)
+            .when(self.palette.is_none(), |reader| {
+                reader.key_context("Reader")
+            })
             .on_action(cx.listener(Self::on_open_pdf))
             .on_action(cx.listener(Self::on_show_palette))
+            .on_action(cx.listener(|this, _: &NextPage, _, cx| {
+                if !this.pages.is_empty() {
+                    this.next_page(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &PreviousPage, _, cx| {
+                if !this.pages.is_empty() {
+                    this.previous_page(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| {
+                if !this.pages.is_empty() {
+                    this.zoom_in(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| {
+                if !this.pages.is_empty() {
+                    this.zoom_out(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FitWidth, _, cx| {
+                if !this.pages.is_empty() {
+                    this.fit_width(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FitPage, _, cx| {
+                if !this.pages.is_empty() {
+                    this.fit_page(cx);
+                }
+            }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if this.palette.is_some() {
                     cx.propagate();
@@ -633,24 +709,10 @@ impl Render for Preview {
                 }
                 if event.keystroke.modifiers == gpui::Modifiers::default() {
                     match event.keystroke.key.as_str() {
-                        "right" | "n" => this.next_page(cx),
-                        "left" | "p" => this.previous_page(cx),
                         "down" | "j" => this.scroll_by(100.0, cx),
                         "up" | "k" => this.scroll_by(-100.0, cx),
-                        "=" | "+" => this.zoom_in(cx),
-                        "-" => this.zoom_out(cx),
-                        "w" => this.fit_width(cx),
-                        "f" => this.fit_page(cx),
                         _ => cx.propagate(),
                     }
-                } else if event.keystroke.modifiers
-                    == (gpui::Modifiers {
-                        shift: true,
-                        ..Default::default()
-                    })
-                    && matches!(event.keystroke.key.as_str(), "=" | "+")
-                {
-                    this.zoom_in(cx);
                 } else {
                     cx.propagate();
                 }
@@ -684,46 +746,64 @@ impl Render for Preview {
                             .child(
                                 div()
                                     .id("previous-page")
-                                    .cursor_pointer()
+                                    .when(has_document, |button| button.cursor_pointer())
                                     .px_3()
-                                    .bg(rgb(0x545b65))
+                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
                                     .child("←")
-                                    .on_click(cx.listener(|this, _, _, cx| this.previous_page(cx))),
+                                    .when(has_document, |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(PreviousPage), cx);
+                                        })
+                                    }),
                             )
                             .child(
                                 div()
                                     .id("next-page")
-                                    .cursor_pointer()
+                                    .when(has_document, |button| button.cursor_pointer())
                                     .px_3()
-                                    .bg(rgb(0x545b65))
+                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
                                     .child("→")
-                                    .on_click(cx.listener(|this, _, _, cx| this.next_page(cx))),
+                                    .when(has_document, |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(NextPage), cx);
+                                        })
+                                    }),
                             )
                             .child(
                                 div()
                                     .id("zoom-out")
-                                    .cursor_pointer()
+                                    .when(has_document, |button| button.cursor_pointer())
                                     .px_3()
-                                    .bg(rgb(0x545b65))
+                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
                                     .child("−")
-                                    .on_click(cx.listener(|this, _, _, cx| this.zoom_out(cx))),
+                                    .when(has_document, |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(ZoomOut), cx);
+                                        })
+                                    }),
                             )
                             .child(
                                 div()
                                     .id("zoom-in")
-                                    .cursor_pointer()
+                                    .when(has_document, |button| button.cursor_pointer())
                                     .px_3()
-                                    .bg(rgb(0x545b65))
+                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
                                     .child("+")
-                                    .on_click(cx.listener(|this, _, _, cx| this.zoom_in(cx))),
+                                    .when(has_document, |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(ZoomIn), cx);
+                                        })
+                                    }),
                             )
                             .child(
                                 div()
                                     .id("fit-width")
-                                    .cursor_pointer()
+                                    .when(has_document, |button| button.cursor_pointer())
                                     .px_3()
                                     .bg(rgb(if self.zoom_mode == ZoomMode::FitWidth {
                                         0x35768a
+                                    } else if !has_document {
+                                        0x41464e
                                     } else {
                                         0x545b65
                                     }))
@@ -732,15 +812,21 @@ impl Render for Preview {
                                     } else {
                                         "Width"
                                     })
-                                    .on_click(cx.listener(|this, _, _, cx| this.fit_width(cx))),
+                                    .when(has_document, |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(FitWidth), cx);
+                                        })
+                                    }),
                             )
                             .child(
                                 div()
                                     .id("fit-page")
-                                    .cursor_pointer()
+                                    .when(has_document, |button| button.cursor_pointer())
                                     .px_3()
                                     .bg(rgb(if self.zoom_mode == ZoomMode::FitPage {
                                         0x35768a
+                                    } else if !has_document {
+                                        0x41464e
                                     } else {
                                         0x545b65
                                     }))
@@ -749,7 +835,11 @@ impl Render for Preview {
                                     } else {
                                         "Page"
                                     })
-                                    .on_click(cx.listener(|this, _, _, cx| this.fit_page(cx))),
+                                    .when(has_document, |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(FitPage), cx);
+                                        })
+                                    }),
                             ),
                     )
                     .child(
@@ -824,6 +914,42 @@ impl Render for Preview {
                                             CommandItem::new()
                                                 .label("Open PDF")
                                                 .action(Box::new(OpenPdf)),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Next Page")
+                                                .action(Box::new(NextPage))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Previous Page")
+                                                .action(Box::new(PreviousPage))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Zoom In")
+                                                .action(Box::new(ZoomIn))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Zoom Out")
+                                                .action(Box::new(ZoomOut))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Fit Width")
+                                                .action(Box::new(FitWidth))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Fit Page")
+                                                .action(Box::new(FitPage))
+                                                .disabled(!has_document),
                                         )
                                         .on_confirm({
                                             let owner = owner.clone();

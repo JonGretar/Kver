@@ -11,7 +11,7 @@ release sequence. See [features](features.md) for the corresponding scope.
 | --- | --- | --- |
 | 0. Validate the stack | **Complete** | Hayro and GPUI were validated for the initial macOS prototype, with documented limitations. |
 | 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
-| 2. Build an action-driven reader | **Not started** | A clearer GPUI Kit interface, discoverable actions, basic independent windows, and text selection/copy follow the MVP. |
+| 2. Build an action-driven reader | **In progress** | Open PDF and reading controls have shared Actions and a searchable palette; the GPUI Kit interface, application menu, independent windows, and text selection/copy remain. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
 **Next work:** Follow the open child tickets of the

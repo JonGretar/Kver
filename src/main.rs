@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
-use kver::reader::Preview;
+use kver::reader::{Preview, bind_reader_keys};
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
@@ -12,26 +12,30 @@ fn main() {
     }
     let path = first.map(PathBuf::from);
 
-    gpui_platform::application().run(move |cx: &mut App| {
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
+    gpui_platform::application()
+        .with_assets(gpui_kit::assets::Assets)
+        .run(move |cx: &mut App| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            cx.on_window_closed(|cx, _| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
 
-        let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
-        if let Err(error) = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..Default::default()
-            },
-            |window, cx| cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
-        ) {
-            eprintln!("Cannot open window: {error}");
-            cx.quit();
-            return;
-        }
-        cx.activate(true);
-    });
+            let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
+            if let Err(error) = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |window, cx| cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
+            ) {
+                eprintln!("Cannot open window: {error}");
+                cx.quit();
+                return;
+            }
+            cx.activate(true);
+        });
 }

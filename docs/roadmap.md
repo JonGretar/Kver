@@ -68,9 +68,13 @@ bounded bitmaps; navigate and zoom with keys or toolbar controls. A
   predictable position across changes in zoom and viewport size
   ([#13](https://github.com/JonGretar/Kver/issues/13),
   [#14](https://github.com/JonGretar/Kver/issues/14)).
-- [ ] Check reading, responsiveness, and bounded memory on representative
+- [x] Check reading, responsiveness, and bounded memory on representative
   long, scanned, rotated/cropped, and text PDFs; resolve release-blocking
   findings ([#17](https://github.com/JonGretar/Kver/issues/17)).
+  [Validation evidence](mvp-reader-validation.md) includes the
+  short-final-page navigation and fit-mode fix
+  ([#31](https://github.com/JonGretar/Kver/issues/31)), with remaining
+  release-window checks reserved for #18.
 - [ ] Automate a versioned GitHub Release with a downloadable unsigned Apple
   silicon macOS app, then verify its launch and reading behavior in a real Mac
   window. Explain macOS security prompts

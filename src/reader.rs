@@ -96,6 +96,18 @@ fn visible_range(pages: &[(f32, f32)], zoom: f32, top: f32, height: f32) -> std:
     first..end
 }
 
+fn current_page_at(pages: &[(f32, f32)], zoom: f32, top: f32, height: f32) -> usize {
+    let last = pages.len() - 1;
+    let document_end = page_top(pages, zoom, pages.len());
+    // A short final page cannot be scrolled to the top; reaching the end
+    // must still make it the current page.
+    if top + height >= document_end - 1.0 {
+        last
+    } else {
+        position_at(pages, zoom, top + height / 2.0).page
+    }
+}
+
 struct Bitmap {
     image: Arc<RenderImage>,
     bytes: usize,
@@ -114,6 +126,9 @@ pub struct Preview {
     generation: u64,
     failed: Option<usize>,
     page_index: usize,
+    // A deliberate page turn remains current even if the viewport also shows
+    // part of a neighboring page. Scrolling chooses a new current page.
+    selected_page: Option<usize>,
     last_viewport: (f32, f32, f32),
     scroll: ScrollHandle,
     focus: FocusHandle,
@@ -134,6 +149,7 @@ impl Preview {
             generation: 0,
             failed: None,
             page_index: 0,
+            selected_page: None,
             last_viewport: (f32::NAN, f32::NAN, f32::NAN),
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
@@ -158,6 +174,7 @@ impl Preview {
         self.in_flight = None;
         self.failed = None;
         self.page_index = 0;
+        self.selected_page = None;
         self.scroll.set_offset(point(px(0.0), px(0.0)));
         self.last_viewport = (f32::NAN, f32::NAN, f32::NAN);
         self.status = "Loading document…".into();
@@ -229,6 +246,7 @@ impl Preview {
 
     fn install_pages(&mut self, pages: Vec<(f32, f32)>, cx: &mut Context<Self>) {
         self.pages = pages;
+        self.selected_page = Some(0);
         self.status = self.ready_status();
         self.sync_viewport(cx);
     }
@@ -289,21 +307,39 @@ impl Preview {
             return;
         }
         let (top, width, height) = self.viewport();
-        let position = position_at(&self.pages, self.scale, top);
-        self.page_index = position.page;
-        self.apply_fit(position, (width, height));
+        let visible = visible_range(&self.pages, self.scale, top, height);
+        if self
+            .selected_page
+            .is_some_and(|page| !visible.contains(&page))
+        {
+            self.selected_page = None;
+        }
+        let target = self
+            .selected_page
+            .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height));
+        // When a scroll changes the fit target, keep the point at the
+        // viewport center stable. Anchoring the top instead can move the
+        // center back across the boundary and refit the previous page.
+        let anchor = if self.selected_page.is_none() && target != self.page_index {
+            height / 2.0
+        } else {
+            0.0
+        };
+        self.page_index = target;
+        let position = position_at(&self.pages, self.scale, top + anchor);
+        self.apply_fit(self.page_index, position, (width, height), anchor);
         self.last_viewport = self.viewport();
         self.schedule(cx);
         cx.notify();
     }
 
-    fn apply_fit(&mut self, position: Position, viewport: (f32, f32)) {
-        if let Some(scale) = fit_scale(self.zoom_mode, self.pages[position.page], viewport) {
-            self.set_scale(scale, position);
+    fn apply_fit(&mut self, page: usize, position: Position, viewport: (f32, f32), anchor: f32) {
+        if let Some(scale) = fit_scale(self.zoom_mode, self.pages[page], viewport) {
+            self.set_scale(scale, position, anchor);
         }
     }
 
-    fn set_scale(&mut self, next: f32, position: Position) {
+    fn set_scale(&mut self, next: f32, position: Position, anchor: f32) {
         if next == self.scale {
             return;
         }
@@ -314,7 +350,7 @@ impl Preview {
         self.failed = None;
         self.scroll.set_offset(point(
             self.scroll.offset().x,
-            px(-page_top(&self.pages, next, position.page) - position.y * next),
+            px(-(page_top(&self.pages, next, position.page) + position.y * next - anchor).max(0.0)),
         ));
     }
 
@@ -331,16 +367,19 @@ impl Preview {
             return;
         }
         self.page_index = index;
+        self.selected_page = Some(index);
         if self.failed != Some(index) {
             self.failed = None;
         }
         let (_, width, height) = self.viewport();
         self.apply_fit(
+            index,
             Position {
                 page: index,
                 y: 0.0,
             },
             (width, height),
+            0.0,
         );
         self.scroll.set_offset(point(
             self.scroll.offset().x,
@@ -365,9 +404,11 @@ impl Preview {
         self.zoom_mode = mode;
         if !self.pages.is_empty() {
             let (top, width, height) = self.viewport();
+            self.page_index = self
+                .selected_page
+                .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height));
             let position = position_at(&self.pages, self.scale, top);
-            self.page_index = position.page;
-            self.apply_fit(position, (width, height));
+            self.apply_fit(self.page_index, position, (width, height), 0.0);
             self.schedule(cx);
         }
         cx.notify();
@@ -380,7 +421,7 @@ impl Preview {
         let (top, _, _) = self.viewport();
         let position = position_at(&self.pages, self.scale, top);
         self.zoom_mode = ZoomMode::Fixed;
-        self.set_scale(next, position);
+        self.set_scale(next, position, 0.0);
         self.schedule(cx);
         cx.notify();
     }
@@ -677,7 +718,10 @@ impl Render for Preview {
                     .overflow_y_scroll()
                     .overflow_x_scroll()
                     .track_scroll(&self.scroll)
-                    .on_scroll(cx.listener(|this, _, _, cx| this.sync_viewport(cx)))
+                    .on_scroll(cx.listener(|this, _, _, cx| {
+                        this.selected_page = None;
+                        this.sync_viewport(cx);
+                    }))
                     .p_4()
                     .child(if self.path.is_none() || self.pages.is_empty() {
                         div()
@@ -695,6 +739,7 @@ impl Render for Preview {
 
 impl Preview {
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
+        self.selected_page = None;
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
         let maximum =
             (page_top(&self.pages, self.scale, self.pages.len()) - self.viewport().2).max(0.0);
@@ -747,6 +792,30 @@ mod tests {
             999..1000
         );
     }
+
+    #[test]
+    fn current_page_ignores_a_sliver_but_counts_a_short_final_page() {
+        let pages = [(600.0, 1200.0), (300.0, 400.0), (600.0, 180.0)];
+        let zoom = 1.0;
+        // Ten points of the previous page are visible above page two.
+        assert_eq!(
+            current_page_at(&pages, zoom, page_top(&pages, zoom, 1) - 10.0, 450.0),
+            1
+        );
+        // The last page is shorter than half a viewport, but at the document
+        // end it is still the page the reader has reached.
+        let height = 700.0;
+        assert_eq!(
+            current_page_at(
+                &pages,
+                zoom,
+                page_top(&pages, zoom, pages.len()) - height,
+                height
+            ),
+            2
+        );
+    }
+
     #[test]
     fn page_local_position_survives_zoom() {
         let pages = vec![(100.0, 200.0), (150.0, 300.0)];

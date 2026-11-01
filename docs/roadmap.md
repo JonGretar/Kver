@@ -2,8 +2,8 @@
 
 Kver's first job is to read PDFs well. The first downloadable product is an
 Apple silicon macOS MVP, not a replacement for every existing reader.
-Capabilities beyond the daily reader are goals, not a fixed release sequence. See
-[features](features.md) for the corresponding scope.
+The next gate improves the reader experience; other goals have no fixed
+release sequence. See [features](features.md) for the corresponding scope.
 
 ## Where we are
 
@@ -11,11 +11,12 @@ Capabilities beyond the daily reader are goals, not a fixed release sequence. Se
 | --- | --- | --- |
 | 0. Validate the stack | **Complete** | Hayro and GPUI were validated for the initial macOS prototype, with documented limitations. |
 | 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
-| 2. Make it a daily reader | **Not started** | Search, selection, links, outline, history, and position restoration follow the MVP. |
+| 2. Build an action-driven reader | **Not started** | A clearer GPUI Kit interface, discoverable actions, basic independent windows, and text selection/copy follow the MVP. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** Plan daily-reader features from [features](features.md), with
-live ownership and blockers tracked in GitHub Issues. The
+**Next work:** Follow the open child tickets of the
+[reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33).
+GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
 
 ## 0. Validate the stack
@@ -28,7 +29,7 @@ prototype; PDFium is a comparator if a concrete gap warrants revisiting it.
 The [validation record](rendering-validation.md) contains the rendering and
 coordinate evidence, accepted annotation-appearance limitation, and platform
 checks. It does not certify all real PDFs or a Windows build. Text selection
-remains in the daily-reader milestone.
+belongs to the next reader-experience gate.
 
 - Bootstrap Rust and GPUI; open a macOS window and render a PDF page at
   several scales without blocking input.
@@ -89,7 +90,7 @@ when the full outcome is complete; GitHub issues hold the finer task graph.
 
 - [x] Investigate mouse text selection and copy on an ordinary text PDF; document
   why the current bitmap-only reader cannot demonstrate it and recommend keeping
-  implementation in the daily-reader milestone
+  implementation after the MVP
   ([#15](https://github.com/JonGretar/Kver/issues/15)).
 
 An experimental Linux binary may accompany the GitHub Release if it is simple
@@ -105,25 +106,35 @@ signing and notarization are not prerequisites. Communicate the resulting
 macOS security prompts with the download. A full Vim command language,
 configurable bindings, and OCR are not release blockers.
 
-## 2. Make it a daily reader
+## 2. Build an action-driven reader
 
-**Outcome:** Common reading workflows no longer require another PDF reader.
+**Outcome:** Kver feels usable as a PDF reader, not just a rendering prototype.
+The [reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33)
+defines this gate; its child tickets track delivery and dependencies.
 
-- Search document text and move between highlighted results.
-- Select and copy text with the mouse.
-- Follow internal links and show the document outline when present.
-- Navigate back and forward and restore the last reading position.
+- Refresh the empty, loading, error, and reading UI with GPUI Kit. Decide the
+  exact look during implementation, not in the roadmap.
+- Make everyday operations discoverable through shared Actions, controls,
+  shortcuts, an application menu, and a searchable app-action command palette.
+- Open and switch independent reader windows without tabs.
+- Select visible text with the mouse and copy it from ordinary text PDFs,
+  including useful spaces and non-ASCII mapping where supported. Do not
+  pretend that image-only scans contain selectable text.
 
-**Gate:** These workflows work on representative PDFs, and navigation remains
-predictable after zoom and scrolling. The order within this milestone is
-flexible. Search-result highlights are transient, not saved annotations.
+**Gate:** A reader can use the controls, menu, shortcuts, and palette to open
+and navigate PDFs in independent windows, and select and copy visible text.
+Reader-level checks cover zoom, scrolling, rotated/cropped pages, and scans;
+a real-Mac check confirms menus, window switching, UI usability, and actual
+drag-to-copy/paste. Record text extraction limits rather than promising
+perfect copy order for every PDF. This gate does not commit to another release
+version or date.
 
 ## Separate platform delivery
 
 Linux and Windows remain product targets. Their compatibility is checked
 during technical validation, but each needs its own build, packaging, and PDF
 regression checks before a downloadable release. Neither blocks the macOS MVP
-or daily-reader milestones.
+or the reader-experience milestone.
 Intel macOS builds also need an Intel-machine check before being offered as a
 supported download; they are not part of the first Apple silicon release.
 
@@ -131,12 +142,14 @@ supported download; they are not part of the first Apple silicon release.
 
 Keep these visible without implying a date or order:
 
+- Document-text search and transient result highlights; internal links and
+  outline; navigation history and restoration of the last reading position.
 - Visual ruler: keyboard movement along text lines, a positional fallback on
   scans, and stable placement through zoom/scroll. Validate its coordinate and
   text-geometry prerequisites in Phase 0; implement it when ready.
 - Configurable keybindings, numeric counts, multi-key commands, named marks,
-  recent-document navigation, and a command palette.
-- Multiple-document switching, tabs or windows, and drag-and-drop.
+  recent-file search, and drag-and-drop.
+- Tabs, if useful beyond independent windows.
 - Password-protected PDFs if not shipped in the MVP.
 - Notes, persistent highlights, and annotation interchange.
 - Reload after PDF rebuilds and SyncTeX source/PDF navigation for LaTeX.

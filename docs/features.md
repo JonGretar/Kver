@@ -22,17 +22,23 @@ Test with text, scanned, long, and rotated/cropped PDFs. Password-protected
 PDFs may be included if straightforward, but do not block this release.
 The MVP does not promise OCR.
 
-## Daily-reader milestone
+## Action-driven reader experience — next gate
 
-- Search document text; move between and highlight results.
-- Select and copy text with the mouse.
-- Follow internal links; display a PDF outline when present.
-- Navigate backward and forward.
-- Restore the previous reading position.
+- Refresh the reader UI with GPUI Kit components; settle its exact appearance
+  during implementation rather than prescribing a layout here.
+- Make everyday reader operations share GPUI Actions, accessible through
+  controls, useful keyboard shortcuts, an application menu, and a searchable
+  command palette for app actions.
+- Open an independent empty reader window and switch between windows; each
+  window keeps its own document and reading state, without tabs.
+- Select visible text with the mouse and copy it to the system clipboard on
+  ordinary text PDFs. Keep selection aligned through zoom and scrolling,
+  exclude off-crop text, and do not imply OCR on image-only scans.
 
 These are the next defined capability gate, not prerequisites for the first
-download. Search-result highlighting is transient; it does not create an
-annotation.
+download. The [reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33)
+defines its acceptance checks; its child issues track implementation. This
+gate does not promise a particular release version or date.
 
 ## Goals without a fixed release date
 
@@ -46,10 +52,13 @@ promise for the immediately following release.
 
 ### More navigation and desktop controls
 
+- Search document text and navigate transiently highlighted results; follow
+  internal links and display the PDF outline when present.
+- Navigate backward and forward and restore the last reading position.
+  Search-result highlights are not saved annotations.
 - Configurable keybindings and preferences.
-- Vim-style sequences, numeric counts, named marks, and a command palette.
-- Recent documents, multiple-document switching, tabs or windows, and
-  drag-and-drop.
+- Vim-style sequences, numeric counts, and named marks.
+- Recent-file search, tabs, and drag-and-drop.
 - Password-protected PDFs if deferred from MVP.
 - Link hints and keyboard-driven text selection.
 

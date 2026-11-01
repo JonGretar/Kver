@@ -6,11 +6,11 @@
 
 use gpui::{
     AnyWindowHandle, AppContext as _, AsKeystroke as _, HeadlessAppContext, InputEvent as _,
-    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, OwnedMenuItem,
-    Pixels, Point, ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    OwnedMenuItem, Pixels, Point, ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
 };
 use kver::app_menu::{self, Quit};
-use kver::reader::{OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
+use kver::reader::{Copy, OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
 use kver::reader_windows::{NewWindow, NextWindow, PreviousWindow};
 use std::{
     path::PathBuf,
@@ -1216,13 +1216,15 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     });
     let (open, quit) = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        assert_eq!(menus.len(), 3);
+        assert_eq!(menus.len(), 4);
         assert_eq!(menus[0].name.as_ref(), "Kver");
         assert_eq!(menus[1].name.as_ref(), "File");
-        assert_eq!(menus[2].name.as_ref(), "Window");
+        assert_eq!(menus[2].name.as_ref(), "Edit");
+        assert!(matches!(&menus[2].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<Copy>()));
+        assert_eq!(menus[3].name.as_ref(), "Window");
         assert!(matches!(&menus[1].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
-        assert!(matches!(&menus[2].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
-        assert!(matches!(&menus[2].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));
+        assert!(matches!(&menus[3].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
+        assert!(matches!(&menus[3].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));
         let OwnedMenuItem::Action {
             name, action: quit, ..
         } = &menus[0].items[0]
@@ -1290,6 +1292,199 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     })?);
     cx.update(|app| app.dispatch_action(quit.as_ref()));
     cx.run_until_parked();
+    Ok(())
+}
+
+fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+    cx.capture_screenshot(window.into())?;
+    cx.update(|app| app.write_to_clipboard(gpui::ClipboardItem::new_string("unchanged".into())));
+    press_key(&mut cx, window, "cmd-c")?;
+    assert_eq!(
+        cx.update(|app| app.read_from_clipboard().unwrap().text()),
+        Some("unchanged".into())
+    );
+    press_key(&mut cx, window, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, window, "copy")?;
+    press_key(&mut cx, window, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| app.read_from_clipboard().unwrap().text()),
+        Some("unchanged".into()),
+        "disabled Copy in the palette must leave the clipboard alone"
+    );
+    if cx.update(|app| window.read(app).unwrap().palette_open()) {
+        press_key(&mut cx, window, "escape")?;
+        cx.run_until_parked();
+    }
+
+    for (zoom, scroll) in [(1.0, 0.0), (1.25, 0.0), (1.25, 40.0)] {
+        if zoom > cx.update(|app| window.read(app).unwrap().scale()) {
+            window.update(&mut cx, |reader, _, cx| reader.zoom_in(cx))?;
+            wait_for_page(&mut cx, &window, "Page 1 of 100 · 125%")?;
+        }
+        if scroll > 0.0 {
+            window.update(&mut cx, |reader, _, cx| reader.scroll_by(scroll, cx))?;
+        }
+        click(&mut cx, window.into(), point(px(160.0), px(200.0)))?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().selected_text()),
+            None
+        );
+        let before = cx.capture_screenshot(window.into())?;
+        let (start, end) = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (
+                reader.text_screen_point(0, 0, 0.1),
+                reader.text_screen_point(0, 4, 0.8),
+            )
+        });
+        let (start, end) = (
+            start.ok_or("text was not extracted")?,
+            end.ok_or("text end missing")?,
+        );
+        cx.update_window(window.into(), |_, view, app| {
+            view.dispatch_event(
+                MouseDownEvent {
+                    position: start,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    first_mouse: false,
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                app,
+            );
+            view.dispatch_event(
+                MouseMoveEvent {
+                    position: end,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                app,
+            );
+            view.dispatch_event(
+                MouseUpEvent {
+                    position: end,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                app,
+            );
+        })?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().selected_text()),
+            Some("KVER ".into())
+        );
+        let after = cx.capture_screenshot(window.into())?;
+        let density = after.width() as f32 / 920.0;
+        let y = (f32::from(start.y) * density) as u32;
+        let left = ((f32::from(start.x) + 2.0) * density) as u32;
+        let right = ((f32::from(end.x) - 2.0) * density) as u32;
+        assert!(right > left);
+        for x in left..right {
+            assert_ne!(
+                before.get_pixel(x, y),
+                after.get_pixel(x, y),
+                "selection highlight has a gap at x={x}"
+            );
+        }
+        press_key(&mut cx, window, "cmd-c")?;
+        assert_eq!(
+            cx.update(|app| app.read_from_clipboard().unwrap().text()),
+            Some("KVER ".into())
+        );
+        if zoom == 1.0 {
+            cx.update(|app| {
+                app.write_to_clipboard(gpui::ClipboardItem::new_string("reset".into()))
+            });
+            press_key(&mut cx, window, "cmd-shift-p")?;
+            cx.run_until_parked();
+            type_query(&mut cx, window, "copy")?;
+            press_key(&mut cx, window, "enter")?;
+            cx.run_until_parked();
+            assert_eq!(
+                cx.update(|app| app.read_from_clipboard().unwrap().text()),
+                Some("KVER ".into()),
+                "palette Copy must dispatch the same reader action"
+            );
+        }
+    }
+    std::fs::create_dir_all("target/captures")?;
+    let blank = PathBuf::from("target/captures/blank-selection.pdf");
+    std::fs::write(
+        &blank,
+        pdf_with_page_sizes([(384, 504), (378, 288), (352, 294)]),
+    )?;
+    window.update(&mut cx, |reader, _, cx| {
+        reader.open_path(blank, cx);
+    })?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().selected_text()),
+        None
+    );
+    wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
+    // An obsolete extraction completing after a second open must not restore
+    // either old selection or old text on the new blank document.
+    window.update(&mut cx, |reader, _, cx| {
+        reader.open_path(PathBuf::from("examples/readme-sample.pdf"), cx);
+        reader.open_path(PathBuf::from("target/captures/blank-selection.pdf"), cx);
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
+    cx.capture_screenshot(window.into())?;
+    cx.update_window(window.into(), |_, view, app| {
+        view.dispatch_event(
+            MouseDownEvent {
+                position: point(px(370.0), px(200.0)),
+                button: MouseButton::Left,
+                click_count: 1,
+                first_mouse: false,
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+        view.dispatch_event(
+            MouseMoveEvent {
+                position: point(px(450.0), px(200.0)),
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+    })?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().selected_text()),
+        None
+    );
+    press_key(&mut cx, window, "cmd-c")?;
+    assert_eq!(
+        cx.update(|app| app.read_from_clipboard().unwrap().text()),
+        Some("KVER ".into())
+    );
     Ok(())
 }
 
@@ -1369,7 +1564,7 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     // second window active, and verify focus changes rather than document state.
     let menu_next = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        let OwnedMenuItem::Action { action, .. } = &menus[2].items[0] else {
+        let OwnedMenuItem::Action { action, .. } = &menus[3].items[0] else {
             panic!("missing Next Window")
         };
         action.boxed_clone()
@@ -1383,7 +1578,7 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
     let menu_previous = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        let OwnedMenuItem::Action { action, .. } = &menus[2].items[1] else {
+        let OwnedMenuItem::Action { action, .. } = &menus[3].items[1] else {
             panic!("missing Previous Window")
         };
         action.boxed_clone()
@@ -1501,6 +1696,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     opening_from_empty_window_and_replacing_documents()?;
     open_pdf_palette_in_empty_window()?;
     shared_reader_actions()?;
+    select_and_copy_ordinary_text()?;
     menu_open_action_targets_window()?;
     long_path_keeps_toolbar_clickable()
 }

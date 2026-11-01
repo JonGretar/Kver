@@ -1,17 +1,24 @@
 //! Provisional PDF backend for the reader prototype.
 //!
-//! The UI receives only premultiplied BGRA pixels and dimensions; Hayro is not part of its API.
+//! The UI receives bitmap pixels and document-space text geometry, never Hayro types.
 use std::path::Path;
 
 use hayro::{
     PixmapSettings, RenderCache, RenderSettings,
-    hayro_interpret::InterpreterSettings,
+    hayro_interpret::{
+        BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
+        InterpreterCache, InterpreterSettings, SoftMask,
+        font::{Glyph, GlyphRun},
+        hayro_cmap::BfString,
+        interpret_page,
+    },
     hayro_syntax::{LoadPdfError, Pdf},
+    kurbo::{Affine, BezPath, Point as KurboPoint, Rect, Shape},
     render,
     vello_cpu::{Pixmap, color::palette::css::WHITE},
 };
 
-use crate::coordinates::PageTransform;
+use crate::coordinates::{PageTransform, Point};
 
 pub struct RenderedPage {
     pub png: Vec<u8>,
@@ -43,6 +50,124 @@ pub struct PageGeometry {
     pub width: f32,
     pub height: f32,
     pub transform: PageTransform,
+}
+
+/// A decoded glyph's advance and visible height in document coordinates.
+#[derive(Clone, Debug)]
+pub struct TextGlyph {
+    pub text: String,
+    pub start: Point,
+    pub end: Point,
+    pub top: f64,
+    pub bottom: f64,
+}
+
+pub struct PageText {
+    pub transform: PageTransform,
+    pub glyphs: Vec<TextGlyph>,
+}
+
+struct TextCollector {
+    crop: Rect,
+    glyphs: Vec<TextGlyph>,
+}
+
+impl<'a> Device<'a> for TextCollector {
+    fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
+    fn push_clip_path(&mut self, _: &ClipPath) {}
+    fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
+    fn draw_image(&mut self, _: Image<'a, '_>, _: ImageDrawProps<'a>) {}
+    fn pop_clip(&mut self) {}
+    fn pop_transparency_group(&mut self) {}
+
+    fn draw_glyph_run(&mut self, run: &GlyphRun<'_, 'a>, props: DrawProps<'a>, mode: &DrawMode) {
+        // This slice only targets filled visible text. Do not offer invisible
+        // extraction text or duplicate a fill+stroke run on its stroke pass.
+        if matches!(mode, DrawMode::Stroke(_) | DrawMode::Invisible) {
+            return;
+        }
+        for (index, glyph) in run.glyphs().iter().enumerate() {
+            let Some(unicode) = glyph.as_unicode() else {
+                continue;
+            };
+            let transform = props.transform * glyph.transform();
+            let origin = transform * KurboPoint::ZERO;
+            let outline = match &**glyph {
+                Glyph::Outline(outline) if !outline.outline().elements().is_empty() => {
+                    Some((transform * outline.outline()).bounding_box())
+                }
+                _ => None,
+            };
+            let next = run
+                .glyphs()
+                .get(index + 1)
+                .map(|next| props.transform * next.transform() * KurboPoint::ZERO)
+                .unwrap_or_else(|| {
+                    KurboPoint::new(
+                        outline.map(|bounds| bounds.x1 + 1.0).unwrap_or(origin.x),
+                        origin.y,
+                    )
+                });
+            // Spaces have no outline but their advance belongs in the copy range.
+            let bounds = outline.unwrap_or_else(|| {
+                Rect::new(
+                    origin.x.min(next.x),
+                    origin.y - 2.0,
+                    origin.x.max(next.x),
+                    origin.y + 10.0,
+                )
+            });
+            if bounds.intersect(self.crop).area() <= 0.0 || next.x <= origin.x {
+                continue;
+            }
+            self.glyphs.push(TextGlyph {
+                text: match unicode {
+                    BfString::Char(c) => c.to_string(),
+                    BfString::String(s) => s,
+                },
+                start: Point {
+                    x: origin.x,
+                    y: origin.y,
+                },
+                end: Point {
+                    x: next.x,
+                    y: next.y,
+                },
+                top: bounds.y1.max(origin.y + 8.0),
+                bottom: bounds.y0.min(origin.y - 2.0),
+            });
+        }
+    }
+}
+
+/// Decode text for one page. Call on a background worker, not the UI thread.
+pub fn page_text(path: &Path, page_index: usize) -> Result<PageText, String> {
+    let data =
+        std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    let pdf = open_pdf(data)?;
+    let page = pdf
+        .pages()
+        .get(page_index)
+        .ok_or_else(|| format!("PDF has no page {}", page_index.saturating_add(1)))?;
+    let box_ = page.media_box();
+    let crop = page.intersected_crop_box();
+    let cache = InterpreterCache::new();
+    let mut context = Context::new(
+        Affine::IDENTITY,
+        Rect::new(box_.x0, box_.y0, box_.x1, box_.y1),
+        &cache,
+        page.xref(),
+        InterpreterSettings::default(),
+    );
+    let mut collector = TextCollector {
+        crop: Rect::new(crop.x0, crop.y0, crop.x1, crop.y1),
+        glyphs: Vec::new(),
+    };
+    interpret_page(page, &mut context, &mut collector);
+    Ok(PageText {
+        transform: PageTransform::from_coefficients(page.initial_transform(true).as_coeffs()),
+        glyphs: collector.glyphs,
+    })
 }
 
 /// Lightweight page sizes for laying out a continuous document without rasterizing it.
@@ -179,6 +304,25 @@ fn rasterize(
 mod tests {
     use super::*;
     use crate::coordinates::{PageViewport, Point};
+
+    #[test]
+    fn ordinary_text_exposes_copyable_advances_and_spaces() {
+        let page = page_text(Path::new("examples/readme-sample.pdf"), 0).unwrap();
+        let heading: String = page
+            .glyphs
+            .iter()
+            .take(20)
+            .map(|glyph| glyph.text.as_str())
+            .collect();
+        assert_eq!(heading, "KVER / READER SAMPLE");
+        assert!(
+            page.glyphs
+                .iter()
+                .take(20)
+                .any(|glyph| glyph.text == " " && glyph.end.x > glyph.start.x)
+        );
+        assert!(page.glyphs.iter().all(|glyph| glyph.end.x > glyph.start.x));
+    }
 
     // A small, valid PDF assembled in memory so the rendering smoke test does
     // not depend on a developer's documents or a downloaded fixture.

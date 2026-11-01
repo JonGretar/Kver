@@ -18,10 +18,11 @@ depend on the PDF engine or physical keybindings.
 open windows; it does not share document or viewport state between readers.
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
-it returns page dimensions, page geometry, and premultiplied BGRA pixels,
-not Hayro types, to the reader. The adapter currently reads and parses the
-document for each raster request. Reusing a parsed document or prefetching
-pages should be driven by measurements, not a new worker architecture upfront.
+it returns page dimensions, page geometry, positioned text, and premultiplied
+BGRA pixels, not Hayro types, to the reader. The adapter currently reads and
+parses the document for each raster and text request. Reusing a parsed
+document or prefetching pages should be driven by measurements, not a new
+worker architecture upfront.
 See the [rendering validation](rendering-validation.md) for the backend choice
 and accepted limitations.
 
@@ -58,7 +59,8 @@ could affect another window. GPUI Kit resolves shortcut hints from active
 keybindings. Bare reading keys apply only while the reader has focus; text
 entry in the palette does not navigate the PDF.
 
-On macOS, `src/app_menu.rs` installs native Kver, File, and Window menus at startup.
+On macOS, `src/app_menu.rs` installs native Kver, File, Edit, and Window menus
+at startup.
 File → Open PDF dispatches the same window-local `OpenPdf` Action; the
 application-wide `Quit` Action shuts down GPUI rather than just closing one
 reader window. File → New Window creates an independent empty reader; Window →
@@ -72,11 +74,13 @@ readers remain open. macOS menu setup stays separate from reader operations.
 Reader navigation anchors use page-local PDF points, not screen pixels.
 `src/coordinates.rs` provides transforms between PDF document coordinates,
 cropped/rotated page-local coordinates, and the viewport; the rendered bitmap
-is only a display representation. This boundary supports future positioned
-text, selection overlays, search, and a visual ruler without storing
-pixel-based anchors. Text extraction and line grouping are not yet reader
-capabilities; when added, extraction belongs behind the PDF adapter and off
-the UI thread.
+is only a display representation. The PDF adapter collects positioned glyphs
+on a background worker for visible pages. The reader keeps one-line selection
+anchors in document coordinates and projects its transient highlight through
+the page transform at the current zoom, independently of the raster cache.
+Changing documents invalidates pending text work and clears selection. More
+general line grouping, rotated/cropped text selection, and scans are separate
+follow-ups.
 
 ## Future state
 

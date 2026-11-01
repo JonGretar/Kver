@@ -93,6 +93,19 @@ Escape; and unavailable reading commands in empty and error windows. The
 specific Mac model and macOS version were not reported. Headless Metal tests
 alone do not establish native focus and input behavior.
 
+### macOS application menu (#36)
+
+`app_menu` installs GPUI's native Kver and File menus only in the macOS
+application startup path. The File menu holds the same `OpenPdf` Action as
+the reader control, shortcut, and palette. GPUI dispatches menu actions into
+the active window's focused element; the reader's existing window-local
+handler owns the picker, error reporting, and obsolete-load invalidation.
+The global `Quit` Action calls GPUI's application shutdown instead of
+closing only the focused reader window. Command-O and Command-Q are
+registered in the keymap before the menu is constructed so GPUI supplies
+the menu's native shortcut labels. This does not add window switching or
+platform-specific code to reader operations.
+
 ## PDF Backend
 
 ### Current and future needs

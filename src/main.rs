@@ -17,6 +17,8 @@ fn main() {
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             bind_reader_keys(cx);
+            #[cfg(target_os = "macos")]
+            kver::app_menu::install(cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();

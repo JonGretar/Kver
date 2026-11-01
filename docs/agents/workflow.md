@@ -21,6 +21,8 @@ version-control operations in this repository.
    until the parent explicitly pulls them with `merge_worktrees`. Independent
    threads do not use that pull; bring their changes together through reviewed
    branches and PRs instead.
+   In the first prompt to a newly created implementation thread, tell it to
+   do the work in that thread; do not instruct it to create another thread.
    Ask working threads to report decisions needed, blockers that change the
    plan, and confirmed landings or dependency changes to the orchestrator.
    Keep routine implementation and CI progress in the working thread.

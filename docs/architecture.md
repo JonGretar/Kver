@@ -85,12 +85,13 @@ Each reader checks its own loaded pages before handling a document Action;
 loading, empty, and error windows disable the corresponding controls and
 palette rows, leaving other windows untouched.
 
-On an Apple silicon Mac, before landing native input changes, manually launch
-the app with a sample PDF and an empty window: verify keyboard and toolbar
-page/zoom/fit parity, search and execute each palette command, inspect shortcut
-hints and dimmed rows in empty/error windows, then verify the reader regains
-keyboard focus after confirming or dismissing the palette. This real-window
-check is **pending**; headless Metal tests do not substitute for it.
+Apple silicon real-window check: Jón Grétar confirmed that the
+`issue-35-reader-actions` branch worked as expected when asked to check
+toolbar/keyboard page, zoom, and fit parity; palette search, shortcut hints,
+typing without invoking reader commands, and focus after confirmation or
+Escape; and unavailable reading commands in empty and error windows. The
+specific Mac model and macOS version were not reported. Headless Metal tests
+alone do not establish native focus and input behavior.
 
 ## PDF Backend
 

@@ -1,6 +1,7 @@
 # Build an unsigned macOS app locally
 
-This packages the **current continuous reader prototype**, not a completed MVP.
+This packages the **macOS MVP** locally. The first released download,
+v0.1.0, is for Apple silicon.
 The bundle contains the optimized `kver` binary and
 the existing macOS icon; it has no Developer ID signature or notarization
 (the macOS linker may apply an ad-hoc signature). Build on the Mac where you
@@ -30,7 +31,7 @@ routine macOS PR CI is paused while the repository is private.
 
 ## Download an unsigned release
 
-When a release is available, download `Kver-vX.Y.Z-macos-arm64.zip` from
+Download `Kver-v0.1.0-macos-arm64.zip` from
 the project's [GitHub Releases](https://github.com/JonGretar/Kver/releases).
 Use an Apple silicon Mac; this is not an Intel or supported Linux build.
 Extract the archive and move `Kver.app` to Applications, or run it directly
@@ -101,8 +102,10 @@ archive and checks its plist, executable architecture, and icon; routine macOS
 PR CI is paused while the repository is private. On a local Apple silicon Mac,
 an earlier bundle build completed, `open` launched the bundled executable with
 the sample PDF, and macOS reported an on-screen window. The local user
-confirmed the app worked and the icon appeared. These earlier checks do not
-replace the release-candidate window check or verify behavior on other Macs.
+confirmed the app worked and the icon appeared. The v0.1.0 local-candidate
+and downloaded-app checks are recorded in the
+[MVP validation evidence](mvp-reader-validation.md); they do not verify
+behavior on other Macs.
 
 ## Troubleshooting and macOS security
 

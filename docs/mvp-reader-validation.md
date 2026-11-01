@@ -1,13 +1,12 @@
 # MVP reader validation (#17)
 
-**Release decision: the local candidate has been checked, but no download has
-been verified.** Release-mode headless Metal checks on an Apple M4
+**Release decision: v0.1.0 is published and its download has been checked.**
+Release-mode headless Metal checks on an Apple M4
 (macOS 27.0.1, 2× display density) found a short-final-page navigation failure,
 tracked and fixed in [#31](https://github.com/JonGretar/Kver/issues/31).
 The fix passed headless checks and a targeted native-window recheck. The
-subsequent local release-candidate window check is recorded below; a
-downloaded GitHub Release remains to be checked in
-[#18](https://github.com/JonGretar/Kver/issues/18).
+subsequent local-candidate and downloaded-release checks for
+[#18](https://github.com/JonGretar/Kver/issues/18) are recorded below.
 
 **Partial native-window report (Jón Grétar):** While opening and scrolling
 `cropped-rotated-scaled.pdf` in either fit mode, the page flickered and moved
@@ -119,13 +118,33 @@ PDF handling, sustained memory, and a fresh native check of the rotated
 fixture were not recorded during this candidate review; the earlier
 representative-PDF and #31 evidence above remains separate.
 
-## Downloaded release check still needed (#18)
+## v0.1.0 downloaded release check (#18)
 
-After the separately authorized tag build publishes the GitHub Release,
-download its archive on an Apple silicon Mac. Inspect the extracted version,
-architecture and icon, and record any Gatekeeper prompt or override used.
-Launch the downloaded app without arguments and check its visible window;
-`open` returning alone is not evidence of working input. In the window:
+After explicit authorization, the `v0.1.0` tag at commit `a5d920f9` triggered
+the [macOS release job](https://github.com/JonGretar/Kver/actions/runs/41294400153),
+which passed and published the
+[GitHub Release](https://github.com/JonGretar/Kver/releases/tag/v0.1.0).
+Its only asset is `Kver-v0.1.0-macos-arm64.zip`; no experimental Linux
+download is offered. A separate GitHub CLI download of that asset had
+SHA-256 `fd7f43877b55c00e27af488410a57421395b7e360a5c3bab656e62483884deb4`,
+matching GitHub's asset digest. The extracted app had both bundle version
+fields set to 0.1.0, an arm64 executable and the icon. The agent launched
+this downloaded copy without an argument and observed a running process.
+
+Jón Grétar reported that the downloaded app worked in the visible Mac
+window and the download looked correct. When asked about a browser-downloaded
+copy, Jón Grétar confirmed a macOS security warning and reported that the
+behavior was as expected. The exact prompt text and override route were
+not recorded. This is a user-observed real-window check, not an automated
+test of picker or input handling, and the CLI download did not itself
+carry a quarantine attribute. The
+[unsigned-app security instructions](macos-app.md#download-an-unsigned-release)
+explain safe ways to open a trusted copy without disabling Gatekeeper.
+
+For future releases, download the archive on an Apple silicon Mac. Inspect
+the extracted version, architecture and icon, and record any Gatekeeper
+prompt or override used. Launch without arguments and check the visible
+window; `open` returning alone is not evidence of working input. In the window:
 
 1. Use **Open PDF** to choose the RFC and confirm the page content appears.
    Open an invalid `.pdf` and a valid PDF again; record the visible error and

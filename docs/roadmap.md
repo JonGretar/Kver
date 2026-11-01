@@ -10,13 +10,12 @@ Capabilities beyond the daily reader are goals, not a fixed release sequence. Se
 | Milestone | Status | What that means |
 | --- | --- | --- |
 | 0. Validate the stack | **Complete** | Hayro and GPUI were validated for the initial macOS prototype, with documented limitations. |
-| 1. Ship a macOS MVP | **In progress** | Continuous reading and a local app bundle work, but the app is not yet a downloadable reader. |
+| 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
 | 2. Make it a daily reader | **Not started** | Search, selection, links, outline, history, and position restoration follow the MVP. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** See the open child issues of the approved
-[macOS MVP spec (#11)](https://github.com/JonGretar/Kver/issues/11) for live
-ownership, blockers, and the next ready ticket. The
+**Next work:** Plan daily-reader features from [features](features.md), with
+live ownership and blockers tracked in GitHub Issues. The
 [feature workflow](agents/workflow.md) explains how to check work status.
 
 ## 0. Validate the stack
@@ -55,12 +54,13 @@ implement the visual ruler.
 
 **Outcome:** A buildable, downloadable PDF reader for macOS.
 
-**Already in the prototype:** Open a PDF by path or from the app; show loading
+**Shipped in v0.1.0:** Open a PDF by path or from the app; show loading
 errors; scroll continuously through pages rendered in background work with
-bounded bitmaps; navigate and zoom with keys or toolbar controls. A
-[local unsigned `.app`](macos-app.md) can be built, but is not a download.
+bounded bitmaps; navigate and zoom with keys or toolbar controls. An
+[unsigned Apple silicon `.app`](macos-app.md) can be built locally or
+downloaded from the GitHub Release.
 
-**Still needed for this gate:**
+**Completed for this gate:**
 
 - [x] Open a local PDF from the app without a command-line argument, with
   understandable failures ([#12](https://github.com/JonGretar/Kver/issues/12)).
@@ -73,13 +73,14 @@ bounded bitmaps; navigate and zoom with keys or toolbar controls. A
   findings ([#17](https://github.com/JonGretar/Kver/issues/17)).
   [Validation evidence](mvp-reader-validation.md) includes the
   short-final-page navigation and fit-mode fix
-  ([#31](https://github.com/JonGretar/Kver/issues/31)), with remaining
-  release-window checks reserved for #18.
-- [ ] Automate a versioned GitHub Release with a downloadable unsigned Apple
+  ([#31](https://github.com/JonGretar/Kver/issues/31)); the subsequent
+  release-window checks are recorded under #18.
+- [x] Automate a versioned GitHub Release with a downloadable unsigned Apple
   silicon macOS app, then verify its launch and reading behavior in a real Mac
   window. Explain macOS security prompts
   ([#16](https://github.com/JonGretar/Kver/issues/16),
   [#18](https://github.com/JonGretar/Kver/issues/18)).
+  See the [v0.1.0 release and downloaded-app evidence](mvp-reader-validation.md#v010-downloaded-release-check-18).
 
 These are milestone outcomes, not one checkbox per ticket. Check each off only
 when the full outcome is complete; GitHub issues hold the finer task graph.

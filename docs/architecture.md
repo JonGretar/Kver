@@ -106,14 +106,6 @@ registered in the keymap before the menu is constructed so GPUI supplies
 the menu's native shortcut labels. This does not add window switching or
 platform-specific code to reader operations.
 
-Headless menu tests inspect the installed Actions and route them through
-GPUI's active-window dispatch, but its file picker cancels without a native
-dialog. On the #36 build, Jón Grétar confirmed native menu Open and Quit,
-Command-O and Command-Q, keyboard navigation after cancelling the picker,
-and File → Open PDF after switching away from and back to Kver on an Apple
-silicon Mac. The #36 issue records the observed check; multi-window
-behavior remains #37.
-
 ## PDF Backend
 
 ### Current and future needs

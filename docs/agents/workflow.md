@@ -5,6 +5,13 @@ worktree is a separate checkout for that thread; an additional Git worktree
 is not part of the routine workflow. Git and `jj` are both acceptable for
 version-control operations in this repository.
 
+Keep repository Markdown files for durable decisions, their reasons, and
+information needed to build or use Kver. Keep working conversations and
+requests for human checks in the Delta thread; ask the person directly there,
+launching the app yourself when possible. Put brief verification results and
+remaining limitations in the relevant GitHub issue or PR, not in architecture
+docs or a test diary.
+
 1. **Decide what to build.** Use `docs/roadmap.md` for release gates and
    `docs/features.md` for scope. For a multi-session feature, agree on a spec
    and small, verifiable tickets before publishing them to
@@ -30,16 +37,16 @@ version-control operations in this repository.
    applicable project skills (such as `tdd` for test-first work), run the
    checks relevant to that behavior, and demonstrate it with a real PDF where
    UI or rendering behavior matters. Local and Cloud Runner threads may have
-   different machines and tools; use the checks available in each, and record
-   what was actually run. While the repository is private, PR CI builds,
-   tests, and runs the headless visual integration target on Linux only; the
-   macOS matrix entry in `.github/workflows/ci.yml` is paused to save billed
+   different machines and tools; use the checks available in each, and briefly
+   report what ran in the issue or PR. While the repository is private, PR CI
+   builds, tests, and runs the headless visual integration target on Linux only;
+   the macOS matrix entry in `.github/workflows/ci.yml` is paused to save billed
    Actions minutes. These checks validate off-screen rendering, not a visible
    window or pointer hit-testing. For changes to native window/input behavior,
-   document a real-Mac manual check before landing; a Linux Cloud Runner
-   cannot substitute for that check. Before a downloadable release, validate
-   launch and reading behavior in a real Mac window. Do not require a local
-   Mac for every routine UI PR.
+   confirm a real-Mac manual check before landing and record its outcome in the
+   issue or PR; a Linux Cloud Runner cannot substitute for that check. Before
+   a downloadable release, validate launch and reading behavior in a real Mac
+   window. Do not require a local Mac for every routine UI PR.
    For exploratory UI probes, temporarily add a Rust case to `tests/visual.rs`,
    run it on the main thread with `cargo +stable test --locked --features screenshot --test visual`,
    and inspect captures under ignored `target/`. Remove the probe code when
@@ -51,8 +58,8 @@ version-control operations in this repository.
    orchestrators should not ask them to create PRs by default. During an
    explicitly requested landing, the Land skill creates a PR if needed; an
    existing PR can also be used. While the repository is private, require the
-   passing Linux PR check before landing, plus the documented real-Mac check
-   for native window/input changes. Check any configured required status checks
+   passing Linux PR check before landing, plus the real-Mac check for native
+   window/input changes. Check any configured required status checks
    before landing: a required paused macOS check must be updated explicitly,
    not treated as passing or bypassed. Once the repository is public, restore
    `macos-15` in the CI matrix and require passing macOS and Linux PR checks
@@ -64,10 +71,10 @@ version-control operations in this repository.
    `Closes #<number>` only when merging that PR will satisfy the ticket's
    acceptance criteria; otherwise use `Refs #<number>` and keep the issue
    open. Do not auto-close a parent spec when only one child ticket is done.
-   Include the documentation close-out in the same PR: check off each
+   Update project docs when a durable fact changes: check off each
    `docs/roadmap.md` item fully completed by that change, leaving partial
-   items unchecked and updating their progress description when useful.
-   Update **Where we are** when the milestone status or next work changes.
+   items unchecked. Update **Where we are** when the milestone status or next
+   work changes.
    Add a user-facing `CHANGELOG.md` entry for notable changes.
 
 ## Work tracking

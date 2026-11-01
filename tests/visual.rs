@@ -5,11 +5,11 @@
 //! process main thread.
 
 use gpui::{
-    AnyWindowHandle, AppContext as _, HeadlessAppContext, InputEvent as _, KeyDownEvent, Keystroke,
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
-    WindowHandle, point, px, size,
+    AnyWindowHandle, AppContext as _, AsKeystroke as _, HeadlessAppContext, InputEvent as _,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
+    ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
 };
-use kver::reader::{Preview, ZoomMode, bind_reader_keys};
+use kver::reader::{Preview, ZoomIn, ZoomMode, bind_reader_keys};
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -101,6 +101,28 @@ fn press_key(
     Ok(())
 }
 
+fn type_query(
+    cx: &mut HeadlessAppContext,
+    window: WindowHandle<Preview>,
+    text: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for character in text.chars() {
+        let key = character.to_string();
+        cx.update_window(window.into(), |_, window, app| {
+            window.dispatch_keystroke(
+                Keystroke {
+                    key: key.clone(),
+                    key_char: Some(key.clone()),
+                    modifiers: Modifiers::default(),
+                },
+                app,
+            );
+        })?;
+    }
+    cx.run_until_parked();
+    Ok(())
+}
+
 // Exercise mixed page sizes through the reader, not only the fit calculation.
 fn pdf_with_page_sizes(sizes: [(u32, u32); 3]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.4\n".to_vec();
@@ -156,6 +178,7 @@ fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(()),
         gpui_platform::current_headless_renderer,
     );
+    cx.update(bind_reader_keys);
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -286,6 +309,7 @@ fn fit_modes_follow_page_and_window() -> Result<(), Box<dyn std::error::Error>> 
         Arc::new(()),
         gpui_platform::current_headless_renderer,
     );
+    cx.update(bind_reader_keys);
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -364,6 +388,7 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         Arc::new(()),
         gpui_platform::current_headless_renderer,
     );
+    cx.update(bind_reader_keys);
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -991,6 +1016,189 @@ fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let document = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    let empty = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    let error = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/missing.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &document, "Page 1 of 100 · 100%")?;
+    cx.capture_screenshot(document.into())?;
+    cx.capture_screenshot(empty.into())?;
+
+    press_key(&mut cx, document, "right")?;
+    assert_eq!(cx.update(|app| document.read(app).unwrap().page_index()), 1);
+    press_key(&mut cx, document, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, document, "next page")?;
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, document, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| document.read(app).unwrap().page_index()), 2);
+    let focus = cx.update(|app| document.read(app).unwrap().reader_focus());
+    assert!(cx.update_window(document.into(), |_, window, _| focus.is_focused(window))?);
+
+    press_key(&mut cx, document, "=")?;
+    assert_eq!(cx.update(|app| document.read(app).unwrap().scale()), 1.25);
+    press_key(&mut cx, document, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, document, "zoom in")?;
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    // Kit reads the item's hint from this active window binding, not a
+    // separately maintained label. The bare "=" binding must not steal text.
+    assert!(cx.update_window(document.into(), |_, window, _| {
+        window
+            .highest_precedence_binding_for_action(&ZoomIn)
+            .is_some_and(|binding| {
+                binding.keystrokes().first().map(|key| key.as_keystroke())
+                    == Some(&Keystroke::parse("cmd-alt-=").unwrap())
+            })
+    })?);
+    press_key(&mut cx, document, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| document.read(app).unwrap().scale()), 1.5625);
+    assert!(cx.update_window(document.into(), |_, window, _| focus.is_focused(window))?);
+
+    press_key(&mut cx, document, "w")?;
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().zoom_mode()),
+        ZoomMode::FitWidth
+    );
+    let width_scale = cx.update(|app| document.read(app).unwrap().scale());
+    press_key(&mut cx, document, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, document, "fit width")?;
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, document, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().scale()),
+        width_scale
+    );
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().zoom_mode()),
+        ZoomMode::FitWidth
+    );
+    press_key(&mut cx, document, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, document, "fit page")?;
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, document, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().zoom_mode()),
+        ZoomMode::FitPage
+    );
+    assert!(cx.update_window(document.into(), |_, window, _| focus.is_focused(window))?);
+
+    let before = cx.update(|app| {
+        let reader = document.read(app).unwrap();
+        (reader.page_index(), reader.scale(), reader.zoom_mode())
+    });
+    press_key(&mut cx, empty, "right")?;
+    press_key(&mut cx, empty, "=")?;
+    press_key(&mut cx, empty, "w")?;
+    press_key(&mut cx, empty, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, empty, "zoom in")?;
+    assert_eq!(
+        cx.update(|app| empty.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, empty, "enter")?;
+    cx.run_until_parked();
+    assert!(cx.update(|app| empty.read(app).unwrap().palette_open()));
+    assert_eq!(cx.update(|app| empty.read(app).unwrap().scale()), 1.0);
+    assert_eq!(cx.update(|app| empty.read(app).unwrap().page_count()), None);
+    assert_eq!(
+        cx.update(|app| {
+            let reader = document.read(app).unwrap();
+            (reader.page_index(), reader.scale(), reader.zoom_mode())
+        }),
+        before
+    );
+    cx.run_until_parked();
+    assert!(cx.update(|app| error.read(app).unwrap().status().starts_with("Cannot read")));
+    press_key(&mut cx, error, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, error, "fit page")?;
+    assert_eq!(
+        cx.update(|app| error.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, error, "enter")?;
+    cx.run_until_parked();
+    assert!(cx.update(|app| error.read(app).unwrap().palette_open()));
+    assert_eq!(cx.update(|app| error.read(app).unwrap().page_count()), None);
+    assert_eq!(
+        cx.update(|app| {
+            let reader = document.read(app).unwrap();
+            (reader.page_index(), reader.scale(), reader.zoom_mode())
+        }),
+        before
+    );
+    document.update(&mut cx, |reader, _, app| {
+        reader.open_path(PathBuf::from("examples/missing.pdf"), app);
+    })?;
+    cx.run_until_parked();
+    assert!(cx.update(|app| {
+        document
+            .read(app)
+            .unwrap()
+            .status()
+            .starts_with("Cannot read")
+    }));
+    press_key(&mut cx, document, "=")?;
+    press_key(&mut cx, document, "f")?;
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().page_count()),
+        None
+    );
+    assert_eq!(cx.update(|app| document.read(app).unwrap().scale()), 1.0);
+    assert_eq!(
+        cx.update(|app| document.read(app).unwrap().zoom_mode()),
+        ZoomMode::Fixed
+    );
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
@@ -1002,5 +1210,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loading_errors_are_visible()?;
     opening_from_empty_window_and_replacing_documents()?;
     open_pdf_palette_in_empty_window()?;
+    shared_reader_actions()?;
     long_path_keeps_toolbar_clickable()
 }

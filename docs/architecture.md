@@ -72,6 +72,26 @@ unhandled input (and all keys while the palette is open) so search text and
 Kit's Enter/Escape handling reach the focused palette. Headless tests exercise
 these routes and rendering; they do not prove the native macOS picker or focus.
 
+### Reading Actions (#35)
+
+Page turns, zoom, and fit modes now enter through window-local GPUI Actions;
+the existing reader methods remain the single source of navigation and scaling
+behavior. Toolbar controls dispatch those Actions, while the palette renders
+Kit `CommandItem`s carrying the same Actions and resolves their shortcut hints
+from the active keymap. Bare reading keys are scoped to the reader only while
+the palette is closed, so typing search terms does not turn pages or zoom.
+Modified shortcuts remain active in the palette and supply its resolved hints.
+Each reader checks its own loaded pages before handling a document Action;
+loading, empty, and error windows disable the corresponding controls and
+palette rows, leaving other windows untouched.
+
+On an Apple silicon Mac, before landing native input changes, manually launch
+the app with a sample PDF and an empty window: verify keyboard and toolbar
+page/zoom/fit parity, search and execute each palette command, inspect shortcut
+hints and dimmed rows in empty/error windows, then verify the reader regains
+keyboard focus after confirming or dismissing the palette. This real-window
+check is **pending**; headless Metal tests do not substitute for it.
+
 ## PDF Backend
 
 ### Current and future needs

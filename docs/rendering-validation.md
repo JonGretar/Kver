@@ -415,6 +415,10 @@ Runner pass could not establish interactive input
 responsiveness, macOS display quality, native key-to-present latency, memory
 under sustained scrolling, or a representative sample of photographic scans.
 
+The follow-up [MVP reader validation](mvp-reader-validation.md) checks current
+behavior on representative PDFs. It does not change the Phase 0 backend
+decision or erase its annotation-appearance limitation.
+
 ## Platform feasibility and current build limits
 
 - **macOS (before the `gpui-pre` migration):** GPUI 0.2.2 uses Metal. After

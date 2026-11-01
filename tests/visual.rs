@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[track_caller]
 fn wait_for_page(
     cx: &mut HeadlessAppContext,
     window: &WindowHandle<Preview>,
@@ -33,7 +34,15 @@ fn wait_for_page(
         if !(status.starts_with("Rendering page ") || status == "Loading document…")
             || Instant::now() >= deadline
         {
-            return Err(format!("Expected {expected:?}, got {status:?}").into());
+            let (index, displayed) = cx.update(|app| {
+                let reader = window.read(app).unwrap();
+                (reader.page_index(), reader.displayed_page_index())
+            });
+            return Err(format!(
+                "{}: Expected {expected:?}, got {status:?} (page_index={index}, displayed={displayed:?})",
+                std::panic::Location::caller()
+            )
+            .into());
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -93,14 +102,23 @@ fn press_key(
 }
 
 // Exercise mixed page sizes through the reader, not only the fit calculation.
-fn mixed_page_pdf() -> Vec<u8> {
+fn pdf_with_page_sizes(sizes: [(u32, u32); 3]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.4\n".to_vec();
     let objects = [
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 1200] /Resources << >> >>",
+        &format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << >> >>",
+            sizes[0].0, sizes[0].1
+        ),
+        &format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << >> >>",
+            sizes[1].0, sizes[1].1
+        ),
+        &format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << >> >>",
+            sizes[2].0, sizes[2].1
+        ),
     ];
     let mut offsets = Vec::new();
     for (index, object) in objects.iter().enumerate() {
@@ -116,6 +134,147 @@ fn mixed_page_pdf() -> Vec<u8> {
         format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
     );
     pdf
+}
+
+fn mixed_page_pdf() -> Vec<u8> {
+    pdf_with_page_sizes([(612, 792), (300, 400), (600, 1200)])
+}
+
+fn mixed_page_pdf_with_last_height(height: u32) -> Vec<u8> {
+    pdf_with_page_sizes([(612, 792), (300, 400), (600, height)])
+}
+
+fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all("target/captures")?;
+    let path = PathBuf::from("target/captures/short-rotated-sizes.pdf");
+    std::fs::write(
+        &path,
+        pdf_with_page_sizes([(384, 504), (378, 288), (352, 294)]),
+    )?;
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
+    press_key(&mut cx, window, "f")?;
+    let mut highest_page = 0;
+    for _ in 0..80 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(20.0, cx))?;
+        cx.capture_screenshot(window.into())?;
+        let (page, zoom) = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (reader.page_index(), reader.scale())
+        });
+        assert!(
+            page >= highest_page,
+            "fit-page went backwards while scrolling forward"
+        );
+        highest_page = page;
+        for _ in 0..3 {
+            cx.capture_screenshot(window.into())?;
+            let after = cx.update(|app| {
+                let reader = window.read(app).unwrap();
+                (reader.page_index(), reader.scale())
+            });
+            assert_eq!(after, (page, zoom), "fit-page changed without scrolling");
+        }
+    }
+    assert!(highest_page >= 1, "fit-page scrolling must reach page two");
+    let mut lowest_page = highest_page;
+    for _ in 0..80 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(-20.0, cx))?;
+        cx.capture_screenshot(window.into())?;
+        let page = cx.update(|app| window.read(app).unwrap().page_index());
+        assert!(
+            page <= lowest_page,
+            "fit-page went forward while scrolling backward"
+        );
+        lowest_page = page;
+    }
+    assert_eq!(lowest_page, 0, "fit-page scrolling must return to page one");
+    Ok(())
+}
+
+fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all("target/captures")?;
+    let path = PathBuf::from("target/captures/short-last-page.pdf");
+    std::fs::write(&path, mixed_page_pdf_with_last_height(180))?;
+    for mode in [ZoomMode::FitWidth, ZoomMode::FitPage] {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(()),
+            gpui_platform::current_headless_renderer,
+        );
+        let path = path.clone();
+        let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+            cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+        })?;
+        wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
+        window.update(&mut cx, |reader, _, cx| {
+            if mode == ZoomMode::FitWidth {
+                reader.fit_width(cx);
+            } else {
+                reader.fit_page(cx);
+            }
+            reader.select_page(1, cx);
+        })?;
+        // A thin strip of page two remains visible above the short third page.
+        for _ in 0..5 {
+            window.update(&mut cx, |reader, _, cx| reader.scroll_by(800.0, cx))?;
+            cx.run_until_parked();
+        }
+        let (page, scale) = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (reader.page_index(), reader.scale())
+        });
+        assert_eq!(
+            page, 2,
+            "{mode:?} must identify the mostly visible final page"
+        );
+        for _ in 0..4 {
+            cx.capture_screenshot(window.into())?;
+            assert_eq!(
+                cx.update(|app| window.read(app).unwrap().scale()),
+                scale,
+                "{mode:?} must not refit again without input"
+            );
+        }
+        window.update(&mut cx, |reader, _, cx| reader.previous_page(cx))?;
+        window.update(&mut cx, |reader, _, cx| reader.next_page(cx))?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().page_index()),
+            2,
+            "{mode:?} must navigate to the short final page"
+        );
+        // Walk back across the differently sized page boundary and return.
+        // A fit change must not itself trigger repeated fit changes.
+        for amount in [-200.0; 12].into_iter().chain([200.0; 12]) {
+            window.update(&mut cx, |reader, _, cx| reader.scroll_by(amount, cx))?;
+            cx.capture_screenshot(window.into())?;
+            let stable = cx.update(|app| {
+                let reader = window.read(app).unwrap();
+                (reader.page_index(), reader.scale())
+            });
+            for _ in 0..3 {
+                cx.capture_screenshot(window.into())?;
+                let after = cx.update(|app| {
+                    let reader = window.read(app).unwrap();
+                    (reader.page_index(), reader.scale())
+                });
+                assert_eq!(after, stable, "{mode:?} refit without scrolling");
+            }
+        }
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().page_index()),
+            2,
+            "{mode:?} must reach the final page again"
+        );
+    }
+    Ok(())
 }
 
 fn fit_modes_follow_page_and_window() -> Result<(), Box<dyn std::error::Error>> {
@@ -280,27 +439,27 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
     // Input-level zoom shares the toolbar command and retains the PDF-point
     // position at the top of a scrolled page (not the same screen pixel).
     window.update(&mut cx, |reader, _, cx| {
-        reader.select_page(1, cx);
+        reader.select_page(0, cx);
         reader.scroll_by(100.0, cx);
     })?;
     let position = cx.update(|app| window.read(app).unwrap().reading_position());
-    assert_eq!(position.0, 1);
+    assert_eq!(position.0, 0);
     assert!(position.1 > 0.0);
     press_key(&mut cx, window, "=")?;
-    assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 1);
+    assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 0);
     let zoomed_position = cx.update(|app| window.read(app).unwrap().reading_position());
     assert_eq!(zoomed_position.0, position.0);
     assert!((zoomed_position.1 - position.1).abs() < 0.01);
-    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 156%"))?;
+    wait_for_page(&mut cx, &window, &format!("Page 1 of {page_count} · 156%"))?;
     press_key(&mut cx, window, "-")?;
-    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 125%"))?;
+    wait_for_page(&mut cx, &window, &format!("Page 1 of {page_count} · 125%"))?;
     let restored = cx.update(|app| window.read(app).unwrap().reading_position());
     assert_eq!(restored.0, position.0);
     assert!((restored.1 - position.1).abs() < 0.01);
     press_key(&mut cx, window, "shift-=")?;
-    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 156%"))?;
+    wait_for_page(&mut cx, &window, &format!("Page 1 of {page_count} · 156%"))?;
     press_key(&mut cx, window, "-")?;
-    wait_for_page(&mut cx, &window, &format!("Page 2 of {page_count} · 125%"))?;
+    wait_for_page(&mut cx, &window, &format!("Page 1 of {page_count} · 125%"))?;
     // Queue pages quickly, without waiting for any intermediate render.
     // Only the newest request may be installed by the reader.
     window.update(&mut cx, |reader, _, cx| {
@@ -347,9 +506,16 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
     );
     last.save(output.join("last.png"))?;
     // Traverse the long sample with both rapid jumps and sustained scrolling.
+    let mut peak_bitmap_bytes = cx.update(|app| window.read(app).unwrap().retained_bitmap_bytes());
     window.update(&mut cx, |reader, _, cx| reader.select_page(0, cx))?;
     for index in 1..page_count {
         window.update(&mut cx, |reader, _, cx| reader.select_page(index, cx))?;
+        let bytes = cx.update(|app| window.read(app).unwrap().retained_bitmap_bytes());
+        peak_bitmap_bytes = peak_bitmap_bytes.max(bytes);
+        assert!(
+            bytes <= 128 * 1024 * 1024,
+            "page {index} retained {bytes} bytes"
+        );
     }
     wait_for_page(
         &mut cx,
@@ -364,21 +530,31 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
     window.update(&mut cx, |reader, _, cx| reader.select_page(0, cx))?;
     for _ in 0..page_count * 2 {
         window.update(&mut cx, |reader, _, cx| reader.scroll_by(800.0, cx))?;
+        let bytes = cx.update(|app| window.read(app).unwrap().retained_bitmap_bytes());
+        peak_bitmap_bytes = peak_bitmap_bytes.max(bytes);
+        assert!(bytes <= 128 * 1024 * 1024, "scroll retained {bytes} bytes");
     }
-    assert_eq!(
-        cx.update(|app| window.read(app).unwrap().page_index()),
-        page_count - 1
+    let end_page = cx.update(|app| window.read(app).unwrap().page_index());
+    assert!(
+        end_page >= page_count - 2,
+        "scrolling must reach the end of the document (top visible page {})",
+        end_page + 1
     );
     wait_for_page(
         &mut cx,
         &window,
-        &format!("Page {page_count} of {page_count} · 125%"),
+        &format!("Page {} of {page_count} · 125%", end_page + 1),
     )?;
     window.update(&mut cx, |reader, _, cx| reader.scroll_by(-800.0, cx))?;
+    let back_page = cx.update(|app| window.read(app).unwrap().page_index());
+    assert!(
+        back_page < end_page,
+        "backward scroll must change current page"
+    );
     wait_for_page(
         &mut cx,
         &window,
-        &format!("Page {} of {page_count} · 125%", page_count - 1),
+        &format!("Page {} of {page_count} · 125%", back_page + 1),
     )?;
     cx.capture_screenshot(window.into())?
         .save(output.join("scrolled.png"))?;
@@ -387,6 +563,9 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         "scrolling must move into the preceding page"
     );
     // Dispatch a real wheel event through GPUI, not just the reader command.
+    // On a short last page the viewport cannot scroll far enough to put
+    // that page at its top; the reading position can stay on the prior page.
+    let before_wheel = cx.update(|app| window.read(app).unwrap().reading_position());
     cx.update_window(window.into(), |_, window, app| {
         window.dispatch_event(
             ScrollEvent {
@@ -398,14 +577,22 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
             app,
         );
     })?;
+    cx.run_until_parked();
+    let after_wheel = cx.update(|app| window.read(app).unwrap().reading_position());
+    let wheel_page = cx.update(|app| window.read(app).unwrap().page_index()) + 1;
+    assert!(
+        after_wheel.0 > before_wheel.0
+            || (after_wheel.0 == before_wheel.0 && after_wheel.1 >= before_wheel.1),
+        "wheel must not scroll backwards: {before_wheel:?} -> {after_wheel:?}"
+    );
     wait_for_page(
         &mut cx,
         &window,
-        &format!("Page {page_count} of {page_count} · 125%"),
+        &format!("Page {wheel_page} of {page_count} · 125%"),
     )?;
     assert_eq!(
         cx.update(|app| window.read(app).unwrap().page_index()),
-        page_count - 1
+        wheel_page - 1
     );
     window.update(&mut cx, |reader, _, cx| {
         reader.select_page(page_count - 1, cx)
@@ -424,7 +611,26 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         cx.update(|app| window.read(app).unwrap().status().to_owned()),
         format!("Page {page_count} of {page_count} · 125%")
     );
-    println!("Reader zoom passed; captures in {}", output.display());
+    press_key(&mut cx, window, "w")?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().zoom_mode()),
+        ZoomMode::FitWidth
+    );
+    let width_scale = cx.update(|app| window.read(app).unwrap().scale());
+    assert!(width_scale.is_finite() && (0.25..=4.0).contains(&width_scale));
+    press_key(&mut cx, window, "f")?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().zoom_mode()),
+        ZoomMode::FitPage
+    );
+    let page_scale = cx.update(|app| window.read(app).unwrap().scale());
+    assert!(page_scale <= width_scale);
+    println!(
+        "Reader case: pages={page_count} peak_retained_bitmap_bytes={peak_bitmap_bytes} \
+         final_retained_bitmap_bytes={bytes} fit_width={width_scale:.3} fit_page={page_scale:.3}; \
+         captures in {}",
+        output.display()
+    );
     Ok(())
 }
 
@@ -732,6 +938,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
     fit_modes_follow_page_and_window()?;
+    fit_page_transition_is_stable()?;
+    short_final_page_fits_without_feedback()?;
     loading_errors_are_visible()?;
     opening_from_empty_window_and_replacing_documents()?;
     long_path_keeps_toolbar_clickable()

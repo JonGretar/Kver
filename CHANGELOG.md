@@ -20,3 +20,4 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Show the PDF filename instead of its full path, keeping navigation and zoom controls reachable even when the name is long or the window is narrow.
+- Keep short last pages navigable and correctly labelled, without fit mode repeatedly changing the page in view.

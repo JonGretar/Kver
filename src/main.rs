@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
-use kver::reader::{Preview, bind_reader_keys};
+use gpui::App;
+use kver::reader::bind_reader_keys;
+use kver::reader_windows;
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
@@ -26,14 +27,7 @@ fn main() {
             })
             .detach();
 
-            let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
-            if let Err(error) = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |window, cx| cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
-            ) {
+            if let Err(error) = reader_windows::open(cx, path) {
                 eprintln!("Cannot open window: {error}");
                 cx.quit();
                 return;

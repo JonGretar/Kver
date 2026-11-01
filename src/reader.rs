@@ -19,6 +19,7 @@ use image::{Frame, RgbaImage};
 use crate::{
     coordinates::{PageViewport, Point},
     pdf,
+    reader_windows::{self, NewWindow, NextWindow, PreviousWindow},
 };
 
 const GAP: f32 = 16.0;
@@ -45,6 +46,9 @@ gpui::actions!(
 pub fn bind_reader_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-o", OpenPdf, None),
+        KeyBinding::new("cmd-n", NewWindow, None),
+        KeyBinding::new("cmd-`", NextWindow, None),
+        KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
@@ -939,6 +943,17 @@ impl Render for Preview {
                 reader.key_context("Reader")
             })
             .on_action(cx.listener(Self::on_open_pdf))
+            .on_action(cx.listener(|_, _: &NewWindow, _, cx| {
+                if let Err(error) = reader_windows::open(cx, None) {
+                    eprintln!("Cannot open window: {error}");
+                }
+            }))
+            .on_action(cx.listener(|_, _: &NextWindow, window, cx| {
+                reader_windows::cycle(window, cx, 1);
+            }))
+            .on_action(cx.listener(|_, _: &PreviousWindow, window, cx| {
+                reader_windows::cycle(window, cx, -1);
+            }))
             .on_action(cx.listener(Self::on_show_palette))
             .on_action(cx.listener(Self::on_copy))
             .on_mouse_up(
@@ -1218,6 +1233,23 @@ impl Render for Preview {
                                             CommandItem::new()
                                                 .label("Open PDF")
                                                 .action(Box::new(OpenPdf)),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("New Window")
+                                                .action(Box::new(NewWindow)),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Next Window")
+                                                .action(Box::new(NextWindow))
+                                                .disabled(cx.windows().len() < 2),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Previous Window")
+                                                .action(Box::new(PreviousWindow))
+                                                .disabled(cx.windows().len() < 2),
                                         )
                                         .item(
                                             CommandItem::new()

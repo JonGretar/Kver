@@ -13,13 +13,16 @@ depend on the PDF engine or physical keybindings.
 
 ## Application boundaries
 
-`src/main.rs` initializes GPUI Kit, keybindings, and the reader window.
+`src/main.rs` initializes GPUI Kit, keybindings, and the initial reader window.
+`src/reader_windows.rs` creates empty reader windows and cycles focus between
+open windows; it does not share document or viewport state between readers.
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
-it returns page dimensions, page geometry, and premultiplied BGRA pixels,
-not Hayro types, to the reader. The adapter currently reads and parses the
-document for each raster request. Reusing a parsed document or prefetching
-pages should be driven by measurements, not a new worker architecture upfront.
+it returns page dimensions, page geometry, positioned text, and premultiplied
+BGRA pixels, not Hayro types, to the reader. The adapter currently reads and
+parses the document for each raster and text request. Reusing a parsed
+document or prefetching pages should be driven by measurements, not a new
+worker architecture upfront.
 See the [rendering validation](rendering-validation.md) for the backend choice
 and accepted limitations.
 
@@ -56,10 +59,15 @@ could affect another window. GPUI Kit resolves shortcut hints from active
 keybindings. Bare reading keys apply only while the reader has focus; text
 entry in the palette does not navigate the PDF.
 
-On macOS, `src/app_menu.rs` installs native Kver and File menus at startup.
+On macOS, `src/app_menu.rs` installs native Kver, File, Edit, and Window menus
+at startup.
 File → Open PDF dispatches the same window-local `OpenPdf` Action; the
 application-wide `Quit` Action shuts down GPUI rather than just closing one
-reader window. macOS menu setup stays separate from reader operations.
+reader window. File → New Window creates an independent empty reader; Window →
+Next Window and Previous Window cycle focus in either direction. These commands
+use the same reader Actions as shortcuts and the palette; only the focused
+window handles a window command. Closing a window does not quit while other
+readers remain open. macOS menu setup stays separate from reader operations.
 
 ## Document coordinates
 

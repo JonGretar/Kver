@@ -3,6 +3,7 @@
 use gpui::{App, KeyBinding, Menu, MenuItem};
 
 use crate::reader::OpenPdf;
+use crate::reader_windows::{NewWindow, NextWindow};
 
 gpui::actions!(kver, [Quit]);
 
@@ -12,5 +13,9 @@ pub fn install(cx: &mut App) {
     cx.set_menus([
         Menu::new("Kver").items([MenuItem::action("Quit Kver", Quit)]),
         Menu::new("File").items([MenuItem::action("Open PDF…", OpenPdf)]),
+        Menu::new("Window").items([
+            MenuItem::action("New Window", NewWindow),
+            MenuItem::action("Next Window", NextWindow),
+        ]),
     ]);
 }

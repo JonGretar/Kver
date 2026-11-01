@@ -11,6 +11,7 @@ use gpui::{
 };
 use kver::app_menu::{self, Quit};
 use kver::reader::{OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
+use kver::reader_windows::{NewWindow, NextWindow};
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -1215,9 +1216,12 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     });
     let (open, quit) = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        assert_eq!(menus.len(), 2);
+        assert_eq!(menus.len(), 3);
         assert_eq!(menus[0].name.as_ref(), "Kver");
         assert_eq!(menus[1].name.as_ref(), "File");
+        assert_eq!(menus[2].name.as_ref(), "Window");
+        assert!(matches!(&menus[2].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
+        assert!(matches!(&menus[2].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
         let OwnedMenuItem::Action {
             name, action: quit, ..
         } = &menus[0].items[0]
@@ -1288,7 +1292,164 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+        app_menu::install(app);
+    });
+    let first = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some("examples/readme-sample.pdf".into()),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &first, "Page 1 of 100 · 100%")?;
+    press_key(&mut cx, first, "right")?;
+    press_key(&mut cx, first, "=")?;
+    let first_state = cx.update(|app| {
+        let reader = first.read(app).unwrap();
+        (
+            reader.path().unwrap().to_owned(),
+            reader.page_index(),
+            reader.scale(),
+        )
+    });
+    // No next window: cycling cannot affect the current document.
+    press_key(&mut cx, first, "cmd-`")?;
+    assert_eq!(cx.update(|app| app.windows().len()), 1);
+    press_key(&mut cx, first, "cmd-n")?;
+    cx.run_until_parked();
+    let second: WindowHandle<Preview> = cx
+        .update(|app| app.windows())
+        .into_iter()
+        .find(|handle| *handle != first.into())
+        .unwrap()
+        .downcast()
+        .expect("new window is a Preview");
+    cx.capture_screenshot(second.into())?;
+    assert_eq!(
+        cx.update(|app| second.read(app).unwrap().page_count()),
+        None
+    );
+    std::fs::create_dir_all("target/captures")?;
+    let other_pdf = PathBuf::from("target/captures/kver-windows.pdf");
+    std::fs::write(&other_pdf, mixed_page_pdf())?;
+    second.update(&mut cx, |reader, _, app| {
+        reader.open_path(other_pdf.clone(), app)
+    })?;
+    wait_for_page(&mut cx, &second, "Page 1 of 3 · 100%")?;
+    press_key(&mut cx, second, "right")?;
+    press_key(&mut cx, second, "cmd-alt-=")?;
+    assert_eq!(cx.update(|app| second.read(app).unwrap().page_index()), 1);
+    assert_eq!(cx.update(|app| second.read(app).unwrap().scale()), 1.25);
+    assert_eq!(
+        cx.update(|app| {
+            let reader = first.read(app).unwrap();
+            (
+                reader.path().unwrap().to_owned(),
+                reader.page_index(),
+                reader.scale(),
+            )
+        }),
+        first_state
+    );
+
+    // The native menu and shortcut carry the same Action; dispatch with the
+    // second window active, and verify focus changes rather than document state.
+    let menu_next = cx.update(|app| {
+        let menus = app.get_menus().unwrap();
+        let OwnedMenuItem::Action { action, .. } = &menus[2].items[1] else {
+            panic!("missing Next Window")
+        };
+        action.boxed_clone()
+    });
+    cx.update_window(second.into(), |_, window, _| window.activate_window())?;
+    cx.update(|app| app.dispatch_action(menu_next.as_ref()));
+    assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
+    press_key(&mut cx, first, "cmd-`")?;
+    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
+    press_key(&mut cx, second, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, second, "next window")?;
+    assert_eq!(
+        cx.update(|app| second.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    assert!(cx.update_window(second.into(), |_, window, _| {
+        window
+            .highest_precedence_binding_for_action(&NextWindow)
+            .is_some()
+    })?);
+    press_key(&mut cx, second, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().page_index()),
+        first_state.1
+    );
+    assert_eq!(cx.update(|app| second.read(app).unwrap().page_index()), 1);
+
+    cx.update_window(second.into(), |_, window, _| window.remove_window())?;
+    cx.run_until_parked();
+    press_key(&mut cx, first, "right")?;
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().page_index()),
+        first_state.1 + 1
+    );
+    // Palette and native menu New Window also create empty, independent readers.
+    press_key(&mut cx, first, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, first, "new window")?;
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, first, "enter")?;
+    cx.run_until_parked();
+    let palette_window = cx
+        .update(|app| app.windows())
+        .into_iter()
+        .find(|handle| *handle != first.into())
+        .unwrap();
+    assert_eq!(
+        cx.update(|app| palette_window
+            .downcast::<Preview>()
+            .unwrap()
+            .read(app)
+            .unwrap()
+            .path()
+            .map(PathBuf::from)),
+        None
+    );
+    let menu_new = cx.update(|app| {
+        let menus = app.get_menus().unwrap();
+        let OwnedMenuItem::Action { action, .. } = &menus[2].items[0] else {
+            panic!("missing New Window")
+        };
+        action.boxed_clone()
+    });
+    cx.update(|app| app.dispatch_action(menu_new.as_ref()));
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| app.windows().len()), 3);
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().page_index()),
+        first_state.1 + 1
+    );
+    std::fs::remove_file(other_pdf)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    independent_reader_windows()?;
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }

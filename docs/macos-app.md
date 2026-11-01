@@ -86,26 +86,6 @@ open -n -a "$PWD/target/release/Kver.app" --args "$PWD/examples/readme-sample.pd
 `open` returning successfully
 only means macOS accepted the launch request; check the visible window as well.
 
-### Native application-menu check (#36)
-
-On an Apple silicon Mac, build the current branch with
-`sh scripts/build-macos-app.sh`, then launch it using the `open -n -a` command
-above. With the empty reader focused, confirm **File → Open PDF…** shows
-Command-O and **Kver → Quit Kver** shows Command-Q. Choose
-`examples/readme-sample.pdf` from the File menu and confirm it renders.
-Repeat with Command-O, the reader's Open PDF control, and the command
-palette; cancelling the picker must leave the current document intact,
-and choosing an invalid PDF must show the usual readable error. Return to
-the reader after the picker and check that navigation still receives keys.
-Launch a second independent Kver instance with `open -n`, focus each
-instance's window in turn, and check menu Open PDF acts on the focused
-instance without changing the other document. Multiple windows within one
-instance are not available until #37. Finally use Command-Q and, in a new
-launch, Kver → Quit Kver; each should exit its app cleanly. Record the Mac
-model, macOS version, branch/commit, and observed results in the #36 issue
-before landing. Linux PR CI and headless Metal checks cannot establish
-native menu presentation, picker focus, or shortcut behavior.
-
 Double-clicking `Kver.app` in Finder opens the empty reader window; use
 **Open PDF** to choose a document. PDF file association in Finder is not yet supported.
 

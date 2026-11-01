@@ -51,6 +51,27 @@ rasters from the PDF adapter. The UI receives backend-independent page
 geometry and pixels rather than Hayro types. Preserve document coordinates
 for future marks, text overlays, and reading positions.
 
+### First reader action and palette (#34)
+
+GPUI Kit 0.8.1 uses the same `gpui-pre` 0.3.10 snapshot as Kver. The
+`screenshot` feature enables Kit's matching test support; the application
+initializes Kit and registers its assets once before opening the reader.
+For now, the reader owns one searchable `CommandState` while its palette is
+visible, and renders `Command` inside its own action dispatch path. Its Open
+PDF item carries the actual `OpenPdf` Action: Kit resolves the active binding
+hint and dispatches the same Action as the toolbar and shortcut. The reader
+owns the existing file-picker and document-loading flow, so entry points
+cannot diverge on errors or stale asynchronous loads.
+
+The palette is an inline overlay instead of a new dialog/window: it keeps the
+reader as the Action handler's ancestor, without introducing a global handler
+that could target the wrong window. This slice does not reorganize navigation
+or add an app-wide palette registry; later reader Actions can extend the same
+palette as their operations become available. The root key handler yields
+unhandled input (and all keys while the palette is open) so search text and
+Kit's Enter/Escape handling reach the focused palette. Headless tests exercise
+these routes and rendering; they do not prove the native macOS picker or focus.
+
 ## PDF Backend
 
 ### Current and future needs

@@ -9,7 +9,7 @@ use gpui::{
     Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
     WindowHandle, point, px, size,
 };
-use kver::reader::{Preview, ZoomMode};
+use kver::reader::{Preview, ZoomMode, bind_reader_keys};
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -932,6 +932,65 @@ fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    cx.capture_screenshot(window.into())?;
+    press_key(&mut cx, window, "cmd-shift-p")?;
+    cx.run_until_parked();
+    assert!(cx.update(|app| window.read(app).unwrap().palette_open()));
+    cx.capture_screenshot(window.into())?
+        .save("target/captures/open-pdf-palette.png")?;
+    // Escape clears a query before dismissing the palette; focus returns
+    // to the reader so the shortcut can reopen it.
+    cx.update_window(window.into(), |_, window, app| {
+        window.dispatch_keystroke(
+            Keystroke {
+                key: "x".into(),
+                key_char: Some("x".into()),
+                modifiers: Modifiers::default(),
+            },
+            app,
+        );
+    })?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().palette_query(app)),
+        Some("x".into())
+    );
+    press_key(&mut cx, window, "escape")?;
+    cx.run_until_parked();
+    assert!(cx.update(|app| window.read(app).unwrap().palette_open()));
+    press_key(&mut cx, window, "escape")?;
+    cx.run_until_parked();
+    assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
+    press_key(&mut cx, window, "cmd-shift-p")?;
+    cx.run_until_parked();
+    press_key(&mut cx, window, "enter")?;
+    cx.run_until_parked();
+    assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().status().to_owned()),
+        "Open a PDF to start reading"
+    ); // Headless picker cancels.
+    press_key(&mut cx, window, "cmd-shift-p")?;
+    cx.run_until_parked();
+    cx.capture_screenshot(window.into())?;
+    click(&mut cx, window.into(), point(px(460.0), px(420.0)))?;
+    assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
@@ -942,5 +1001,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     short_final_page_fits_without_feedback()?;
     loading_errors_are_visible()?;
     opening_from_empty_window_and_replacing_documents()?;
+    open_pdf_palette_in_empty_window()?;
     long_path_keeps_toolbar_clickable()
 }

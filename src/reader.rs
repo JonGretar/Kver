@@ -7,9 +7,10 @@ use std::{
 };
 
 use gpui::{
-    Context, FocusHandle, PathPromptOptions, RenderImage, ScrollHandle, Window, div, img, point,
-    prelude::*, px, rgb,
+    App, Context, Entity, FocusHandle, KeyBinding, PathPromptOptions, RenderImage, ScrollHandle,
+    Window, div, img, point, prelude::*, px, rgb,
 };
+use gpui_kit::component::command::{Command, CommandItem, CommandState};
 use image::{Frame, RgbaImage};
 
 use crate::pdf;
@@ -17,6 +18,17 @@ use crate::pdf;
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
 const PAGE_PADDING: f32 = 16.0;
+
+gpui::actions!(kver, [OpenPdf, ShowCommandPalette]);
+
+/// Bind the same actions in the app and headless reader windows so Kit
+/// resolves the shortcut displayed beside Open PDF from the active keymap.
+pub fn bind_reader_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("cmd-o", OpenPdf, None),
+        KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
+    ]);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoomMode {
@@ -133,6 +145,7 @@ pub struct Preview {
     scroll: ScrollHandle,
     focus: FocusHandle,
     focus_initialized: bool,
+    palette: Option<Entity<CommandState>>,
     status: String,
 }
 
@@ -154,6 +167,7 @@ impl Preview {
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
+            palette: None,
             status: "Open a PDF to start reading".into(),
         };
         if reader.path.is_some() {
@@ -217,6 +231,32 @@ impl Preview {
         .detach();
     }
 
+    fn on_open_pdf(&mut self, _: &OpenPdf, _: &mut Window, cx: &mut Context<Self>) {
+        self.open_dialog(cx);
+    }
+
+    fn show_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let palette = cx.new(|cx| CommandState::new(window, cx));
+        self.palette = Some(palette.clone());
+        palette.update(cx, |palette, cx| palette.focus(window, cx));
+        cx.notify();
+    }
+
+    fn on_show_palette(
+        &mut self,
+        _: &ShowCommandPalette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_palette(window, cx);
+    }
+
+    fn dismiss_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.palette = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
     fn load(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.path.clone() else {
             return;
@@ -262,6 +302,14 @@ impl Preview {
 
     pub fn status(&self) -> &str {
         &self.status
+    }
+    pub fn palette_open(&self) -> bool {
+        self.palette.is_some()
+    }
+    pub fn palette_query(&self, cx: &gpui::App) -> Option<gpui::SharedString> {
+        self.palette
+            .as_ref()
+            .map(|palette| palette.read(cx).query(cx))
     }
     pub fn page_index(&self) -> usize {
         self.page_index
@@ -576,7 +624,13 @@ impl Render for Preview {
         div()
             .size_full()
             .track_focus(&self.focus)
+            .on_action(cx.listener(Self::on_open_pdf))
+            .on_action(cx.listener(Self::on_show_palette))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                if this.palette.is_some() {
+                    cx.propagate();
+                    return;
+                }
                 if event.keystroke.modifiers == gpui::Modifiers::default() {
                     match event.keystroke.key.as_str() {
                         "right" | "n" => this.next_page(cx),
@@ -587,7 +641,7 @@ impl Render for Preview {
                         "-" => this.zoom_out(cx),
                         "w" => this.fit_width(cx),
                         "f" => this.fit_page(cx),
-                        _ => {}
+                        _ => cx.propagate(),
                     }
                 } else if event.keystroke.modifiers
                     == (gpui::Modifiers {
@@ -597,6 +651,8 @@ impl Render for Preview {
                     && matches!(event.keystroke.key.as_str(), "=" | "+")
                 {
                     this.zoom_in(cx);
+                } else {
+                    cx.propagate();
                 }
             }))
             .flex()
@@ -621,7 +677,9 @@ impl Render for Preview {
                                     .px_3()
                                     .bg(rgb(0x545b65))
                                     .child("Open PDF")
-                                    .on_click(cx.listener(|this, _, _, cx| this.open_dialog(cx))),
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(OpenPdf), cx);
+                                    }),
                             )
                             .child(
                                 div()
@@ -734,6 +792,56 @@ impl Render for Preview {
                         content.into_any_element()
                     }),
             )
+            .when_some(self.palette.clone(), |reader, palette| {
+                let owner = cx.weak_entity();
+                reader
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .bg(gpui::rgba(0x00000080))
+                            .on_mouse_down(gpui::MouseButton::Left, {
+                                let owner = owner.clone();
+                                move |_, window, cx| {
+                                    let _ = owner.update(cx, |reader, cx| {
+                                        reader.dismiss_palette(window, cx)
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div().w(px(380.0)).child(
+                                    Command::new(&palette)
+                                        .placeholder("Search actions…")
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Open PDF")
+                                                .action(Box::new(OpenPdf)),
+                                        )
+                                        .on_confirm({
+                                            let owner = owner.clone();
+                                            move |_, window, cx| {
+                                                let _ = owner.update(cx, |reader, cx| {
+                                                    reader.dismiss_palette(window, cx)
+                                                });
+                                            }
+                                        })
+                                        .on_cancel(move |window, cx| {
+                                            let _ = owner.update(cx, |reader, cx| {
+                                                reader.dismiss_palette(window, cx)
+                                            });
+                                        }),
+                                ),
+                            ),
+                    )
+            })
     }
 }
 

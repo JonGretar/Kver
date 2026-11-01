@@ -7,8 +7,8 @@ use std::{
 };
 
 use gpui::{
-    App, Context, Entity, FocusHandle, KeyBinding, PathPromptOptions, RenderImage, ScrollHandle,
-    Window, div, img, point, prelude::*, px, rgb,
+    App, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, PathPromptOptions, RenderImage,
+    ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
     base::Disableable,
@@ -16,7 +16,10 @@ use gpui_kit::{
 };
 use image::{Frame, RgbaImage};
 
-use crate::pdf;
+use crate::{
+    coordinates::{PageViewport, Point},
+    pdf,
+};
 
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
@@ -32,7 +35,8 @@ gpui::actions!(
         ZoomIn,
         ZoomOut,
         FitWidth,
-        FitPage
+        FitPage,
+        Copy
     ]
 );
 
@@ -59,6 +63,7 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt--", ZoomOut, None),
         KeyBinding::new("cmd-alt-w", FitWidth, None),
         KeyBinding::new("cmd-alt-f", FitPage, None),
+        KeyBinding::new("cmd-c", Copy, Some("Reader")),
     ]);
 }
 
@@ -157,6 +162,58 @@ struct Bitmap {
     bytes: usize,
 }
 
+/// Boundary indices refer to glyphs on one line; points stay in PDF coordinates.
+#[derive(Clone, Copy)]
+struct TextAnchor {
+    page: usize,
+    boundary: usize,
+    document: Point,
+}
+
+#[derive(Clone, Copy)]
+struct TextSelection {
+    start: TextAnchor,
+    end: TextAnchor,
+}
+
+fn selected_range(selection: TextSelection) -> std::ops::Range<usize> {
+    selection.start.boundary.min(selection.end.boundary)
+        ..selection.start.boundary.max(selection.end.boundary)
+}
+
+fn selected_text(selection: TextSelection, text: &pdf::PageText) -> Option<String> {
+    let range = selected_range(selection);
+    let first = text.glyphs.get(range.start)?;
+    if range.is_empty()
+        || text
+            .glyphs
+            .get(range.end - 1)
+            .is_none_or(|last| (last.start.y - first.start.y).abs() > 3.0)
+    {
+        return None;
+    }
+    Some(
+        text.glyphs[range]
+            .iter()
+            .map(|glyph| glyph.text.as_str())
+            .collect(),
+    )
+}
+
+fn hit_boundary(text: &pdf::PageText, at: Point) -> Option<(usize, Point)> {
+    text.glyphs
+        .iter()
+        .enumerate()
+        .filter(|(_, glyph)| {
+            at.y >= glyph.bottom - 3.0
+                && at.y <= glyph.top + 3.0
+                && at.x >= glyph.start.x - 8.0
+                && at.x <= glyph.end.x + 8.0
+        })
+        .flat_map(|(index, glyph)| [(index, glyph.start), (index + 1, glyph.end)])
+        .min_by(|(_, a), (_, b)| (a.x - at.x).abs().total_cmp(&(b.x - at.x).abs()))
+}
+
 pub struct Preview {
     path: Option<PathBuf>,
     scale: f32,
@@ -168,6 +225,12 @@ pub struct Preview {
     // *current* viewport, rather than queued ahead of a later jump.
     in_flight: Option<(usize, u64)>,
     generation: u64,
+    document_generation: u64,
+    text: HashMap<usize, pdf::PageText>,
+    text_failed: std::collections::HashSet<usize>,
+    text_in_flight: Option<usize>,
+    selection: Option<TextSelection>,
+    dragging: bool,
     failed: Option<usize>,
     page_index: usize,
     // A deliberate page turn remains current even if the viewport also shows
@@ -192,6 +255,12 @@ impl Preview {
             images: HashMap::new(),
             in_flight: None,
             generation: 0,
+            document_generation: 0,
+            text: HashMap::new(),
+            text_failed: std::collections::HashSet::new(),
+            text_in_flight: None,
+            selection: None,
+            dragging: false,
             failed: None,
             page_index: 0,
             selected_page: None,
@@ -212,6 +281,12 @@ impl Preview {
     /// Replace the active document immediately, before any asynchronous work completes.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.generation += 1;
+        self.document_generation += 1;
+        self.text.clear();
+        self.text_failed.clear();
+        self.text_in_flight = None;
+        self.selection = None;
+        self.dragging = false;
         self.path = Some(path);
         self.scale = 1.0;
         self.zoom_mode = ZoomMode::Fixed;
@@ -384,6 +459,157 @@ impl Preview {
         self.images.values().map(|image| image.bytes).sum()
     }
 
+    pub fn selected_text(&self) -> Option<String> {
+        let selection = self.selection?;
+        self.text
+            .get(&selection.start.page)
+            .and_then(|page| selected_text(selection, page))
+    }
+
+    #[cfg(feature = "screenshot")]
+    pub fn text_screen_point(
+        &self,
+        page: usize,
+        glyph_index: usize,
+        fraction: f64,
+    ) -> Option<gpui::Point<gpui::Pixels>> {
+        let glyph = self.text.get(&page)?.glyphs.get(glyph_index)?;
+        let document = Point {
+            x: glyph.start.x + (glyph.end.x - glyph.start.x) * fraction,
+            y: glyph.start.y + (glyph.top - glyph.start.y) * 0.4,
+        };
+        let screen = self.page_viewport(page)?.document_to_screen(document);
+        Some(point(px(screen.x as f32), px(screen.y as f32)))
+    }
+
+    /// Measured scroll bounds and centered page layout define the window origin.
+    fn page_viewport(&self, index: usize) -> Option<PageViewport> {
+        let text = self.text.get(&index)?;
+        let bounds = self.scroll.bounds();
+        let width = self.pages.get(index)?.0 * self.scale;
+        let inner_width = (f32::from(bounds.size.width) - PAGE_PADDING * 2.0).max(0.0);
+        let origin = Point {
+            x: f32::from(bounds.origin.x) as f64
+                + PAGE_PADDING as f64
+                + ((inner_width - width).max(0.0) / 2.0) as f64,
+            y: f32::from(bounds.origin.y) as f64
+                + PAGE_PADDING as f64
+                + page_top(&self.pages, self.scale, index) as f64,
+        };
+        PageViewport::new(
+            text.transform,
+            self.scale as f64,
+            origin,
+            Point {
+                x: -f32::from(self.scroll.offset().x) as f64,
+                y: -f32::from(self.scroll.offset().y) as f64,
+            },
+        )
+    }
+
+    fn pointer_anchor(
+        &self,
+        page: usize,
+        position: gpui::Point<gpui::Pixels>,
+    ) -> Option<TextAnchor> {
+        let viewport = self.page_viewport(page)?;
+        let document = viewport.screen_to_document(Point {
+            x: f32::from(position.x) as f64,
+            y: f32::from(position.y) as f64,
+        })?;
+        let (boundary, document) = hit_boundary(self.text.get(&page)?, document)?;
+        Some(TextAnchor {
+            page,
+            boundary,
+            document,
+        })
+    }
+
+    fn start_selection(
+        &mut self,
+        page: usize,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.selection = self
+            .pointer_anchor(page, position)
+            .map(|anchor| TextSelection {
+                start: anchor,
+                end: anchor,
+            });
+        self.dragging = self.selection.is_some();
+        cx.notify();
+    }
+
+    fn extend_selection(&mut self, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        if !self.dragging {
+            return;
+        }
+        let Some(mut selection) = self.selection else {
+            return;
+        };
+        if let Some(anchor) = self.pointer_anchor(selection.start.page, position)
+            && (anchor.document.y - selection.start.document.y).abs() <= 3.0
+        {
+            selection.end = anchor;
+            self.selection = Some(selection);
+            cx.notify();
+        }
+    }
+
+    fn on_copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.selected_text() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    fn schedule_text(&mut self, cx: &mut Context<Self>) {
+        if self.pages.is_empty() || self.text_in_flight.is_some() {
+            return;
+        }
+        let (top, _, height) = self.viewport();
+        let mut visible = visible_range(&self.pages, self.scale, top, height);
+        self.text.retain(|index, _| {
+            visible.contains(index)
+                || self
+                    .selection
+                    .is_some_and(|selection| selection.start.page == *index)
+        });
+        let Some(index) = visible
+            .find(|index| !self.text.contains_key(index) && !self.text_failed.contains(index))
+        else {
+            return;
+        };
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        self.text_in_flight = Some(index);
+        let generation = self.document_generation;
+        let work = cx
+            .background_executor()
+            .spawn(async move { pdf::page_text(&path, index) });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.document_generation != generation {
+                    return;
+                }
+                this.text_in_flight = None;
+                match result {
+                    Ok(text) => {
+                        this.text.insert(index, text);
+                    }
+                    Err(_) => {
+                        this.text_failed.insert(index);
+                    }
+                }
+                this.schedule_text(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn viewport(&self) -> (f32, f32, f32) {
         let top = (-f32::from(self.scroll.offset().y)).max(0.0);
         let width = f32::from(self.scroll.bounds().size.width);
@@ -420,6 +646,7 @@ impl Preview {
         self.apply_fit(self.page_index, position, (width, height), anchor);
         self.last_viewport = self.viewport();
         self.schedule(cx);
+        self.schedule_text(cx);
         cx.notify();
     }
 
@@ -643,22 +870,63 @@ impl Render for Preview {
             let page_width = px(width * self.scale);
             let page_height = px(page_height * self.scale);
             let image = self.images.get(&index).map(|bitmap| bitmap.image.clone());
+            let mut page = div()
+                .relative()
+                .w(page_width)
+                .h(page_height)
+                .flex_shrink_0()
+                .bg(rgb(0xffffff))
+                .when_some(image, |element, image| {
+                    element.child(img(image).size_full())
+                });
+            if let (Some(selection), Some(text)) = (self.selection, self.text.get(&index))
+                && selection.start.page == index
+                && selected_text(selection, text).is_some()
+            {
+                let glyphs = &text.glyphs[selected_range(selection)];
+                let first = &glyphs[0];
+                let last = &glyphs[glyphs.len() - 1];
+                let top = glyphs
+                    .iter()
+                    .map(|glyph| glyph.top)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let bottom = glyphs
+                    .iter()
+                    .map(|glyph| glyph.bottom)
+                    .fold(f64::INFINITY, f64::min);
+                let start = text.transform.document_to_page(first.start);
+                let end = text.transform.document_to_page(last.end);
+                let top = text.transform.document_to_page(Point {
+                    x: first.start.x,
+                    y: top,
+                });
+                let bottom = text.transform.document_to_page(Point {
+                    x: first.start.x,
+                    y: bottom,
+                });
+                page = page.child(
+                    div()
+                        .absolute()
+                        .left(px((start.x * self.scale as f64) as f32))
+                        .top(px((top.y.min(bottom.y) * self.scale as f64) as f32))
+                        .w(px(((end.x - start.x) * self.scale as f64) as f32))
+                        .h(px(((top.y - bottom.y).abs() * self.scale as f64) as f32))
+                        .bg(gpui::rgba(0x278acb70)),
+                );
+            }
+            page = page.on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                    this.start_selection(index, event.position, cx);
+                }),
+            );
             content = content.child(
                 div()
                     .w_full()
                     .min_w(page_width)
                     .flex()
                     .justify_center()
-                    .child(
-                        div()
-                            .w(page_width)
-                            .h(page_height)
-                            .flex_shrink_0()
-                            .bg(rgb(0xffffff))
-                            .when_some(image, |element, image| {
-                                element.child(img(image).size_full())
-                            }),
-                    )
+                    .child(page)
                     .mb(px(GAP)),
             );
         }
@@ -672,6 +940,11 @@ impl Render for Preview {
             })
             .on_action(cx.listener(Self::on_open_pdf))
             .on_action(cx.listener(Self::on_show_palette))
+            .on_action(cx.listener(Self::on_copy))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, _| this.dragging = false),
+            )
             .on_action(cx.listener(|this, _: &NextPage, _, cx| {
                 if !this.pages.is_empty() {
                     this.next_page(cx);
@@ -840,6 +1113,25 @@ impl Render for Preview {
                                             window.dispatch_action(Box::new(FitPage), cx);
                                         })
                                     }),
+                            )
+                            .child(
+                                div()
+                                    .id("copy-selection")
+                                    .when(self.selected_text().is_some(), |button| {
+                                        button.cursor_pointer()
+                                    })
+                                    .px_3()
+                                    .bg(rgb(if self.selected_text().is_some() {
+                                        0x545b65
+                                    } else {
+                                        0x41464e
+                                    }))
+                                    .child("Copy")
+                                    .when(self.selected_text().is_some(), |button| {
+                                        button.on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(Copy), cx);
+                                        })
+                                    }),
                             ),
                     )
                     .child(
@@ -866,6 +1158,18 @@ impl Render for Preview {
                     .overflow_y_scroll()
                     .overflow_x_scroll()
                     .track_scroll(&self.scroll)
+                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                        if event.pressed_button == Some(gpui::MouseButton::Left) {
+                            this.extend_selection(event.position, cx);
+                        }
+                    }))
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                            this.extend_selection(event.position, cx);
+                            this.dragging = false;
+                        }),
+                    )
                     .on_scroll(cx.listener(|this, _, _, cx| {
                         this.selected_page = None;
                         this.sync_viewport(cx);
@@ -950,6 +1254,12 @@ impl Render for Preview {
                                                 .label("Fit Page")
                                                 .action(Box::new(FitPage))
                                                 .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Copy")
+                                                .action(Box::new(Copy))
+                                                .disabled(self.selected_text().is_none()),
                                         )
                                         .on_confirm({
                                             let owner = owner.clone();

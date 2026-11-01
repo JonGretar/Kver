@@ -66,11 +66,13 @@ reader window. macOS menu setup stays separate from reader operations.
 Reader navigation anchors use page-local PDF points, not screen pixels.
 `src/coordinates.rs` provides transforms between PDF document coordinates,
 cropped/rotated page-local coordinates, and the viewport; the rendered bitmap
-is only a display representation. This boundary supports future positioned
-text, selection overlays, search, and a visual ruler without storing
-pixel-based anchors. Text extraction and line grouping are not yet reader
-capabilities; when added, extraction belongs behind the PDF adapter and off
-the UI thread.
+is only a display representation. The PDF adapter collects positioned glyphs
+on a background worker for visible pages. The reader keeps one-line selection
+anchors in document coordinates and projects its transient highlight through
+the page transform at the current zoom, independently of the raster cache.
+Changing documents invalidates pending text work and clears selection. More
+general line grouping, rotated/cropped text selection, and scans are separate
+follow-ups.
 
 ## Future state
 

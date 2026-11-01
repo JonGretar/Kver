@@ -63,10 +63,9 @@ File → Open PDF dispatches the same window-local `OpenPdf` Action; the
 application-wide `Quit` Action shuts down GPUI rather than just closing one
 reader window. File → New Window creates an independent empty reader; Window →
 Next Window and Previous Window cycle focus in either direction. These commands
-use the same reader Actions as shortcuts
-and the palette; only the focused window handles a window command. Closing a
-window does not quit while other readers remain open. macOS menu setup stays
-separate from reader operations.
+use the same reader Actions as shortcuts and the palette; only the focused
+window handles a window command. Closing a window does not quit while other
+readers remain open. macOS menu setup stays separate from reader operations.
 
 ## Document coordinates
 

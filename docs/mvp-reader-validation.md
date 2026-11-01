@@ -1,12 +1,13 @@
 # MVP reader validation (#17)
 
-**Release decision: not yet ready for a download.** Release-mode headless Metal checks
-on an Apple M4 (macOS 27.0.1, 2× display density) found a short-final-page
-navigation failure, tracked as [#31](https://github.com/JonGretar/Kver/issues/31)
-and blocking release [#18](https://github.com/JonGretar/Kver/issues/18).
-The full release-candidate Mac-window check in #18 has **not** been completed.
-The fix has passed headless checks and a targeted native-window recheck;
-these results do not certify a downloadable app.
+**Release decision: the local candidate has been checked, but no download has
+been verified.** Release-mode headless Metal checks on an Apple M4
+(macOS 27.0.1, 2× display density) found a short-final-page navigation failure,
+tracked and fixed in [#31](https://github.com/JonGretar/Kver/issues/31).
+The fix passed headless checks and a targeted native-window recheck. The
+subsequent local release-candidate window check is recorded below; a
+downloaded GitHub Release remains to be checked in
+[#18](https://github.com/JonGretar/Kver/issues/18).
 
 **Partial native-window report (Jón Grétar):** While opening and scrolling
 `cropped-rotated-scaled.pdf` in either fit mode, the page flickered and moved
@@ -97,11 +98,34 @@ exercised by this test. On this Mac `sh scripts/build-macos-app.sh` built
 `target/release/Kver.app` with an arm64 Mach-O, but building a bundle is not
 evidence that its visible window works.
 
-## Remaining release-window interaction check (#18)
+## Local release-candidate window check (#18)
 
-On an Apple silicon Mac with a display, launch the locally built app without
-arguments with `open -n -a "$PWD/target/release/Kver.app"`; do not infer
-success from `open` returning alone. In the visible window:
+On 2026-11-01, `sh scripts/package-macos-app.sh` built and inspected the
+local `Kver-v0.1.0-macos-arm64.zip` on an Apple M4 (Mac16,1,
+macOS 27.0.1). The extracted archive contained version 0.1.0, an arm64
+executable and the app icon. The release metadata validator accepted
+`v0.1.0`; `cargo +stable test --locked --all-targets --features screenshot`,
+clippy and fmt passed on this Mac. The local archive SHA-256 was
+`d3b0382b676a33ac40af60c5f48986845689b9839f2852dfec87e7511dc7452a`.
+
+The agent launched the **locally built** bundle without a PDF path using
+`open -n -a "$PWD/target/release/Kver.app"` and confirmed the app process
+started. Jón Grétar reviewed the visible window and reported that the
+requested checks worked as expected: opening an ordinary PDF through
+**Open PDF**, page navigation, scrolling, zoom, fit modes and resizing,
+with no reported responsiveness issue. This is a user-reported interaction
+check, not an automated measurement. The document name, page count, invalid
+PDF handling, sustained memory, and a fresh native check of the rotated
+fixture were not recorded during this candidate review; the earlier
+representative-PDF and #31 evidence above remains separate.
+
+## Downloaded release check still needed (#18)
+
+After the separately authorized tag build publishes the GitHub Release,
+download its archive on an Apple silicon Mac. Inspect the extracted version,
+architecture and icon, and record any Gatekeeper prompt or override used.
+Launch the downloaded app without arguments and check its visible window;
+`open` returning alone is not evidence of working input. In the window:
 
 1. Use **Open PDF** to choose the RFC and confirm the page content appears.
    Open an invalid `.pdf` and a valid PDF again; record the visible error and
@@ -115,5 +139,6 @@ success from `open` returning alone. In the visible window:
    Some annotation appearances are known to be misplaced on this fixture.
 4. Record Mac model, macOS version, display density, documents/pages checked,
    any pauses and approximate process-memory behavior after repeated scrolling.
-   Report observations separately from headless results. Repeat any pre-fix
-   observations against the landed candidate before using them as release evidence.
+   Report observations separately from headless and local-candidate results.
+   Repeat any pre-fix observations against the downloaded app before using
+   them as release evidence.

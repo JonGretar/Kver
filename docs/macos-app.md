@@ -25,7 +25,8 @@ For a versioned Apple silicon archive, run `sh scripts/package-macos-app.sh`
 on an Apple silicon Mac. It builds the same app, checks the bundle version
 against `Cargo.toml` and the executable's `arm64` architecture, then extracts
 and checks `target/release/Kver-vX.Y.Z-macos-arm64.zip`. It does not upload
-or publish anything. The macOS PR CI job runs this same packaging path.
+or publish anything. The tag-only release job runs this same packaging path;
+routine macOS PR CI is paused while the repository is private.
 
 ## Download an unsigned release
 
@@ -95,12 +96,13 @@ file target/release/Kver.app/Contents/MacOS/kver
 ls -l target/release/Kver.app/Contents/Resources/kver.icns
 ```
 
-The [macOS CI job](../.github/workflows/ci.yml) builds the same archive and checks
-its plist, executable architecture, and icon. On a local Apple silicon Mac, the build
-completed, `open` launched the bundled executable with the sample PDF, and
-macOS reported an on-screen window. The local user confirmed the app worked
-and the icon appeared. CI's structural checks do not replace this visual check
-or verify behavior on other Macs.
+The [tag-only release job](../.github/workflows/release.yml) builds the same
+archive and checks its plist, executable architecture, and icon; routine macOS
+PR CI is paused while the repository is private. On a local Apple silicon Mac,
+an earlier bundle build completed, `open` launched the bundled executable with
+the sample PDF, and macOS reported an on-screen window. The local user
+confirmed the app worked and the icon appeared. These earlier checks do not
+replace the release-candidate window check or verify behavior on other Macs.
 
 ## Troubleshooting and macOS security
 

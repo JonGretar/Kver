@@ -2,213 +2,80 @@
 
 ## Overview
 
-Kver is a native PDF reader in Rust using GPUI. Its continuous-scroll
-prototype renders with Hayro, the chosen initial backend. Revisit the choice
-if a concrete rendering or text-geometry limitation warrants it.
-macOS is the first delivery target; Linux and Windows are separate targets.
+Kver is a native Rust PDF reader built with GPUI and GPUI Kit. Hayro is the
+initial PDF backend; a concrete rendering or text-geometry gap would justify
+reconsidering it. The downloadable app targets Apple silicon macOS.
+Linux and Windows have separate delivery gates.
 
-The application separates PDF processing, document navigation, rendering orchestration, and UI components.
+The reader keeps PDF processing behind an internal adapter and schedules
+expensive work off the UI thread. Navigation state and page positions do not
+depend on the PDF engine or physical keybindings.
 
-The primary architectural goal is to support a responsive reading experience without tightly coupling the application to a particular PDF engine.
+## Application boundaries
 
-## Stack
+`src/main.rs` initializes GPUI Kit, keybindings, and the reader window.
+`src/reader.rs` owns the viewport, document identity, navigation state,
+render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
+it returns page dimensions, page geometry, and premultiplied BGRA pixels,
+not Hayro types, to the reader. The adapter currently reads and parses the
+document for each raster request. Reusing a parsed document or prefetching
+pages should be driven by measurements, not a new worker architecture upfront.
+See the [rendering validation](rendering-validation.md) for the backend choice
+and accepted limitations.
 
-| Component             | Technology |
-| --------------------- | ---------- |
-| Language              | Rust       |
-| UI framework          | GPUI       |
-| PDF backend           | Hayro      |
-| Planned persistence   | SQLite     |
-| Planned configuration | TOML       |
+### Rendering and navigation
 
-### GPUI and rendering
+The reader loads page dimensions in background work, then lays out the full
+document with spacers around visible pages. It selects one raster job at a
+time from the current viewport rather than queueing work that a scroll or
+zoom might make obsolete. Old-document, old-scale, and offscreen results are
+discarded. Only visible bitmaps are retained, within a 128 MiB budget;
+offscreen pages remain placeholders. Rasterization accounts for display
+density and passes pixels directly to GPUI without a PNG round trip.
 
-The prototype uses `gpui-pre` with its matching platform crate. The optional
-`screenshot` feature enables headless test support; normal GUI builds omit it.
-`tests/visual.rs` runs on the process main thread for macOS Metal and checks
-the reader's asynchronous rendering. It does not verify pointer hit-testing.
+The reader preserves a page-local position in PDF points across zoom and
+viewport changes. Fixed zoom, fit width, and fit page use one scale for
+continuous layout. Fit modes recompute from the current page and measured
+scroll viewport on navigation or resize; manual zoom returns to fixed mode.
+Scale changes invalidate obsolete bitmaps before new background renders
+complete, without waiting on the UI thread.
 
-The prototype loads page dimensions once in background work and lays out the
-whole document with spacer elements around the visible pages. It rasterizes one
-visible page at a time on the background executor, selecting the next job from
-the *current* viewport rather than filling a queue that can become obsolete.
-Results from an old zoom or an offscreen page are discarded. Only visible
-bitmaps are retained, subject to a 128 MiB budget; offscreen pages remain
-placeholders. The UI receives premultiplied BGRA pixels directly rather than
-encoding/decoding PNG. Zoom preserves the page-local reading position in PDF
-points. Fixed zoom and fit-width/fit-page share one scale for continuous layout;
-fit modes recalculate from the current page's dimensions and the measured scroll
-viewport on navigation and window resize. Manual zoom exits fit mode. A scale
-change invalidates obsolete bitmaps before background rendering, without waiting
-on the UI thread. The adapter currently reparses the PDF for each raster request; a
-parsed-document worker and prefetch are deferred until measurements justify them.
+### Actions, palette, and menu
 
-## Boundaries
+Open PDF, page turns, zoom, and fit modes are GPUI Actions handled by the
+active reader window. Toolbar controls, keybindings, and GPUI Kit's command
+palette dispatch those same Actions; reader methods own the underlying
+navigation and loading behavior. The reader owns the file picker and ignores
+obsolete asynchronous load results, so entry points share error handling.
+Document-dependent Actions are unavailable in an empty, loading, or error
+window; each reader checks its own document state.
 
-The GPUI viewport handles interaction and display; reader actions remain
-separate from physical keybindings. Background work obtains page geometry and
-rasters from the PDF adapter. The UI receives backend-independent page
-geometry and pixels rather than Hayro types. Preserve document coordinates
-for future marks, text overlays, and reading positions.
+The palette is an inline overlay owned by the reader. This keeps the reader
+in its Action dispatch path rather than relying on a global handler that
+could affect another window. GPUI Kit resolves shortcut hints from active
+keybindings. Bare reading keys apply only while the reader has focus; text
+entry in the palette does not navigate the PDF.
 
-### First reader action and palette (#34)
+On macOS, `src/app_menu.rs` installs native Kver and File menus at startup.
+File → Open PDF dispatches the same window-local `OpenPdf` Action; the
+application-wide `Quit` Action shuts down GPUI rather than just closing one
+reader window. macOS menu setup stays separate from reader operations.
 
-GPUI Kit 0.8.1 uses the same `gpui-pre` 0.3.10 snapshot as Kver. The
-`screenshot` feature enables Kit's matching test support; the application
-initializes Kit and registers its assets once before opening the reader.
-For now, the reader owns one searchable `CommandState` while its palette is
-visible, and renders `Command` inside its own action dispatch path. Its Open
-PDF item carries the actual `OpenPdf` Action: Kit resolves the active binding
-hint and dispatches the same Action as the toolbar and shortcut. The reader
-owns the existing file-picker and document-loading flow, so entry points
-cannot diverge on errors or stale asynchronous loads.
+## Document coordinates
 
-The palette is an inline overlay instead of a new dialog/window: it keeps the
-reader as the Action handler's ancestor, without introducing a global handler
-that could target the wrong window. This slice does not reorganize navigation
-or add an app-wide palette registry; later reader Actions can extend the same
-palette as their operations become available. The root key handler yields
-unhandled input (and all keys while the palette is open) so search text and
-Kit's Enter/Escape handling reach the focused palette. Headless tests exercise
-these routes and rendering; they do not prove the native macOS picker or focus.
+Reader navigation anchors use page-local PDF points, not screen pixels.
+`src/coordinates.rs` provides transforms between PDF document coordinates,
+cropped/rotated page-local coordinates, and the viewport; the rendered bitmap
+is only a display representation. This boundary supports future positioned
+text, selection overlays, search, and a visual ruler without storing
+pixel-based anchors. Text extraction and line grouping are not yet reader
+capabilities; when added, extraction belongs behind the PDF adapter and off
+the UI thread.
 
-### Reading Actions (#35)
+## Future state
 
-Page turns, zoom, and fit modes now enter through window-local GPUI Actions;
-the existing reader methods remain the single source of navigation and scaling
-behavior. Toolbar controls dispatch those Actions, while the palette renders
-Kit `CommandItem`s carrying the same Actions and resolves their shortcut hints
-from the active keymap. Bare reading keys are scoped to the reader only while
-the palette is closed, so typing search terms does not turn pages or zoom.
-Modified shortcuts remain active in the palette and supply its resolved hints.
-Each reader checks its own loaded pages before handling a document Action;
-loading, empty, and error windows disable the corresponding controls and
-palette rows, leaving other windows untouched.
-
-Apple silicon real-window check: Jón Grétar confirmed that the
-`issue-35-reader-actions` branch worked as expected when asked to check
-toolbar/keyboard page, zoom, and fit parity; palette search, shortcut hints,
-typing without invoking reader commands, and focus after confirmation or
-Escape; and unavailable reading commands in empty and error windows. The
-specific Mac model and macOS version were not reported. Headless Metal tests
-alone do not establish native focus and input behavior.
-
-### macOS application menu (#36)
-
-`app_menu` installs GPUI's native Kver and File menus only in the macOS
-application startup path. The File menu holds the same `OpenPdf` Action as
-the reader control, shortcut, and palette. GPUI dispatches menu actions into
-the active window's focused element; the reader's existing window-local
-handler owns the picker, error reporting, and obsolete-load invalidation.
-The global `Quit` Action calls GPUI's application shutdown instead of
-closing only the focused reader window. Command-O and Command-Q are
-registered in the keymap before the menu is constructed so GPUI supplies
-the menu's native shortcut labels. This does not add window switching or
-platform-specific code to reader operations.
-
-## PDF Backend
-
-### Current and future needs
-
-The backend boundary currently covers page dimensions, geometry, and rasterization.
-Later reader features will also need:
-
-- Positioned text extraction
-- Link extraction
-- Document outlines
-
-Positioned text extraction is especially important for text selection, searching, and the visual ruler.
-
-### Current backend
-
-`src/pdf.rs` isolates Hayro from the UI. It supplies page dimensions and
-rendered pixels for requested pages; the viewport displays visible pages and
-discards obsolete render results. Hayro avoids a separate native PDF library.
-PDFium (`pdfium-render`) is a comparator if a significant gap appears, not the
-current implementation. See the [validation record](rendering-validation.md)
-for the decision, evidence, and accepted limitations.
-
-## Rendering Pipeline
-
-The application should use virtualized page rendering.
-
-Only pages within or near the visible viewport should be rendered.
-
-Conceptual flow:
-
-1. Determine visible page regions.
-2. Request matching render operations.
-3. Prioritize visible pages.
-4. Render asynchronously.
-5. Cache completed page images.
-6. Upload/display page images through GPUI.
-7. Evict old cache entries as appropriate.
-
-### Cache and zoom
-
-Keep retained bitmaps bounded and invalidate results when the document,
-viewport, or scale changes. Rasterize at the requested display density off
-the UI thread; preserve a page-local reading position through zoom.
-
-## Coordinate Systems
-
-The application must distinguish between:
-
-1. PDF/document coordinates
-2. Page-local viewport coordinates
-3. Window/screen coordinates
-
-Coordinate conversion should be centralized and tested.
-
-Persistent positions must be expressed in document coordinates.
-
-Be aware that PDF pages may have rotations, crop boxes, and non-default page origins.
-
-## Document State
-
-Keep the document identity, page-local reading position, and zoom state
-independent of window dimensions. Add history, marks, search, and ruler state
-when those features are implemented.
-
-## Navigation
-
-Keep navigation actions separate from input handling. Scrolling, page
-movement, and zoom can be triggered by keyboard or UI controls without
-changing the PDF backend. Later command parsing and configurable bindings
-belong at the input boundary, not inside reader actions.
-
-## Visual Ruler
-
-The ruler is a later goal, not an MVP gate. Keep positioned text and
-document-space coordinates available for line-based movement; scanned PDFs
-need a positional fallback. Render the guide as a GPUI overlay so movement
-does not rerasterize a page. Grouping text into reading-order lines,
-especially across columns, remains an open problem.
-
-## Persistence
-
-SQLite is proposed for:
-
-- Recently opened documents
-- Reading positions
-- Marks
-- Navigation metadata
-- Future bookmarks and highlights
-
-Use TOML for user-editable settings and keybindings.
-
-Database schema design is deferred until the persistence layer is implemented.
-
-## Cross-Platform Support
-
-The first downloadable MVP targets macOS; Linux and Windows have separate
-delivery gates. Keep platform-specific file dialogs, menus, window behavior,
-and packaging out of core document and navigation code.
-
-## Open Questions
-
-- What are the practical cross-platform limitations of GPUI?
-- How should PDF rendering workers be managed?
-- What text-line grouping strategy works best?
-- Should PDF annotations eventually be written into PDFs or stored separately?
-- What licensing model should Kver use?
+The reader currently has no persistence layer. SQLite is planned for
+reading state and TOML for user-editable configuration, but neither has a
+schema or implementation yet. Platform-specific menus, dialogs, and
+packaging belong at the application boundary; the PDF and navigation
+behavior should remain portable.

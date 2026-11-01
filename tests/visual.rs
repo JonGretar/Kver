@@ -6,10 +6,11 @@
 
 use gpui::{
     AnyWindowHandle, AppContext as _, AsKeystroke as _, HeadlessAppContext, InputEvent as _,
-    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, OwnedMenuItem,
+    Pixels, Point, ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
 };
-use kver::reader::{Preview, ZoomIn, ZoomMode, bind_reader_keys};
+use kver::app_menu::{self, Quit};
+use kver::reader::{OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -1199,6 +1200,94 @@ fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Native menus call App::dispatch_action, which routes to the active window.
+/// The headless platform stores menu Actions but its picker always cancels.
+fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+        app_menu::install(app);
+    });
+    let (open, quit) = cx.update(|app| {
+        let menus = app.get_menus().unwrap();
+        assert_eq!(menus.len(), 2);
+        assert_eq!(menus[0].name.as_ref(), "Kver");
+        assert_eq!(menus[1].name.as_ref(), "File");
+        let OwnedMenuItem::Action {
+            name, action: quit, ..
+        } = &menus[0].items[0]
+        else {
+            panic!("Quit menu item is not an Action")
+        };
+        assert_eq!(name, "Quit Kver");
+        assert!(quit.as_any().is::<Quit>());
+        let OwnedMenuItem::Action {
+            name, action: open, ..
+        } = &menus[1].items[0]
+        else {
+            panic!("Open PDF menu item is not an Action")
+        };
+        assert_eq!(name, "Open PDF…");
+        assert!(open.as_any().is::<OpenPdf>());
+        (open.boxed_clone(), quit.boxed_clone())
+    });
+    let first = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    let second = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    cx.capture_screenshot(first.into())?;
+    cx.capture_screenshot(second.into())?;
+    cx.update_window(first.into(), |_, window, _| window.activate_window())?;
+    cx.update(|app| {
+        assert_eq!(app.active_window(), Some(first.into()));
+        app.dispatch_action(open.as_ref());
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().status().to_owned()),
+        "Open a PDF to start reading"
+    ); // Headless picker cancels.
+    assert_eq!(
+        cx.update(|app| second.read(app).unwrap().status().to_owned()),
+        "Open a PDF to start reading"
+    );
+    cx.update_window(second.into(), |_, window, _| window.activate_window())?;
+    cx.update(|app| {
+        assert_eq!(app.active_window(), Some(second.into()));
+        app.dispatch_action(open.as_ref());
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| second.read(app).unwrap().status().to_owned()),
+        "Open a PDF to start reading"
+    );
+    assert_eq!(cx.update(|app| first.read(app).unwrap().page_count()), None);
+    assert_eq!(
+        cx.update(|app| second.read(app).unwrap().page_count()),
+        None
+    );
+    assert!(cx.update_window(first.into(), |_, window, _| {
+        window
+            .highest_precedence_binding_for_action(&OpenPdf)
+            .is_some()
+    })?);
+    assert!(cx.update_window(second.into(), |_, window, _| {
+        window
+            .highest_precedence_binding_for_action(&Quit)
+            .is_some()
+    })?);
+    cx.update(|app| app.dispatch_action(quit.as_ref()));
+    cx.run_until_parked();
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
@@ -1211,5 +1300,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     opening_from_empty_window_and_replacing_documents()?;
     open_pdf_palette_in_empty_window()?;
     shared_reader_actions()?;
+    menu_open_action_targets_window()?;
     long_path_keeps_toolbar_clickable()
 }

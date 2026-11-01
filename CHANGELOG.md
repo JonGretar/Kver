@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Open a PDF from a searchable command palette with a visible shortcut hint, or use Command-O and the existing reader control.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added

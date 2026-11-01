@@ -18,7 +18,7 @@ use image::{Frame, RgbaImage};
 
 use crate::{
     pdf,
-    reader_windows::{self, NewWindow, NextWindow},
+    reader_windows::{self, NewWindow, NextWindow, PreviousWindow},
 };
 
 const GAP: f32 = 16.0;
@@ -46,6 +46,7 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-o", OpenPdf, None),
         KeyBinding::new("cmd-n", NewWindow, None),
         KeyBinding::new("cmd-`", NextWindow, None),
+        KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
@@ -682,7 +683,10 @@ impl Render for Preview {
                 }
             }))
             .on_action(cx.listener(|_, _: &NextWindow, window, cx| {
-                reader_windows::next(window, cx);
+                reader_windows::cycle(window, cx, 1);
+            }))
+            .on_action(cx.listener(|_, _: &PreviousWindow, window, cx| {
+                reader_windows::cycle(window, cx, -1);
             }))
             .on_action(cx.listener(Self::on_show_palette))
             .on_action(cx.listener(|this, _: &NextPage, _, cx| {
@@ -937,6 +941,12 @@ impl Render for Preview {
                                             CommandItem::new()
                                                 .label("Next Window")
                                                 .action(Box::new(NextWindow))
+                                                .disabled(cx.windows().len() < 2),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Previous Window")
+                                                .action(Box::new(PreviousWindow))
                                                 .disabled(cx.windows().len() < 2),
                                         )
                                         .item(

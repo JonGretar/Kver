@@ -61,7 +61,9 @@ entry in the palette does not navigate the PDF.
 On macOS, `src/app_menu.rs` installs native Kver, File, and Window menus at startup.
 File → Open PDF dispatches the same window-local `OpenPdf` Action; the
 application-wide `Quit` Action shuts down GPUI rather than just closing one
-reader window. Window menu commands use the same reader Actions as shortcuts
+reader window. File → New Window creates an independent empty reader; Window →
+Next Window and Previous Window cycle focus in either direction. These commands
+use the same reader Actions as shortcuts
 and the palette; only the focused window handles a window command. Closing a
 window does not quit while other readers remain open. macOS menu setup stays
 separate from reader operations.

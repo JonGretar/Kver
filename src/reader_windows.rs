@@ -6,7 +6,7 @@ use gpui::{App, AppContext as _, Bounds, Window, WindowBounds, WindowOptions, px
 
 use crate::reader::Preview;
 
-gpui::actions!(kver, [NewWindow, NextWindow]);
+gpui::actions!(kver, [NewWindow, NextWindow, PreviousWindow]);
 
 pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<(), String> {
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
@@ -25,7 +25,8 @@ pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
-pub fn next(window: &mut Window, cx: &mut App) {
+/// Cycle in stable window order, wrapping in either direction.
+pub fn cycle(window: &mut Window, cx: &mut App, step: isize) {
     let windows = cx.windows();
     let Some(index) = windows
         .iter()
@@ -36,8 +37,8 @@ pub fn next(window: &mut Window, cx: &mut App) {
     if windows.len() < 2 {
         return;
     }
-    let next = windows[(index + 1) % windows.len()];
-    if let Err(error) = cx.update_window(next, |_, window, _| window.activate_window()) {
-        eprintln!("Cannot activate next window: {error}");
+    let destination = windows[(index as isize + step).rem_euclid(windows.len() as isize) as usize];
+    if let Err(error) = cx.update_window(destination, |_, window, _| window.activate_window()) {
+        eprintln!("Cannot activate window: {error}");
     }
 }

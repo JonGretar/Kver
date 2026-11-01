@@ -11,7 +11,7 @@ use gpui::{
 };
 use kver::app_menu::{self, Quit};
 use kver::reader::{OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
-use kver::reader_windows::{NewWindow, NextWindow};
+use kver::reader_windows::{NewWindow, NextWindow, PreviousWindow};
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -1220,8 +1220,9 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(menus[0].name.as_ref(), "Kver");
         assert_eq!(menus[1].name.as_ref(), "File");
         assert_eq!(menus[2].name.as_ref(), "Window");
-        assert!(matches!(&menus[2].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
-        assert!(matches!(&menus[2].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
+        assert!(matches!(&menus[1].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
+        assert!(matches!(&menus[2].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
+        assert!(matches!(&menus[2].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));
         let OwnedMenuItem::Action {
             name, action: quit, ..
         } = &menus[0].items[0]
@@ -1232,7 +1233,7 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
         assert!(quit.as_any().is::<Quit>());
         let OwnedMenuItem::Action {
             name, action: open, ..
-        } = &menus[1].items[0]
+        } = &menus[1].items[1]
         else {
             panic!("Open PDF menu item is not an Action")
         };
@@ -1325,6 +1326,7 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     });
     // No next window: cycling cannot affect the current document.
     press_key(&mut cx, first, "cmd-`")?;
+    press_key(&mut cx, first, "cmd-shift-`")?;
     assert_eq!(cx.update(|app| app.windows().len()), 1);
     press_key(&mut cx, first, "cmd-n")?;
     cx.run_until_parked();
@@ -1367,7 +1369,7 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     // second window active, and verify focus changes rather than document state.
     let menu_next = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        let OwnedMenuItem::Action { action, .. } = &menus[2].items[1] else {
+        let OwnedMenuItem::Action { action, .. } = &menus[2].items[0] else {
             panic!("missing Next Window")
         };
         action.boxed_clone()
@@ -1376,6 +1378,17 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     cx.update(|app| app.dispatch_action(menu_next.as_ref()));
     assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
     press_key(&mut cx, first, "cmd-`")?;
+    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
+    press_key(&mut cx, second, "cmd-shift-`")?;
+    assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
+    let menu_previous = cx.update(|app| {
+        let menus = app.get_menus().unwrap();
+        let OwnedMenuItem::Action { action, .. } = &menus[2].items[1] else {
+            panic!("missing Previous Window")
+        };
+        action.boxed_clone()
+    });
+    cx.update(|app| app.dispatch_action(menu_previous.as_ref()));
     assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
     press_key(&mut cx, second, "cmd-shift-p")?;
     cx.run_until_parked();
@@ -1397,6 +1410,25 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
         first_state.1
     );
     assert_eq!(cx.update(|app| second.read(app).unwrap().page_index()), 1);
+    press_key(&mut cx, first, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, first, "previous window")?;
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    assert!(cx.update_window(first.into(), |_, window, _| {
+        window
+            .highest_precedence_binding_for_action(&PreviousWindow)
+            .is_some()
+    })?);
+    press_key(&mut cx, first, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
+    assert_eq!(
+        cx.update(|app| first.read(app).unwrap().page_index()),
+        first_state.1
+    );
 
     cx.update_window(second.into(), |_, window, _| window.remove_window())?;
     cx.run_until_parked();
@@ -1432,7 +1464,7 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     );
     let menu_new = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        let OwnedMenuItem::Action { action, .. } = &menus[2].items[0] else {
+        let OwnedMenuItem::Action { action, .. } = &menus[1].items[0] else {
             panic!("missing New Window")
         };
         action.boxed_clone()
@@ -1440,6 +1472,14 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     cx.update(|app| app.dispatch_action(menu_new.as_ref()));
     cx.run_until_parked();
     assert_eq!(cx.update(|app| app.windows().len()), 3);
+    let third = cx.update(|app| app.active_window().unwrap());
+    assert_ne!(third, palette_window);
+    cx.update_window(first.into(), |_, window, _| window.activate_window())?;
+    press_key(&mut cx, first, "cmd-shift-`")?;
+    assert_eq!(cx.update(|app| app.active_window()), Some(third));
+    cx.update_window(first.into(), |_, window, _| window.activate_window())?;
+    press_key(&mut cx, first, "cmd-`")?;
+    assert_eq!(cx.update(|app| app.active_window()), Some(palette_window));
     assert_eq!(
         cx.update(|app| first.read(app).unwrap().page_index()),
         first_state.1 + 1
@@ -1449,10 +1489,10 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    independent_reader_windows()?;
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }
+    independent_reader_windows()?;
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
     fit_modes_follow_page_and_window()?;
     fit_page_transition_is_stable()?;

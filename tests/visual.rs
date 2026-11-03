@@ -1488,6 +1488,159 @@ fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn multi_line_selection_survives_zoom_and_scroll() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let window = cx.open_window(size(px(920.0), px(720.0)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/selection-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
+    for (zoom, scroll) in [(1.0, 0.0), (1.25, 0.0), (1.25, 55.0)] {
+        if zoom > cx.update(|app| window.read(app).unwrap().scale()) {
+            window.update(&mut cx, |reader, _, cx| reader.zoom_in(cx))?;
+            wait_for_page(&mut cx, &window, "Page 1 of 1 · 125%")?;
+        }
+        if scroll > 0.0 {
+            window.update(&mut cx, |reader, _, cx| reader.scroll_by(scroll, cx))?;
+        }
+        if zoom > 1.0 {
+            assert_eq!(
+                cx.update(|app| window.read(app).unwrap().selected_text()),
+                Some("café world\nSecond naïve".into()),
+                "zooming or scrolling must not change the document-space selection"
+            );
+        }
+        click(&mut cx, window.into(), point(px(160.0), px(300.0)))?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().selected_text()),
+            None
+        );
+        let before = cx.capture_screenshot(window.into())?;
+        let (start, end, first_line, second_line, third_line) = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (
+                reader.text_screen_point(0, 6, 0.1),
+                reader.text_screen_point(0, 27, 0.9),
+                reader.text_screen_point(0, 8, 0.5),
+                reader.text_screen_point(0, 20, 0.5),
+                reader.text_screen_point(0, 35, 0.5),
+            )
+        });
+        let (start, end) = (start.ok_or("start missing")?, end.ok_or("end missing")?);
+        cx.update_window(window.into(), |_, view, app| {
+            for input in [
+                MouseDownEvent {
+                    position: start,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    first_mouse: false,
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                MouseMoveEvent {
+                    position: end,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                MouseUpEvent {
+                    position: end,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+            ] {
+                view.dispatch_event(input, app);
+            }
+        })?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().selected_text()),
+            Some("café world\nSecond naïve".into())
+        );
+        let after = cx.capture_screenshot(window.into())?;
+        let density = after.width() as f32 / 920.0;
+        for (point, highlighted) in [
+            (first_line.unwrap(), true),
+            (second_line.unwrap(), true),
+            (third_line.unwrap(), false),
+        ] {
+            let x = (f32::from(point.x) * density) as u32;
+            let y = (f32::from(point.y) * density) as u32;
+            assert_eq!(
+                before.get_pixel(x, y) != after.get_pixel(x, y),
+                highlighted,
+                "overlay at {point:?} (zoom {zoom}, scroll {scroll})"
+            );
+        }
+        press_key(&mut cx, window, "cmd-c")?;
+        assert_eq!(
+            cx.update(|app| app.read_from_clipboard().unwrap().text()),
+            Some("café world\nSecond naïve".into())
+        );
+    }
+    // Reverse drag through a paragraph gap still copies in visible reading order.
+    let (start, end) = cx.update(|app| {
+        let reader = window.read(app).unwrap();
+        (
+            reader.text_screen_point(0, 39, 0.9).unwrap(),
+            reader.text_screen_point(0, 9, 0.9).unwrap(),
+        )
+    });
+    cx.capture_screenshot(window.into())?;
+    cx.update_window(window.into(), |_, view, app| {
+        view.dispatch_event(
+            MouseDownEvent {
+                position: start,
+                button: MouseButton::Left,
+                click_count: 1,
+                first_mouse: false,
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+        view.dispatch_event(
+            MouseMoveEvent {
+                position: end,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+        view.dispatch_event(
+            MouseUpEvent {
+                position: end,
+                button: MouseButton::Left,
+                click_count: 1,
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+    })?;
+    press_key(&mut cx, window, "cmd-c")?;
+    assert_eq!(
+        cx.update(|app| app.read_from_clipboard().unwrap().text()),
+        Some(" world\nSecond naïve line\n\nThird Þ".into())
+    );
+    Ok(())
+}
+
 fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
@@ -1697,6 +1850,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     open_pdf_palette_in_empty_window()?;
     shared_reader_actions()?;
     select_and_copy_ordinary_text()?;
+    multi_line_selection_survives_zoom_and_scroll()?;
     menu_open_action_targets_window()?;
     long_path_keeps_toolbar_clickable()
 }

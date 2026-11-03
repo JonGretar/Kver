@@ -166,12 +166,12 @@ struct Bitmap {
     bytes: usize,
 }
 
-/// Boundary indices refer to glyphs on one line; points stay in PDF coordinates.
+/// Boundary indices refer to visually ordered document-space glyphs, not pixels.
 #[derive(Clone, Copy)]
 struct TextAnchor {
     page: usize,
+    line: usize,
     boundary: usize,
-    document: Point,
 }
 
 #[derive(Clone, Copy)]
@@ -180,42 +180,73 @@ struct TextSelection {
     end: TextAnchor,
 }
 
-fn selected_range(selection: TextSelection) -> std::ops::Range<usize> {
-    selection.start.boundary.min(selection.end.boundary)
-        ..selection.start.boundary.max(selection.end.boundary)
+fn selected_ranges(selection: TextSelection, text: &pdf::PageText) -> Vec<std::ops::Range<usize>> {
+    let (start, end) = if (selection.start.line, selection.start.boundary)
+        <= (selection.end.line, selection.end.boundary)
+    {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    (start.line..=end.line)
+        .filter_map(|line| {
+            let range = text.lines.get(line)?;
+            let from = if line == start.line {
+                start.boundary
+            } else {
+                range.start
+            };
+            let to = if line == end.line {
+                end.boundary
+            } else {
+                range.end
+            };
+            (from < to && from >= range.start && to <= range.end).then_some(from..to)
+        })
+        .collect()
 }
 
 fn selected_text(selection: TextSelection, text: &pdf::PageText) -> Option<String> {
-    let range = selected_range(selection);
-    let first = text.glyphs.get(range.start)?;
-    if range.is_empty()
-        || text
-            .glyphs
-            .get(range.end - 1)
-            .is_none_or(|last| (last.start.y - first.start.y).abs() > 3.0)
-    {
-        return None;
+    let ranges = selected_ranges(selection, text);
+    let mut result = String::new();
+    let mut previous: Option<&pdf::TextGlyph> = None;
+    for range in ranges {
+        let first = text.glyphs.get(range.start)?;
+        if let Some(last) = previous {
+            result.push('\n');
+            let height = last.top - last.bottom;
+            if (last.start.y - first.start.y).abs() > height * 1.7 {
+                result.push('\n');
+            }
+        }
+        for glyph in &text.glyphs[range.clone()] {
+            result.push_str(&glyph.text);
+        }
+        previous = text.glyphs.get(range.end - 1);
     }
-    Some(
-        text.glyphs[range]
-            .iter()
-            .map(|glyph| glyph.text.as_str())
-            .collect(),
-    )
+    (!result.is_empty()).then_some(result)
 }
 
-fn hit_boundary(text: &pdf::PageText, at: Point) -> Option<(usize, Point)> {
-    text.glyphs
-        .iter()
-        .enumerate()
-        .filter(|(_, glyph)| {
-            at.y >= glyph.bottom - 3.0
-                && at.y <= glyph.top + 3.0
-                && at.x >= glyph.start.x - 8.0
-                && at.x <= glyph.end.x + 8.0
-        })
-        .flat_map(|(index, glyph)| [(index, glyph.start), (index + 1, glyph.end)])
-        .min_by(|(_, a), (_, b)| (a.x - at.x).abs().total_cmp(&(b.x - at.x).abs()))
+fn hit_boundary(text: &pdf::PageText, at: Point) -> Option<(usize, usize)> {
+    text.lines.iter().enumerate().find_map(|(line, range)| {
+        text.glyphs[range.clone()]
+            .iter()
+            .enumerate()
+            .filter(|(_, glyph)| {
+                at.y >= glyph.bottom - 3.0
+                    && at.y <= glyph.top + 3.0
+                    && at.x >= glyph.start.x - 8.0
+                    && at.x <= glyph.end.x + 8.0
+            })
+            .flat_map(|(offset, glyph)| {
+                [
+                    (line, range.start + offset, glyph.start),
+                    (line, range.start + offset + 1, glyph.end),
+                ]
+            })
+            .min_by(|(_, _, a), (_, _, b)| (a.x - at.x).abs().total_cmp(&(b.x - at.x).abs()))
+            .map(|(line, boundary, _)| (line, boundary))
+    })
 }
 
 pub struct Preview {
@@ -521,11 +552,11 @@ impl Preview {
             x: f32::from(position.x) as f64,
             y: f32::from(position.y) as f64,
         })?;
-        let (boundary, document) = hit_boundary(self.text.get(&page)?, document)?;
+        let (line, boundary) = hit_boundary(self.text.get(&page)?, document)?;
         Some(TextAnchor {
             page,
+            line,
             boundary,
-            document,
         })
     }
 
@@ -552,9 +583,7 @@ impl Preview {
         let Some(mut selection) = self.selection else {
             return;
         };
-        if let Some(anchor) = self.pointer_anchor(selection.start.page, position)
-            && (anchor.document.y - selection.start.document.y).abs() <= 3.0
-        {
+        if let Some(anchor) = self.pointer_anchor(selection.start.page, position) {
             selection.end = anchor;
             self.selection = Some(selection);
             cx.notify();
@@ -887,65 +916,67 @@ impl Render for Preview {
                 && selection.start.page == index
                 && selected_text(selection, text).is_some()
             {
-                let glyphs = &text.glyphs[selected_range(selection)];
-                let first = &glyphs[0];
-                let last = &glyphs[glyphs.len() - 1];
-                let top = glyphs
-                    .iter()
-                    .map(|glyph| glyph.top)
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let bottom = glyphs
-                    .iter()
-                    .map(|glyph| glyph.bottom)
-                    .fold(f64::INFINITY, f64::min);
-                let corners = [
-                    Point {
-                        x: first.start.x,
-                        y: top,
-                    },
-                    Point {
-                        x: last.end.x,
-                        y: top,
-                    },
-                    Point {
-                        x: first.start.x,
-                        y: bottom,
-                    },
-                    Point {
-                        x: last.end.x,
-                        y: bottom,
-                    },
-                ]
-                .map(|corner| text.transform.document_to_page(corner));
-                let left = corners
-                    .iter()
-                    .map(|point| point.x)
-                    .fold(f64::INFINITY, f64::min);
-                let right = corners
-                    .iter()
-                    .map(|point| point.x)
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let top = corners
-                    .iter()
-                    .map(|point| point.y)
-                    .fold(f64::INFINITY, f64::min);
-                let bottom = corners
-                    .iter()
-                    .map(|point| point.y)
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let left = left.clamp(0.0, width as f64);
-                let right = right.clamp(0.0, width as f64);
-                let top = top.clamp(0.0, self.pages[index].1 as f64);
-                let bottom = bottom.clamp(0.0, self.pages[index].1 as f64);
-                page = page.child(
-                    div()
-                        .absolute()
-                        .left(px((left * self.scale as f64) as f32))
-                        .top(px((top * self.scale as f64) as f32))
-                        .w(px(((right - left) * self.scale as f64) as f32))
-                        .h(px(((bottom - top) * self.scale as f64) as f32))
-                        .bg(gpui::rgba(0x278acb70)),
-                );
+                for range in selected_ranges(selection, text) {
+                    let glyphs = &text.glyphs[range];
+                    let first = &glyphs[0];
+                    let last = &glyphs[glyphs.len() - 1];
+                    let top = glyphs
+                        .iter()
+                        .map(|glyph| glyph.top)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let bottom = glyphs
+                        .iter()
+                        .map(|glyph| glyph.bottom)
+                        .fold(f64::INFINITY, f64::min);
+                    let corners = [
+                        Point {
+                            x: first.start.x,
+                            y: top,
+                        },
+                        Point {
+                            x: last.end.x,
+                            y: top,
+                        },
+                        Point {
+                            x: first.start.x,
+                            y: bottom,
+                        },
+                        Point {
+                            x: last.end.x,
+                            y: bottom,
+                        },
+                    ]
+                    .map(|corner| text.transform.document_to_page(corner));
+                    let left = corners
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f64::INFINITY, f64::min)
+                        .clamp(0.0, width as f64);
+                    let right = corners
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f64::NEG_INFINITY, f64::max)
+                        .clamp(0.0, width as f64);
+                    let top = corners
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f64::INFINITY, f64::min)
+                        .clamp(0.0, self.pages[index].1 as f64);
+                    let bottom = corners
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f64::NEG_INFINITY, f64::max)
+                        .clamp(0.0, self.pages[index].1 as f64);
+                    page = page.child(
+                        div()
+                            .absolute()
+                            .left(px((left * self.scale as f64) as f32))
+                            .top(px((top * self.scale as f64) as f32))
+                            .w(px(((right - left) * self.scale as f64) as f32))
+                            .h(px(((bottom - top) * self.scale as f64) as f32))
+                            .bg(gpui::rgba(0x278acb70)),
+                    );
+                }
             }
             page = page.on_mouse_down(
                 gpui::MouseButton::Left,

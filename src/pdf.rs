@@ -65,6 +65,25 @@ pub struct TextGlyph {
 pub struct PageText {
     pub transform: PageTransform,
     pub glyphs: Vec<TextGlyph>,
+    /// Visual reading order for ordinary horizontal text, in PDF page coordinates.
+    pub lines: Vec<std::ops::Range<usize>>,
+}
+
+fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> {
+    glyphs.sort_by(|a, b| b.start.y.total_cmp(&a.start.y));
+    let mut lines = Vec::new();
+    let mut start = 0;
+    while start < glyphs.len() {
+        let baseline = glyphs[start].start.y;
+        let mut end = start + 1;
+        while end < glyphs.len() && (glyphs[end].start.y - baseline).abs() <= 3.0 {
+            end += 1;
+        }
+        glyphs[start..end].sort_by(|a, b| a.start.x.total_cmp(&b.start.x));
+        lines.push(start..end);
+        start = end;
+    }
+    lines
 }
 
 struct TextCollector {
@@ -172,9 +191,11 @@ pub fn page_text(path: &Path, page_index: usize) -> Result<PageText, String> {
         glyphs: Vec::new(),
     };
     interpret_page(page, &mut context, &mut collector);
+    let lines = order_visible_lines(&mut collector.glyphs);
     Ok(PageText {
         transform: PageTransform::from_coefficients(page.initial_transform(true).as_coeffs()),
         glyphs: collector.glyphs,
+        lines,
     })
 }
 
@@ -330,6 +351,34 @@ mod tests {
                 .any(|glyph| glyph.text == " " && glyph.end.x > glyph.start.x)
         );
         assert!(page.glyphs.iter().all(|glyph| glyph.end.x > glyph.start.x));
+    }
+
+    #[test]
+    fn visual_lines_do_not_follow_glyph_callback_order() {
+        let mut glyphs: Vec<TextGlyph> = [
+            (20.0, 80.0, "B"),
+            (20.0, 100.0, "D"),
+            (10.0, 80.0, "A"),
+            (10.0, 100.0, "C"),
+        ]
+        .into_iter()
+        .map(|(x, y, text)| TextGlyph {
+            text: text.into(),
+            start: Point { x, y },
+            end: Point { x: x + 10.0, y },
+            top: y + 10.0,
+            bottom: y - 2.0,
+        })
+        .collect();
+        let lines = order_visible_lines(&mut glyphs);
+        assert_eq!(lines, [0..2, 2..4]);
+        assert_eq!(
+            glyphs
+                .iter()
+                .map(|glyph| glyph.text.as_str())
+                .collect::<String>(),
+            "CDAB"
+        );
     }
 
     // A small, valid PDF assembled in memory so the rendering smoke test does

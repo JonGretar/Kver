@@ -13,7 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Find page navigation, zoom, and fit commands in the palette with active shortcut hints; unavailable document commands are dimmed until a PDF loads.
 - On macOS, open a PDF from the File menu with Command-O or quit from the Kver menu with Command-Q.
 - Open independent PDF reader windows with File → New Window or Command-N; cycle between them with the Window menu, command palette, or Command-` / Command-Shift-`.
-- Drag across one line of ordinary PDF text, see a continuous selection highlight, and copy it to the clipboard with Command-C, the Edit menu, or the command palette.
+- Drag across ordinary PDF text, including multiple lines and paragraphs, see the selected lines highlighted, and copy mapped text with spaces and line breaks to the clipboard with Command-C, the Edit menu, or the command palette.
 
 ### Fixed
 

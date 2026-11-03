@@ -160,6 +160,65 @@ fn pdf_with_page_sizes(sizes: [(u32, u32); 3]) -> Vec<u8> {
     pdf
 }
 
+// A real PDF page stream with a nonzero crop origin, 90° rotation, text
+// crossing the crop edge, and entirely hidden text.
+fn rotated_selection_pdf() -> Vec<u8> {
+    let stream = b"BT /F1 16 Tf 40 100 Td (VISIBLE) Tj ET BT /F1 16 Tf 126 100 Td (CROSS) Tj ET BT /F1 16 Tf 40 280 Td (HIDDEN) Tj ET";
+    let objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [10 20 210 320] /CropBox [30 50 130 250] /Rotate 90 /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n", stream.len()).into_bytes().into_iter().chain(stream.iter().copied()).chain(b"\nendstream".iter().copied()).collect(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+        pdf.extend_from_slice(object);
+        pdf.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+    pdf
+}
+
+fn image_only_pdf() -> Vec<u8> {
+    let image = [0xaa_u8; 64];
+    let stream = b"q 300 0 0 400 40 40 cm /Im1 Do Q";
+    let objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 384 504] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n", stream.len()).into_bytes().into_iter().chain(stream.iter().copied()).chain(b"\nendstream".iter().copied()).collect(),
+        format!("<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n", image.len()).into_bytes().into_iter().chain(image).chain(b"\nendstream".iter().copied()).collect(),
+    ];
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+        pdf.extend_from_slice(object);
+        pdf.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+    pdf
+}
+
 fn mixed_page_pdf() -> Vec<u8> {
     pdf_with_page_sizes([(612, 792), (300, 400), (600, 1200)])
 }
@@ -1488,6 +1547,163 @@ fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all("target/captures")?;
+    let path = PathBuf::from("target/captures/rotated-selection.pdf");
+    std::fs::write(&path, rotated_selection_pdf())?;
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(()),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let window = cx.open_window(size(px(420.0), px(180.0)), |window, cx| {
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
+    for zoom in [1.0, 1.25] {
+        if zoom > 1.0 {
+            window.update(&mut cx, |reader, _, cx| reader.zoom_in(cx))?;
+            wait_for_page(&mut cx, &window, "Page 1 of 1 · 125%")?;
+            cx.capture_screenshot(window.into())?;
+            let before_scroll = cx
+                .update(|app| window.read(app).unwrap().text_screen_point(0, 0, 0.1))
+                .ok_or("text before scroll missing")?;
+            window.update(&mut cx, |reader, _, cx| reader.scroll_by(25.0, cx))?;
+            let after_scroll = cx
+                .update(|app| window.read(app).unwrap().text_screen_point(0, 0, 0.1))
+                .ok_or("text after scroll missing")?;
+            assert!(
+                f32::from(after_scroll.y) < f32::from(before_scroll.y) - 5.0,
+                "fixture must really scroll"
+            );
+        }
+        click(&mut cx, window.into(), point(px(200.0), px(160.0)))?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().selected_text()),
+            None
+        );
+        let before = cx.capture_screenshot(window.into())?;
+        let (start, end) = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (
+                reader.text_screen_point(0, 0, 0.1),
+                reader.text_screen_point(0, 6, 0.9),
+            )
+        });
+        let (start, end) = (
+            start.ok_or("rotated text unavailable")?,
+            end.ok_or("rotated end unavailable")?,
+        );
+        assert!(f32::from(end.y) > f32::from(start.y));
+        cx.update_window(window.into(), |_, view, app| {
+            view.dispatch_event(
+                MouseDownEvent {
+                    position: start,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    first_mouse: false,
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                app,
+            );
+            view.dispatch_event(
+                MouseMoveEvent {
+                    position: end,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                app,
+            );
+            view.dispatch_event(
+                MouseUpEvent {
+                    position: end,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    modifiers: Modifiers::default(),
+                }
+                .to_platform_input(),
+                app,
+            );
+        })?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().selected_text()),
+            Some("VISIBLE".into())
+        );
+        let after = cx.capture_screenshot(window.into())?;
+        let density = after.width() as f32 / 420.0;
+        let x = (f32::from(start.x) * density) as u32;
+        let y = ((f32::from(start.y) + f32::from(end.y)) * 0.5 * density) as u32;
+        assert_ne!(
+            before.get_pixel(x, y),
+            after.get_pixel(x, y),
+            "rotated selection overlay missing"
+        );
+        press_key(&mut cx, window, "cmd-c")?;
+        assert_eq!(
+            cx.update(|app| app.read_from_clipboard().unwrap().text()),
+            Some("VISIBLE".into())
+        );
+    }
+    let scan = PathBuf::from("target/captures/image-only-selection.pdf");
+    std::fs::write(&scan, image_only_pdf())?;
+    assert!(kver::pdf::page_text(&scan, 0)?.glyphs.is_empty());
+    window.update(&mut cx, |reader, _, cx| reader.open_path(scan, cx))?;
+    wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
+    cx.capture_screenshot(window.into())?;
+    assert!(
+        cx.update(|app| window.read(app).unwrap().text_screen_point(0, 0, 0.5))
+            .is_none()
+    );
+    cx.update_window(window.into(), |_, view, app| {
+        view.dispatch_event(
+            MouseDownEvent {
+                position: point(px(200.0), px(200.0)),
+                button: MouseButton::Left,
+                click_count: 1,
+                first_mouse: false,
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+        view.dispatch_event(
+            MouseMoveEvent {
+                position: point(px(240.0), px(215.0)),
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+        view.dispatch_event(
+            MouseUpEvent {
+                position: point(px(240.0), px(215.0)),
+                button: MouseButton::Left,
+                click_count: 1,
+                modifiers: Modifiers::default(),
+            }
+            .to_platform_input(),
+            app,
+        );
+    })?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().selected_text()),
+        None
+    );
+    press_key(&mut cx, window, "cmd-c")?;
+    assert_eq!(
+        cx.update(|app| app.read_from_clipboard().unwrap().text()),
+        Some("VISIBLE".into())
+    );
+    Ok(())
+}
+
 fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
@@ -1697,6 +1913,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     open_pdf_palette_in_empty_window()?;
     shared_reader_actions()?;
     select_and_copy_ordinary_text()?;
+    rotated_crop_and_scan_selection()?;
     menu_open_action_targets_window()?;
     long_path_keeps_toolbar_clickable()
 }

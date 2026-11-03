@@ -1663,7 +1663,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
     cx.update_window(window.into(), |_, view, app| {
         view.dispatch_event(
             MouseDownEvent {
-                position: point(px(200.0), px(200.0)),
+                position: point(px(200.0), px(135.0)),
                 button: MouseButton::Left,
                 click_count: 1,
                 first_mouse: false,
@@ -1674,7 +1674,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
         );
         view.dispatch_event(
             MouseMoveEvent {
-                position: point(px(240.0), px(215.0)),
+                position: point(px(240.0), px(155.0)),
                 pressed_button: Some(MouseButton::Left),
                 modifiers: Modifiers::default(),
             }
@@ -1683,7 +1683,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
         );
         view.dispatch_event(
             MouseUpEvent {
-                position: point(px(240.0), px(215.0)),
+                position: point(px(240.0), px(155.0)),
                 button: MouseButton::Left,
                 click_count: 1,
                 modifiers: Modifiers::default(),

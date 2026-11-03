@@ -15,6 +15,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Open independent PDF reader windows with File → New Window or Command-N; cycle between them with the Window menu, command palette, or Command-` / Command-Shift-`.
 - Drag across one line of ordinary PDF text, see a continuous selection highlight, and copy it to the clipboard with Command-C, the Edit menu, or the command palette.
 
+### Fixed
+
+- Keep selection and copied text aligned with the visible crop on rotated PDFs; image-only pages offer no text to select or copy.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added

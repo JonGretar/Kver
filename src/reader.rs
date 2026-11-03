@@ -928,23 +928,52 @@ impl Render for Preview {
                         .iter()
                         .map(|glyph| glyph.bottom)
                         .fold(f64::INFINITY, f64::min);
-                    let start = text.transform.document_to_page(first.start);
-                    let end = text.transform.document_to_page(last.end);
-                    let top = text.transform.document_to_page(Point {
-                        x: first.start.x,
-                        y: top,
-                    });
-                    let bottom = text.transform.document_to_page(Point {
-                        x: first.start.x,
-                        y: bottom,
-                    });
+                    let corners = [
+                        Point {
+                            x: first.start.x,
+                            y: top,
+                        },
+                        Point {
+                            x: last.end.x,
+                            y: top,
+                        },
+                        Point {
+                            x: first.start.x,
+                            y: bottom,
+                        },
+                        Point {
+                            x: last.end.x,
+                            y: bottom,
+                        },
+                    ]
+                    .map(|corner| text.transform.document_to_page(corner));
+                    let left = corners
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f64::INFINITY, f64::min)
+                        .clamp(0.0, width as f64);
+                    let right = corners
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f64::NEG_INFINITY, f64::max)
+                        .clamp(0.0, width as f64);
+                    let top = corners
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f64::INFINITY, f64::min)
+                        .clamp(0.0, self.pages[index].1 as f64);
+                    let bottom = corners
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f64::NEG_INFINITY, f64::max)
+                        .clamp(0.0, self.pages[index].1 as f64);
                     page = page.child(
                         div()
                             .absolute()
-                            .left(px((start.x * self.scale as f64) as f32))
-                            .top(px((top.y.min(bottom.y) * self.scale as f64) as f32))
-                            .w(px(((end.x - start.x) * self.scale as f64) as f32))
-                            .h(px(((top.y - bottom.y).abs() * self.scale as f64) as f32))
+                            .left(px((left * self.scale as f64) as f32))
+                            .top(px((top * self.scale as f64) as f32))
+                            .w(px(((right - left) * self.scale as f64) as f32))
+                            .h(px(((bottom - top) * self.scale as f64) as f32))
                             .bg(gpui::rgba(0x278acb70)),
                     );
                 }

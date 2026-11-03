@@ -136,7 +136,15 @@ impl<'a> Device<'a> for TextCollector {
                     origin.y + 10.0,
                 )
             });
-            if bounds.intersect(self.crop).area() <= 0.0 || next.x <= origin.x {
+            // An overlapping glyph may be clipped halfway by the page crop.
+            // Its Unicode mapping is for the whole glyph, not the visible
+            // fragment, so only offer fully contained glyphs for selection.
+            if bounds.x0 < self.crop.x0
+                || bounds.x1 > self.crop.x1
+                || bounds.y0 < self.crop.y0
+                || bounds.y1 > self.crop.y1
+                || next.x <= origin.x
+            {
                 continue;
             }
             self.glyphs.push(TextGlyph {
@@ -412,7 +420,7 @@ mod tests {
     // unrotated crop. Labels and outlines make rendered output inspectable.
     fn geometry_pdf() -> Vec<u8> {
         let mut pdf = b"%PDF-1.4\n".to_vec();
-        let rotated = b"30 50 100 200 re S BT /F1 12 Tf 40 80 Td (ROTATED) Tj ET";
+        let rotated = b"30 50 100 200 re S BT /F1 12 Tf 40 80 Td (ROTATED) Tj ET BT /F1 12 Tf 126 80 Td (CROSS) Tj ET BT /F1 12 Tf 40 280 Td (HIDDEN) Tj ET";
         let cropped = b"30 50 100 200 re S BT /F1 12 Tf 40 80 Td (CROPPED) Tj ET";
         let objects: Vec<Vec<u8>> = vec![
             b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
@@ -461,6 +469,23 @@ mod tests {
             (actual.y - expected.y).abs() < 1e-6,
             "{actual:?} != {expected:?}"
         );
+    }
+
+    #[test]
+    fn rotated_crop_exposes_only_visible_glyphs() {
+        let path = std::env::temp_dir().join(format!("kver-41-{}.pdf", std::process::id()));
+        std::fs::write(&path, geometry_pdf()).unwrap();
+        let page = page_text(&path, 0).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let extracted: String = page
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.text.as_str())
+            .collect();
+        assert_eq!(extracted, "ROTATED");
+        let start = page.transform.document_to_page(page.glyphs[0].start);
+        let end = page.transform.document_to_page(page.glyphs[0].end);
+        assert!(end.y > start.y, "rotated line follows the rendered y axis");
     }
 
     #[test]

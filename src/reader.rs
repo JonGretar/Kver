@@ -6,13 +6,28 @@ use std::{
     sync::Arc,
 };
 
-use gpui::{
+use gpui_kit as gpui;
+use gpui_kit::assets::IconName;
+use gpui_kit::{
     App, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, PathPromptOptions, RenderImage,
     ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
     base::Disableable,
-    component::command::{Command, CommandItem, CommandState},
+    component::{
+        ActiveTheme, Selectable, Sizable, TitleBar,
+        button::{Button, ButtonVariants},
+        command::{Command, CommandItem, CommandState},
+        empty::{
+            Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
+            EmptyTitle,
+        },
+        spinner::Spinner,
+        status_bar::StatusBar,
+        theme::Theme,
+        toolbar::{Toolbar, ToolbarGroup},
+        tooltip::Tooltip,
+    },
 };
 use image::{Frame, RgbaImage};
 
@@ -96,6 +111,25 @@ fn document_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
+}
+
+fn reader_button(
+    id: &'static str,
+    label: &'static str,
+    icon: Option<IconName>,
+    action: Box<dyn gpui::Action>,
+    enabled: bool,
+    selected: bool,
+) -> Button {
+    Button::new(id)
+        .accessibility_label(label)
+        .when_some(icon, |button, icon| button.icon(icon))
+        .when(icon.is_none(), |button| button.label(label))
+        .ghost()
+        .selected(selected)
+        .disabled(!enabled)
+        .tooltip(label)
+        .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
 }
 
 fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
@@ -868,6 +902,11 @@ impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
+            cx.observe_window_appearance(window, |_, window, cx| {
+                Theme::sync_system_appearance(Some(window), cx);
+                cx.notify();
+            })
+            .detach();
             cx.observe_window_bounds(window, |_, window, cx| {
                 // The scroll area's bounds are laid out in the resize frame.
                 // Refit after that frame, using its measured content viewport.
@@ -890,6 +929,11 @@ impl Render for Preview {
         let (top, _, height) = self.viewport();
         let range = visible_range(&self.pages, self.scale, top, height);
         let has_document = !self.pages.is_empty();
+        let filename = self
+            .path
+            .as_deref()
+            .map(document_name)
+            .map(gpui::SharedString::from);
         let top_space = page_top(&self.pages, self.scale, range.start);
         let end_space = page_top(&self.pages, self.scale, self.pages.len())
             - page_top(&self.pages, self.scale, range.end);
@@ -1067,163 +1111,131 @@ impl Render for Preview {
             }))
             .flex()
             .flex_col()
-            .bg(rgb(0x30343b))
-            .text_color(rgb(0xf5f5f5))
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_1()
-                    .p_3()
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_4()
+                        TitleBar::new()
+                            .pr_3()
                             .child(
                                 div()
-                                    .id("open-pdf")
-                                    .cursor_pointer()
-                                    .px_3()
-                                    .bg(rgb(0x545b65))
-                                    .child("Open PDF")
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    // TitleBar's inner bar does not shrink; give the
+                                    // filename a zero basis so Open PDF stays visible.
+                                    .w_0()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .child(
+                                        div()
+                                            .text_color(cx.theme().primary)
+                                            .font_weight(gpui::FontWeight::BOLD)
+                                            .child("K /"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("document-name")
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .truncate()
+                                            .text_sm()
+                                            .when_some(filename.clone(), |title, name| {
+                                                title.tooltip(move |window, cx| {
+                                                    Tooltip::new(name.clone()).build(window, cx)
+                                                })
+                                            })
+                                            .child(
+                                                filename.unwrap_or_else(|| {
+                                                    "A quiet place to read".into()
+                                                }),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                Button::new("open-pdf")
+                                    .label("Open PDF…")
+                                    .icon(IconName::FolderOpen)
+                                    .ghost()
+                                    .small()
+                                    .tooltip_with_action("Choose a PDF", &OpenPdf, None)
                                     .on_click(|_, window, cx| {
-                                        window.dispatch_action(Box::new(OpenPdf), cx);
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("previous-page")
-                                    .when(has_document, |button| button.cursor_pointer())
-                                    .px_3()
-                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
-                                    .child("←")
-                                    .when(has_document, |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(PreviousPage), cx);
-                                        })
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("next-page")
-                                    .when(has_document, |button| button.cursor_pointer())
-                                    .px_3()
-                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
-                                    .child("→")
-                                    .when(has_document, |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(NextPage), cx);
-                                        })
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("zoom-out")
-                                    .when(has_document, |button| button.cursor_pointer())
-                                    .px_3()
-                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
-                                    .child("−")
-                                    .when(has_document, |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(ZoomOut), cx);
-                                        })
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("zoom-in")
-                                    .when(has_document, |button| button.cursor_pointer())
-                                    .px_3()
-                                    .bg(rgb(if has_document { 0x545b65 } else { 0x41464e }))
-                                    .child("+")
-                                    .when(has_document, |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(ZoomIn), cx);
-                                        })
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("fit-width")
-                                    .when(has_document, |button| button.cursor_pointer())
-                                    .px_3()
-                                    .bg(rgb(if self.zoom_mode == ZoomMode::FitWidth {
-                                        0x35768a
-                                    } else if !has_document {
-                                        0x41464e
-                                    } else {
-                                        0x545b65
-                                    }))
-                                    .child(if f32::from(window.bounds().size.width) < 560.0 {
-                                        "W"
-                                    } else {
-                                        "Width"
-                                    })
-                                    .when(has_document, |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(FitWidth), cx);
-                                        })
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("fit-page")
-                                    .when(has_document, |button| button.cursor_pointer())
-                                    .px_3()
-                                    .bg(rgb(if self.zoom_mode == ZoomMode::FitPage {
-                                        0x35768a
-                                    } else if !has_document {
-                                        0x41464e
-                                    } else {
-                                        0x545b65
-                                    }))
-                                    .child(if f32::from(window.bounds().size.width) < 560.0 {
-                                        "F"
-                                    } else {
-                                        "Page"
-                                    })
-                                    .when(has_document, |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(FitPage), cx);
-                                        })
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .id("copy-selection")
-                                    .when(self.selected_text().is_some(), |button| {
-                                        button.cursor_pointer()
-                                    })
-                                    .px_3()
-                                    .bg(rgb(if self.selected_text().is_some() {
-                                        0x545b65
-                                    } else {
-                                        0x41464e
-                                    }))
-                                    .child("Copy")
-                                    .when(self.selected_text().is_some(), |button| {
-                                        button.on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(Copy), cx);
-                                        })
+                                        window.dispatch_action(Box::new(OpenPdf), cx)
                                     }),
                             ),
                     )
                     .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .gap_4()
-                            .child(
-                                div().flex_1().min_w(px(0.0)).truncate().child(
-                                    self.path
-                                        .as_ref()
-                                        .map(|path| document_name(path))
-                                        .unwrap_or_default(),
-                                ),
+                        Toolbar::new("reading-toolbar")
+                            .px_3()
+                            .content(
+                                ToolbarGroup::new("page-controls")
+                                    .label("Page navigation")
+                                    .child(reader_button(
+                                        "previous-page",
+                                        "Previous page",
+                                        Some(IconName::ArrowUp),
+                                        Box::new(PreviousPage),
+                                        has_document && self.page_index > 0,
+                                        false,
+                                    ))
+                                    .child(reader_button(
+                                        "next-page",
+                                        "Next page",
+                                        Some(IconName::ArrowDown),
+                                        Box::new(NextPage),
+                                        has_document && self.page_index + 1 < self.pages.len(),
+                                        false,
+                                    )),
                             )
-                            .child(div().min_w(px(0.0)).truncate().child(self.status.clone())),
+                            .content(gpui_kit::component::separator::Separator::vertical().h_5())
+                            .content(
+                                ToolbarGroup::new("zoom-controls")
+                                    .label("Zoom and fit")
+                                    .child(reader_button(
+                                        "zoom-out",
+                                        "Zoom out",
+                                        Some(IconName::Minus),
+                                        Box::new(ZoomOut),
+                                        has_document,
+                                        false,
+                                    ))
+                                    .child(reader_button(
+                                        "zoom-in",
+                                        "Zoom in",
+                                        Some(IconName::Plus),
+                                        Box::new(ZoomIn),
+                                        has_document,
+                                        false,
+                                    ))
+                                    .child(reader_button(
+                                        "fit-width",
+                                        "Fit width",
+                                        None,
+                                        Box::new(FitWidth),
+                                        has_document,
+                                        has_document && self.zoom_mode == ZoomMode::FitWidth,
+                                    ))
+                                    .child(reader_button(
+                                        "fit-page",
+                                        "Fit page",
+                                        None,
+                                        Box::new(FitPage),
+                                        has_document,
+                                        has_document && self.zoom_mode == ZoomMode::FitPage,
+                                    )),
+                            )
+                            .content(div().flex_1())
+                            .child(reader_button(
+                                "copy-selection",
+                                "Copy selection",
+                                Some(IconName::Copy),
+                                Box::new(Copy),
+                                self.selected_text().is_some(),
+                                false,
+                            )),
                     ),
             )
             .child(
@@ -1249,16 +1261,92 @@ impl Render for Preview {
                         this.selected_page = None;
                         this.sync_viewport(cx);
                     }))
+                    .bg(cx.theme().muted)
                     .p_4()
                     .child(if self.path.is_none() || self.pages.is_empty() {
+                        let loading = self.status == "Loading document…";
                         div()
-                            .w_full()
+                            .size_full()
                             .flex()
+                            .items_center()
                             .justify_center()
-                            .child(self.status.clone())
+                            .child(
+                                Empty::new()
+                                    .flex_none()
+                                    .max_w(gpui::rems(28.))
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().background)
+                                    .header(
+                                        EmptyHeader::new()
+                                            .media(
+                                                EmptyMedia::new()
+                                                    .with_variant(EmptyMediaVariant::Icon)
+                                                    .child(if loading {
+                                                        Spinner::new().into_any_element()
+                                                    } else {
+                                                        gpui_kit::component::Icon::new(
+                                                            IconName::FileText,
+                                                        )
+                                                        .into_any_element()
+                                                    }),
+                                            )
+                                            .title(EmptyTitle::new().child(
+                                                if self.path.is_none() {
+                                                    "Open a PDF to start reading"
+                                                } else if loading {
+                                                    "Opening document…"
+                                                } else {
+                                                    "Couldn’t open this PDF"
+                                                },
+                                            ))
+                                            .description(EmptyDescription::new().child(
+                                                if self.path.is_none() {
+                                                    "Choose a document to begin.".to_owned()
+                                                } else {
+                                                    self.status.clone()
+                                                },
+                                            )),
+                                    )
+                                    .content(
+                                        EmptyContent::new().child(
+                                            Button::new("open-pdf-center")
+                                                .label(if self.path.is_none() {
+                                                    "Open PDF…"
+                                                } else {
+                                                    "Choose another PDF…"
+                                                })
+                                                .on_click(|_, window, cx| {
+                                                    window.dispatch_action(Box::new(OpenPdf), cx)
+                                                }),
+                                        ),
+                                    ),
+                            )
                             .into_any_element()
                     } else {
                         content.into_any_element()
+                    }),
+            )
+            .child(
+                StatusBar::new()
+                    .left(div().min_w(px(0.0)).truncate().child(if has_document {
+                        format!("PAGE {} / {}", self.page_index + 1, self.pages.len())
+                    } else {
+                        self.status.clone()
+                    }))
+                    .when(has_document && !self.status.starts_with("Page "), |bar| {
+                        bar.child(div().min_w(px(0.0)).truncate().child(self.status.clone()))
+                    })
+                    .when(has_document, |bar| {
+                        bar.right(div().child(format!(
+                            "{}%{}",
+                            (self.scale * 100.0).round(),
+                            match self.zoom_mode {
+                                ZoomMode::Fixed => "",
+                                ZoomMode::FitWidth => " · Fit width",
+                                ZoomMode::FitPage => " · Fit page",
+                            }
+                        )))
                     }),
             )
             .when_some(self.palette.clone(), |reader, palette| {
@@ -1268,7 +1356,7 @@ impl Render for Preview {
                         div()
                             .absolute()
                             .inset_0()
-                            .bg(gpui::rgba(0x00000080))
+                            .bg(cx.theme().overlay)
                             .on_mouse_down(gpui::MouseButton::Left, {
                                 let owner = owner.clone();
                                 move |_, window, cx| {
@@ -1291,7 +1379,7 @@ impl Render for Preview {
                                         .placeholder("Search actions…")
                                         .item(
                                             CommandItem::new()
-                                                .label("Open PDF")
+                                                .label("Open PDF…")
                                                 .action(Box::new(OpenPdf)),
                                         )
                                         .item(
@@ -1315,13 +1403,16 @@ impl Render for Preview {
                                             CommandItem::new()
                                                 .label("Next Page")
                                                 .action(Box::new(NextPage))
-                                                .disabled(!has_document),
+                                                .disabled(
+                                                    !has_document
+                                                        || self.page_index + 1 >= self.pages.len(),
+                                                ),
                                         )
                                         .item(
                                             CommandItem::new()
                                                 .label("Previous Page")
                                                 .action(Box::new(PreviousPage))
-                                                .disabled(!has_document),
+                                                .disabled(!has_document || self.page_index == 0),
                                         )
                                         .item(
                                             CommandItem::new()

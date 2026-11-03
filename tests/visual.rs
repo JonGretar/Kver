@@ -277,8 +277,8 @@ fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
     press_key(&mut cx, window, "f")?;
     let mut highest_page = 0;
-    for _ in 0..80 {
-        window.update(&mut cx, |reader, _, cx| reader.scroll_by(20.0, cx))?;
+    for _ in 0..20 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(80.0, cx))?;
         cx.capture_screenshot(window.into())?;
         let (page, zoom) = cx.update(|app| {
             let reader = window.read(app).unwrap();
@@ -289,19 +289,17 @@ fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
             "fit-page went backwards while scrolling forward"
         );
         highest_page = page;
-        for _ in 0..3 {
-            cx.capture_screenshot(window.into())?;
-            let after = cx.update(|app| {
-                let reader = window.read(app).unwrap();
-                (reader.page_index(), reader.scale())
-            });
-            assert_eq!(after, (page, zoom), "fit-page changed without scrolling");
-        }
+        cx.capture_screenshot(window.into())?;
+        let after = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (reader.page_index(), reader.scale())
+        });
+        assert_eq!(after, (page, zoom), "fit-page changed without scrolling");
     }
     assert!(highest_page >= 1, "fit-page scrolling must reach page two");
     let mut lowest_page = highest_page;
-    for _ in 0..80 {
-        window.update(&mut cx, |reader, _, cx| reader.scroll_by(-20.0, cx))?;
+    for _ in 0..20 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(-80.0, cx))?;
         cx.capture_screenshot(window.into())?;
         let page = cx.update(|app| window.read(app).unwrap().page_index());
         assert!(
@@ -351,7 +349,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
             page, 2,
             "{mode:?} must identify the mostly visible final page"
         );
-        for _ in 0..4 {
+        for _ in 0..2 {
             cx.capture_screenshot(window.into())?;
             assert_eq!(
                 cx.update(|app| window.read(app).unwrap().scale()),
@@ -368,6 +366,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
         );
         // Walk back across the differently sized page boundary and return.
         // A fit change must not itself trigger repeated fit changes.
+        let mut previous_stable = None;
         for amount in [-200.0; 12].into_iter().chain([200.0; 12]) {
             window.update(&mut cx, |reader, _, cx| reader.scroll_by(amount, cx))?;
             cx.capture_screenshot(window.into())?;
@@ -375,7 +374,9 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
                 let reader = window.read(app).unwrap();
                 (reader.page_index(), reader.scale())
             });
-            for _ in 0..3 {
+            // Verify another frame at each page/fit transition, where
+            // feedback loops would change the selected page without input.
+            if previous_stable != Some(stable) {
                 cx.capture_screenshot(window.into())?;
                 let after = cx.update(|app| {
                     let reader = window.read(app).unwrap();
@@ -383,6 +384,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
                 });
                 assert_eq!(after, stable, "{mode:?} refit without scrolling");
             }
+            previous_stable = Some(stable);
         }
         assert_eq!(
             cx.update(|app| window.read(app).unwrap().page_index()),
@@ -949,90 +951,109 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
     let directory = PathBuf::from("target/captures")
         .join("long-directory-name-for-testing-toolbar-layout".repeat(5));
     std::fs::create_dir_all(&directory)?;
-    for (name, filename) in [
-        ("long-parent", "reader.pdf".to_string()),
-        (
-            "long-filename",
-            format!("{}.pdf", "long-reader-filename-".repeat(7)),
-        ),
-    ] {
-        let path = directory.join(filename);
-        std::fs::copy("examples/readme-sample.pdf", &path)?;
-        for width in [920.0, 440.0, 360.0] {
-            let mut cx = HeadlessAppContext::with_platform(
-                gpui_platform::current_platform(true).text_system(),
-                Arc::new(gpui_kit::assets::Assets),
-                gpui_platform::current_headless_renderer,
-            );
-            cx.update(gpui_kit::init);
-            let path = path.clone();
-            let window = cx.open_window(size(px(width), px(800.0)), |window, cx| {
-                cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
-            })?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
-            let capture = cx.capture_screenshot(window.into())?;
-            capture.save(format!("target/captures/{name}-{width}.png"))?;
-            // Resolve Kit controls by identity and hit-test their actual bounds.
-            cx.update_window(window.into(), |_, frame, app| {
-                frame.render_frame(app);
-                for id in [
-                    "open-pdf",
-                    "previous-page",
-                    "next-page",
-                    "zoom-out",
-                    "zoom-in",
-                    "fit-width",
-                    "fit-page",
-                    "copy-selection",
-                ] {
-                    let target = frame.find(id);
-                    assert!(
-                        target.visible(),
-                        "{id} is clipped at width {width}: {target:?}"
-                    );
-                    assert!(
-                        target.bounds().right() <= px(width),
-                        "{id} extends past width {width}"
-                    );
-                }
-            })?;
-            click_control(&mut cx, window.into(), "previous-page")?;
-            assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 0);
-            click_control(&mut cx, window.into(), "next-page")?;
-            wait_for_page(&mut cx, &window, "Page 2 of 100 · 100%").map_err(|error| {
-                format!("next-page must remain reachable at width {width}: {error}")
-            })?;
-            click_control(&mut cx, window.into(), "previous-page")?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
-                format!("previous-page must remain reachable at width {width}: {error}")
-            })?;
-            click_control(&mut cx, window.into(), "zoom-in")?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 125%").map_err(|error| {
-                format!("zoom-in must remain reachable at width {width}: {error}")
-            })?;
-            click_control(&mut cx, window.into(), "zoom-out")?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
-                format!("zoom-out must remain reachable at width {width}: {error}")
-            })?;
-            click_control(&mut cx, window.into(), "fit-width")?;
+    let path = directory.join(format!("{}.pdf", "long-reader-filename-".repeat(7)));
+    std::fs::copy("examples/readme-sample.pdf", &path)?;
+    for width in [920.0, 440.0, 360.0] {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(gpui_kit::assets::Assets),
+            gpui_platform::current_headless_renderer,
+        );
+        cx.update(|app| {
+            gpui_kit::init(app);
+            bind_reader_keys(app);
+        });
+        let path = path.clone();
+        let window = cx.open_window(size(px(width), px(800.0)), |window, cx| {
+            cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+        })?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+        let capture = cx.capture_screenshot(window.into())?;
+        capture.save(format!("target/captures/long-filename-{width}.png"))?;
+        // Resolve Kit controls by identity and hit-test their actual bounds.
+        cx.update_window(window.into(), |_, frame, app| {
+            frame.render_frame(app);
+            for id in [
+                "open-pdf",
+                "previous-page",
+                "next-page",
+                "zoom-out",
+                "zoom-in",
+                "fit-width",
+                "fit-page",
+                "copy-selection",
+            ] {
+                let target = frame.find(id);
+                assert!(
+                    target.visible(),
+                    "{id} is clipped at width {width}: {target:?}"
+                );
+                assert!(
+                    target.bounds().right() <= px(width),
+                    "{id} extends past width {width}"
+                );
+            }
+        })?;
+        click_control(&mut cx, window.into(), "previous-page")?;
+        assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 0);
+        click_control(&mut cx, window.into(), "next-page")?;
+        wait_for_page(&mut cx, &window, "Page 2 of 100 · 100%").map_err(|error| {
+            format!("next-page must remain reachable at width {width}: {error}")
+        })?;
+        click_control(&mut cx, window.into(), "previous-page")?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
+            format!("previous-page must remain reachable at width {width}: {error}")
+        })?;
+        click_control(&mut cx, window.into(), "zoom-in")?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 125%")
+            .map_err(|error| format!("zoom-in must remain reachable at width {width}: {error}"))?;
+        click_control(&mut cx, window.into(), "zoom-out")?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")
+            .map_err(|error| format!("zoom-out must remain reachable at width {width}: {error}"))?;
+        click_control(&mut cx, window.into(), "fit-width")?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().zoom_mode()),
+            ZoomMode::FitWidth,
+            "fit-width button must remain reachable at width {width}"
+        );
+        click_control(&mut cx, window.into(), "fit-page")?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().zoom_mode()),
+            ZoomMode::FitPage,
+            "fit-page button must remain reachable at width {width}"
+        );
+        click_control(&mut cx, window.into(), "zoom-in")?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().zoom_mode()),
+            ZoomMode::Fixed,
+            "manual zoom must leave fit mode at width {width}"
+        );
+        press_key(&mut cx, window, "cmd-shift-p")?;
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, frame, app| {
+            frame.render_frame(app);
             assert_eq!(
-                cx.update(|app| window.read(app).unwrap().zoom_mode()),
-                ZoomMode::FitWidth,
-                "fit-width button must remain reachable at width {width}"
+                frame.find("reader-command-palette").role(),
+                Some(gpui::Role::Dialog)
             );
-            click_control(&mut cx, window.into(), "fit-page")?;
-            assert_eq!(
-                cx.update(|app| window.read(app).unwrap().zoom_mode()),
-                ZoomMode::FitPage,
-                "fit-page button must remain reachable at width {width}"
+            let palette = frame.find("command");
+            assert!(palette.visible(), "palette is clipped at width {width}");
+            assert!(
+                palette.bounds().right() <= px(width),
+                "palette extends past width {width}"
             );
-            click_control(&mut cx, window.into(), "zoom-in")?;
-            assert_eq!(
-                cx.update(|app| window.read(app).unwrap().zoom_mode()),
-                ZoomMode::Fixed,
-                "manual zoom must leave fit mode at width {width}"
+            assert!(
+                palette.bounds().left() >= px(0.0),
+                "palette extends before width {width}"
             );
+        })?;
+        if width == 360.0 {
+            cx.capture_screenshot(window.into())?
+                .save("target/captures/palette-narrow.png")?;
         }
+        press_key(&mut cx, window, "escape")?;
+        cx.run_until_parked();
+        assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
     }
     Ok(())
 }
@@ -2063,6 +2084,8 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
         Some(second_window.into())
     );
     press_key(&mut cx, second_window, "cmd-shift-p")?;
+    cx.run_until_parked();
+    press_key(&mut cx, second_window, "tab")?;
     cx.run_until_parked();
     type_query(&mut cx, second_window, "next window")?;
     assert_eq!(

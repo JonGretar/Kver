@@ -13,7 +13,7 @@ use gpui_kit::{
     ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
-    base::Disableable,
+    base::{Disableable, FocusTrapElement, TestSupportExt as _},
     component::{
         ActiveTheme, Selectable, Sizable, TitleBar,
         button::{Button, ButtonVariants},
@@ -308,6 +308,7 @@ pub struct Preview {
     last_viewport: (f32, f32, f32),
     scroll: ScrollHandle,
     focus: FocusHandle,
+    palette_focus: FocusHandle,
     focus_initialized: bool,
     palette: Option<Entity<CommandState>>,
     status: String,
@@ -336,6 +337,7 @@ impl Preview {
             last_viewport: (f32::NAN, f32::NAN, f32::NAN),
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
+            palette_focus: cx.focus_handle(),
             focus_initialized: false,
             palette: None,
             status: "Open a PDF to start reading".into(),
@@ -412,6 +414,9 @@ impl Preview {
     }
 
     fn show_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.is_some() {
+            return;
+        }
         let palette = cx.new(|cx| CommandState::new(window, cx));
         self.palette = Some(palette.clone());
         palette.update(cx, |palette, cx| palette.focus(window, cx));
@@ -1368,13 +1373,18 @@ impl Render for Preview {
                     )
                     .child(
                         div()
+                            .id("palette-panel")
+                            .test_support()
+                            .role(gpui::Role::Dialog)
+                            .aria_label("Commands")
                             .absolute()
                             .inset_0()
                             .flex()
                             .items_center()
                             .justify_center()
+                            .p_4()
                             .child(
-                                div().w(px(380.0)).child(
+                                div().w_full().max_w(gpui::rems(24.)).child(
                                     Command::new(&palette)
                                         .placeholder("Search actions…")
                                         .item(
@@ -1458,7 +1468,8 @@ impl Render for Preview {
                                             });
                                         }),
                                 ),
-                            ),
+                            )
+                            .focus_trap("reader-command-palette", &self.palette_focus),
                     )
             })
     }

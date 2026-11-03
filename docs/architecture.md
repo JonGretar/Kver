@@ -66,9 +66,13 @@ states rather than a reader-specific palette.
 
 The palette is an inline overlay owned by the reader. This keeps the reader
 in its Action dispatch path rather than relying on a global handler that
-could affect another window. GPUI Kit resolves shortcut hints from active
-keybindings. Bare reading keys apply only while the reader has focus; text
-entry in the palette does not navigate the PDF.
+could affect another window. Kit's `Command` owns search and selection;
+`Root` handles the overlay's focus trap through Kit's `FocusTrapElement`.
+The overlay has a dialog role and a rem-based maximum width so it remains
+usable in narrow windows. Dismissing it restores reader focus. GPUI Kit
+resolves shortcut hints from active keybindings. Bare reading keys apply only
+while the reader has focus; text entry in the palette does not navigate the
+PDF.
 
 On macOS, `src/app_menu.rs` installs native Kver, File, Edit, and Window menus
 at startup.

@@ -14,6 +14,8 @@ depend on the PDF engine or physical keybindings.
 ## Application boundaries
 
 `src/main.rs` initializes GPUI Kit, keybindings, and the initial reader window.
+`src/assets.rs` combines Kit's default component assets with only the extra
+reader icons used by fit controls; the full icon catalog is not embedded.
 `src/reader_windows.rs` creates empty reader windows and cycles focus between
 open windows; it does not share document or viewport state between readers.
 Each window mounts its reader inside GPUI Kit's `Root`, which owns component

@@ -14,6 +14,7 @@ use gpui_kit::{
     OwnedMenuItem, Pixels, Point, ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
 };
 use kver::app_menu::{self, Quit};
+use kver::assets::ReaderAssets;
 use kver::reader::{Copy, OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
 use kver::reader_windows::{NewWindow, NextWindow, PreviousWindow};
 use std::{
@@ -264,7 +265,7 @@ fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -319,7 +320,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
     for mode in [ZoomMode::FitWidth, ZoomMode::FitPage] {
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
-            Arc::new(gpui_kit::assets::Assets),
+            Arc::new(ReaderAssets),
             gpui_platform::current_headless_renderer,
         );
         cx.update(gpui_kit::init);
@@ -401,7 +402,7 @@ fn fit_modes_follow_page_and_window() -> Result<(), Box<dyn std::error::Error>> 
     std::fs::write(&path, mixed_page_pdf())?;
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -483,7 +484,7 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         .unwrap_or_else(|| PathBuf::from("examples/readme-sample.pdf"));
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -780,7 +781,7 @@ fn loading_error_is_visible(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(gpui_kit::init);
@@ -831,7 +832,7 @@ fn loading_errors_are_visible() -> Result<(), Box<dyn std::error::Error>> {
 fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(gpui_kit::init);
@@ -956,7 +957,7 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
     for width in [920.0, 440.0, 360.0] {
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
-            Arc::new(gpui_kit::assets::Assets),
+            Arc::new(ReaderAssets),
             gpui_platform::current_headless_renderer,
         );
         cx.update(|app| {
@@ -992,6 +993,21 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
                     target.bounds().right() <= px(width),
                     "{id} extends past width {width}"
                 );
+            }
+            for (id, label) in [("fit-width", "Fit width"), ("fit-page", "Fit page")] {
+                let button = frame.find(id);
+                assert_eq!(button.label(), Some(label));
+                if width < 560.0 {
+                    assert!(
+                        button.bounds().size.width <= px(32.0),
+                        "{id} should use its icon at width {width}"
+                    );
+                } else {
+                    assert!(
+                        button.bounds().size.width > px(32.0),
+                        "{id} should retain its visible label at width {width}"
+                    );
+                }
             }
         })?;
         click_control(&mut cx, window.into(), "previous-page")?;
@@ -1066,7 +1082,7 @@ fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("examples/readme-sample.pdf"));
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(gpui_kit::init);
@@ -1141,7 +1157,7 @@ fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
 fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1200,7 +1216,7 @@ fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> 
 fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1385,7 +1401,7 @@ fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
 fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1477,7 +1493,7 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
 fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1670,7 +1686,7 @@ fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
 fn multi_line_selection_survives_zoom_and_scroll() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1826,7 +1842,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(&path, rotated_selection_pdf())?;
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1970,7 +1986,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
 fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {

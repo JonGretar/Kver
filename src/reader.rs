@@ -40,6 +40,7 @@ use crate::{
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
 const PAGE_PADDING: f32 = 16.0;
+const FIT_LABEL_MIN_REMS: f32 = 35.0;
 
 gpui::actions!(
     kver,
@@ -934,6 +935,8 @@ impl Render for Preview {
         let (top, _, height) = self.viewport();
         let range = visible_range(&self.pages, self.scale, top, height);
         let has_document = !self.pages.is_empty();
+        let show_fit_labels = f32::from(window.bounds().size.width)
+            >= FIT_LABEL_MIN_REMS * f32::from(window.rem_size());
         let filename = self
             .path
             .as_deref()
@@ -1215,22 +1218,28 @@ impl Render for Preview {
                                         has_document,
                                         false,
                                     ))
-                                    .child(reader_button(
-                                        "fit-width",
-                                        "Fit width",
-                                        None,
-                                        Box::new(FitWidth),
-                                        has_document,
-                                        has_document && self.zoom_mode == ZoomMode::FitWidth,
-                                    ))
-                                    .child(reader_button(
-                                        "fit-page",
-                                        "Fit page",
-                                        None,
-                                        Box::new(FitPage),
-                                        has_document,
-                                        has_document && self.zoom_mode == ZoomMode::FitPage,
-                                    )),
+                                    .child(
+                                        reader_button(
+                                            "fit-width",
+                                            "Fit width",
+                                            Some(IconName::MoveHorizontal),
+                                            Box::new(FitWidth),
+                                            has_document,
+                                            has_document && self.zoom_mode == ZoomMode::FitWidth,
+                                        )
+                                        .when(show_fit_labels, |button| button.label("Fit width")),
+                                    )
+                                    .child(
+                                        reader_button(
+                                            "fit-page",
+                                            "Fit page",
+                                            Some(IconName::Expand),
+                                            Box::new(FitPage),
+                                            has_document,
+                                            has_document && self.zoom_mode == ZoomMode::FitPage,
+                                        )
+                                        .when(show_fit_labels, |button| button.label("Fit page")),
+                                    ),
                             )
                             .content(div().flex_1())
                             .child(reader_button(

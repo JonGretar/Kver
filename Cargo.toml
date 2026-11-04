@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = ["gui"]
-gui = ["dep:gpui-kit", "dep:image"]
+gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:url"]
 screenshot = ["gui", "gpui-kit/test-support"]
 
 [[bin]]
@@ -26,3 +26,6 @@ required-features = ["screenshot"]
 gpui-kit = { version = "=0.8.1", features = ["test-support"], optional = true }
 hayro = "0.8.0"
 image = { version = "0.25", default-features = false, optional = true }
+rfd = { version = "0.17.2", optional = true }
+async-channel = { version = "2", optional = true }
+url = { version = "2", optional = true }

@@ -22,8 +22,8 @@ The script builds the release binary with Corgi when available, or with
 `cargo +stable build --release --locked --bin kver` otherwise, and creates
 `target/release/Kver.app`. Re-running replaces the bundle with the new binary
 and icon. If `CARGO_TARGET_DIR` is set, both tools place the bundle and
-release binary under `$CARGO_TARGET_DIR/release/`. The app has no bundled PDF
-and no PDF file association.
+release binary under `$CARGO_TARGET_DIR/release/`. The app has no bundled PDF.
+It declares PDF viewer support so macOS can offer it in Finder's **Open With** menu.
 
 For a versioned Apple silicon archive, run `sh scripts/package-macos-app.sh`
 on an Apple silicon Mac. It builds the same app, checks the bundle version
@@ -90,7 +90,29 @@ open -n -a "$PWD/target/release/Kver.app" --args "$PWD/examples/readme-sample.pd
 only means macOS accepted the launch request; check the visible window as well.
 
 Double-clicking `Kver.app` in Finder opens the empty reader window; use
-**Open PDF** to choose a document. PDF file association in Finder is not yet supported.
+**Open PDF** to choose a document. The picker filters for PDF files.
+
+### Open PDFs from Finder
+
+Move the newly built `Kver.app` to Applications and launch it once. In Finder,
+control-click a PDF and choose **Open With → Kver** (use **Other…** to select
+the app if it is not listed). Each PDF opens in its own reader window; the
+initial empty window is reused when available. This also works while Kver is
+already running.
+
+To make Kver the default for PDFs, select a PDF in Finder, choose **Get Info**
+(Command-I), expand **Open with**, select **Kver**, and click **Change All…**.
+Kver does not change your default automatically. Older downloaded releases
+do not include this integration; rebuild the app to use it.
+
+To exercise Finder-style file delivery from Terminal, without `--args`:
+
+```sh
+open -a "$PWD/target/release/Kver.app" "$PWD/examples/readme-sample.pdf"
+```
+
+Check both a fresh launch and delivery while the app is running, including
+multiple PDFs and filenames containing spaces or non-ASCII characters.
 
 To inspect the package independently:
 

@@ -57,6 +57,19 @@ active reader window. Toolbar controls, keybindings, and GPUI Kit's command
 palette dispatch those same Actions; reader methods own the underlying
 navigation and loading behavior. The reader owns the file picker and ignores
 obsolete asynchronous load results, so entry points share error handling.
+The native picker uses `rfd` for its PDF extension filter because GPUI's
+`PathPromptOptions` does not expose file-type filtering. Its asynchronous API
+keeps the picker from blocking GPUI's event loop; cancellation leaves the
+current document unchanged. Unlike GPUI's picker, `rfd` does not distinguish
+picker failure from cancellation.
+The app shell registers OS file-open events before launch and queues local
+file paths through `async-channel` for processing on GPUI's foreground task.
+`url` decodes file URLs without corrupting escaped or non-ASCII filenames.
+File-open requests reuse the initial reader while empty, otherwise create
+independent readers. The macOS bundle declares the standard `com.adobe.pdf`
+type as a viewer with alternate handler rank, without taking over the user's
+default PDF application. Linux and Windows file associations remain separate
+packaging work.
 Document-dependent Actions are unavailable in an empty, loading, or error
 window; each reader checks its own document state.
 Kit's `TitleBar` holds the truncating filename and persistent Open PDF button;

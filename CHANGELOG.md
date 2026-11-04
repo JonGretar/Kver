@@ -13,6 +13,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Choose PDFs with a PDF-filtered native Open dialog.
+- On macOS, open PDFs from Finder with Open With and optionally choose Kver as the default PDF viewer.
 - Open a PDF from a searchable command palette with a visible shortcut hint, or use Command-O and the existing reader control.
 - Find page navigation, zoom, and fit commands in the palette with active shortcut hints; unavailable document commands are dimmed until a PDF loads.
 - On macOS, open a PDF from the File menu with Command-O or quit from the Kver menu with Command-Q.

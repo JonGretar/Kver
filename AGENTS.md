@@ -94,7 +94,23 @@ Do not introduce:
 - Avoid panics in normal application code.
 - Keep unsafe code isolated and documented.
 - Prefer small modules with clear responsibilities.
-- Use `cargo fmt` and `cargo clippy`.
+- Format with `cargo fmt` and lint with Clippy using the command policy below.
+
+### Local Rust commands
+
+On macOS, when Corgi is installed, use Corgi for every build, check,
+test, and lint operation it supports. This includes routine validation,
+not only release builds and app packaging.
+
+- Check Corgi's installed help for the appropriate command; do not assume
+  Cargo's syntax or flags work unchanged.
+- Use Cargo directly only when Corgi is unavailable, the operation is not
+  supported by Corgi, or the task explicitly requires a Cargo command.
+- Formatting with `cargo fmt` is fine.
+- On Linux and in CI, use Cargo.
+- If falling back to Cargo on a Mac with Corgi installed, explain why
+  before running it.
+- Do not run equivalent Cargo and Corgi checks merely to validate twice.
 
 ## Performance Considerations
 

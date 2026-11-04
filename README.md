@@ -95,4 +95,5 @@ to Cargo. See the
 
 ## License
 
-To be determined.
+Kver's original code, documentation, and app icon are [MIT-licensed](LICENSE).
+Third-party dependencies and copied material retain their own licenses.

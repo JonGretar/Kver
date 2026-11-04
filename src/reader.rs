@@ -1205,7 +1205,7 @@ impl Render for Preview {
                                     .child(reader_button(
                                         "zoom-out",
                                         "Zoom out",
-                                        Some(IconName::Minus),
+                                        Some(IconName::ZoomOut),
                                         Box::new(ZoomOut),
                                         has_document,
                                         false,
@@ -1213,7 +1213,7 @@ impl Render for Preview {
                                     .child(reader_button(
                                         "zoom-in",
                                         "Zoom in",
-                                        Some(IconName::Plus),
+                                        Some(IconName::ZoomIn),
                                         Box::new(ZoomIn),
                                         has_document,
                                         false,

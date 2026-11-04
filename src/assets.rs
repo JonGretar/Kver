@@ -7,7 +7,7 @@ use gpui_kit::{
     assets::{Assets, icon_assets},
 };
 
-icon_assets!(ReaderIcons, [MoveHorizontal, Expand]);
+icon_assets!(ReaderIcons, [MoveHorizontal, Expand, ZoomIn, ZoomOut]);
 
 /// The asset source registered by both the app and reader integration tests.
 pub struct ReaderAssets;
@@ -38,6 +38,8 @@ mod tests {
         for path in [
             "icons/move-horizontal.svg",
             "icons/expand.svg",
+            "icons/zoom-in.svg",
+            "icons/zoom-out.svg",
             "icons/arrow-down.svg",
         ] {
             assert!(ReaderAssets.load(path).unwrap().is_some(), "{path}");

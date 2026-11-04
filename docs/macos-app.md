@@ -10,17 +10,20 @@ intend to run it (Apple silicon and Intel builds are architecture-specific).
 ## Build
 
 Install Rust 1.92 or newer and Xcode with its Metal Toolchain component.
+Install Corgi (`cargo install corgi-build`) to use its shared build cache;
+the script falls back to Cargo if Corgi is not installed.
 From a checkout of this repository:
 
 ```sh
 sh scripts/build-macos-app.sh
 ```
 
-The script runs `cargo +stable build --release --locked --bin kver` and creates
+The script builds the release binary with Corgi when available, or with
+`cargo +stable build --release --locked --bin kver` otherwise, and creates
 `target/release/Kver.app`. Re-running replaces the bundle with the new binary
-and icon. If `CARGO_TARGET_DIR` is set, the bundle and release binary are instead
-under `$CARGO_TARGET_DIR/release/`. The app has no bundled PDF and no PDF file
-association.
+and icon. If `CARGO_TARGET_DIR` is set, both tools place the bundle and
+release binary under `$CARGO_TARGET_DIR/release/`. The app has no bundled PDF
+and no PDF file association.
 
 For a versioned Apple silicon archive, run `sh scripts/package-macos-app.sh`
 on an Apple silicon Mac. It builds the same app, checks the bundle version

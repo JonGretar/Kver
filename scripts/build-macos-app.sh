@@ -22,7 +22,11 @@ if [ -z "$version" ]; then
     exit 1
 fi
 
-cargo +stable build --release --locked --bin kver
+if command -v corgi >/dev/null 2>&1; then
+    corgi build --release --bin kver --target-dir "${CARGO_TARGET_DIR:-target}"
+else
+    cargo +stable build --release --locked --bin kver
+fi
 
 release_dir="${CARGO_TARGET_DIR:-target}/release"
 bundle="$release_dir/Kver.app"

@@ -3,7 +3,9 @@ set -eu
 
 # Preparation runs before Cloud Runner setup and also on local macOS checkouts.
 export PATH="$HOME/.cargo/bin:$PATH"
-if command -v cargo >/dev/null 2>&1; then
+if [ "$(uname -s)" = "Darwin" ] && command -v corgi >/dev/null 2>&1; then
+    corgi fetch
+elif command -v cargo >/dev/null 2>&1; then
     cargo fetch --locked
 else
     echo "Cargo is not installed yet; skipping dependency fetch (Cloud Runner setup installs Rust)."

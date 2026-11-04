@@ -46,13 +46,14 @@ release gates and current progress.
 ## Try the prototype
 
 On macOS, install Rust 1.92 or newer and Xcode with the Metal Toolchain
-component. From a checkout of this repository, run:
+component. Install [Corgi](https://github.com/ConradIrwin/corgi) with
+`cargo install corgi-build`. From a checkout of this repository, run:
 
 ```sh
-cargo +stable run -- examples/readme-sample.pdf
+corgi run -- examples/readme-sample.pdf
 ```
 
-Run `cargo +stable run` without a path to choose a PDF from the window. Scroll
+Run `corgi run` without a path to choose a PDF from the window. Scroll
 with a wheel/trackpad or `j`/`k`; jump between pages with left/right or `p`/`n`.
 Use `=` and `-` or the toolbar buttons to zoom. The prototype renders visible
 pages in background work, but is not yet the downloadable macOS MVP.
@@ -60,6 +61,31 @@ pages in background work, but is not yet the downloadable macOS MVP.
 For a local unsigned `.app`, see the [macOS build guide](docs/macos-app.md).
 For rendering evidence and known limitations, see the
 [validation record](docs/rendering-validation.md).
+
+### Build and test
+
+Corgi is the local macOS build path. Its machine-wide cache shares compiled
+artifacts across checkouts:
+
+```sh
+corgi build
+corgi build --release
+corgi test --all-targets --features screenshot
+```
+
+Until Corgi's feature-planning issue is fixed, Kver enables GPUI Kit's
+`test-support` dependencies for normal GUI builds so Corgi can run the visual
+tests. The `screenshot` feature still gates the visual test target; plain
+`corgi test` does not run it. This adds build dependencies to normal GUI
+builds, but the measured release binary grew by about 0.5 MiB. The first
+Corgi build populates the shared store; it does not remove existing Cargo
+`target/` directories or the user-local `sccache` cache.
+
+Corgi is macOS-only. Linux Cloud Runners and CI continue using Cargo
+(`cargo +stable test --locked --all-targets --features screenshot` for the
+full suite). Local macOS packaging uses Corgi when available and falls back
+to Cargo. See the
+[Corgi evaluation](docs/research/corgi.md) for measurements and limitations.
 
 ## Inspiration
 

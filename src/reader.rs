@@ -9,8 +9,8 @@ use std::{
 use gpui_kit as gpui;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    App, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, PathPromptOptions, RenderImage,
-    ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
+    App, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, RenderImage, ScrollHandle,
+    Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
     base::{Disableable, FocusTrapElement, TestSupportExt as _},
@@ -377,33 +377,18 @@ impl Preview {
 
     pub fn open_dialog(&mut self, cx: &mut Context<Self>) {
         let generation = self.generation;
-        let choice = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Open PDF".into()),
-        });
+        let choice = rfd::AsyncFileDialog::new()
+            .set_title("Open PDF")
+            .add_filter("PDF documents", &["pdf"])
+            .pick_file();
         cx.spawn(async move |this, cx| {
             let result = choice.await;
             let _ = this.update(cx, |this, cx| {
                 if generation != this.generation {
                     return;
                 }
-                match result {
-                    Ok(Ok(Some(paths))) => {
-                        if let Some(path) = paths.into_iter().next() {
-                            this.open_path(path, cx);
-                        }
-                    }
-                    Ok(Ok(None)) => {}
-                    Ok(Err(error)) => {
-                        this.status = format!("Cannot choose PDF: {error}");
-                        cx.notify();
-                    }
-                    Err(_) => {
-                        this.status = "Cannot choose PDF: file picker closed unexpectedly".into();
-                        cx.notify();
-                    }
+                if let Some(file) = result {
+                    this.open_path(file.path().to_path_buf(), cx);
                 }
             });
         })

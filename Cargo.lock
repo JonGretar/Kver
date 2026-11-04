@@ -3867,8 +3867,6 @@ name = "kver"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
- "gpui-pre",
- "gpui-pre-platform",
  "hayro",
  "image",
 ]

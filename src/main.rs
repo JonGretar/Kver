@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use gpui::App;
+use gpui_kit::App;
+use gpui_kit::platform as gpui_platform;
+use kver::assets::ReaderAssets;
 use kver::reader::bind_reader_keys;
 use kver::reader_windows;
 
@@ -14,9 +16,10 @@ fn main() {
     let path = first.map(PathBuf::from);
 
     gpui_platform::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(ReaderAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
+            gpui_kit::component::theme::Theme::sync_system_appearance(None, cx);
             bind_reader_keys(cx);
             #[cfg(target_os = "macos")]
             kver::app_menu::install(cx);

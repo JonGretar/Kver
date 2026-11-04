@@ -1,6 +1,7 @@
 //! macOS application chrome; reader operations remain window-local Actions.
 
-use gpui::{App, KeyBinding, Menu, MenuItem};
+use gpui_kit as gpui;
+use gpui_kit::{App, KeyBinding, Menu, MenuItem};
 
 use crate::reader::{Copy, OpenPdf};
 use crate::reader_windows::{NewWindow, NextWindow, PreviousWindow};

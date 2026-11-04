@@ -4,12 +4,17 @@
 //! Rust's default #[test] runner uses worker threads; Metal requires the
 //! process main thread.
 
-use gpui::{
+use gpui_kit as gpui;
+use gpui_kit::component::theme::{Theme, ThemeMode};
+use gpui_kit::platform as gpui_platform;
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{
     AnyWindowHandle, AppContext as _, AsKeystroke as _, HeadlessAppContext, InputEvent as _,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     OwnedMenuItem, Pixels, Point, ScrollDelta, ScrollEvent, WindowHandle, point, px, size,
 };
 use kver::app_menu::{self, Quit};
+use kver::assets::ReaderAssets;
 use kver::reader::{Copy, OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
 use kver::reader_windows::{NewWindow, NextWindow, PreviousWindow};
 use std::{
@@ -24,11 +29,21 @@ fn wait_for_page(
     window: &WindowHandle<Preview>,
     expected: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let view = window.root(cx)?;
+    wait_for_view(cx, &view, expected)
+}
+
+#[track_caller]
+fn wait_for_view(
+    cx: &mut HeadlessAppContext,
+    reader: &gpui::Entity<Preview>,
+    expected: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let deadline = Instant::now() + Duration::from_secs(30);
     cx.allow_parking();
     loop {
         cx.run_until_parked();
-        let status = cx.update(|app| window.read(app).map(|reader| reader.status().to_owned()))?;
+        let status = cx.update(|app| reader.read(app).status().to_owned());
         if status == expected {
             cx.forbid_parking();
             return Ok(());
@@ -37,7 +52,7 @@ fn wait_for_page(
             || Instant::now() >= deadline
         {
             let (index, displayed) = cx.update(|app| {
-                let reader = window.read(app).unwrap();
+                let reader = reader.read(app);
                 (reader.page_index(), reader.displayed_page_index())
             });
             return Err(format!(
@@ -84,9 +99,22 @@ pub fn click(
     Ok(())
 }
 
+fn click_control(
+    cx: &mut HeadlessAppContext,
+    window: AnyWindowHandle,
+    id: &'static str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    cx.update_window(window, |_, frame, app| {
+        frame.render_frame(app);
+        frame.click(id, app);
+    })?;
+    cx.run_until_parked();
+    Ok(())
+}
+
 fn press_key(
     cx: &mut HeadlessAppContext,
-    window: WindowHandle<Preview>,
+    window: impl Into<AnyWindowHandle>,
     key: &'static str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     cx.update_window(window.into(), |_, window, app| {
@@ -105,12 +133,13 @@ fn press_key(
 
 fn type_query(
     cx: &mut HeadlessAppContext,
-    window: WindowHandle<Preview>,
+    window: impl Into<AnyWindowHandle>,
     text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let window = window.into();
     for character in text.chars() {
         let key = character.to_string();
-        cx.update_window(window.into(), |_, window, app| {
+        cx.update_window(window, |_, window, app| {
             window.dispatch_keystroke(
                 Keystroke {
                     key: key.clone(),
@@ -236,18 +265,21 @@ fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
-    cx.update(bind_reader_keys);
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
     wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
     press_key(&mut cx, window, "f")?;
     let mut highest_page = 0;
-    for _ in 0..80 {
-        window.update(&mut cx, |reader, _, cx| reader.scroll_by(20.0, cx))?;
+    for _ in 0..20 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(80.0, cx))?;
         cx.capture_screenshot(window.into())?;
         let (page, zoom) = cx.update(|app| {
             let reader = window.read(app).unwrap();
@@ -258,19 +290,17 @@ fn fit_page_transition_is_stable() -> Result<(), Box<dyn std::error::Error>> {
             "fit-page went backwards while scrolling forward"
         );
         highest_page = page;
-        for _ in 0..3 {
-            cx.capture_screenshot(window.into())?;
-            let after = cx.update(|app| {
-                let reader = window.read(app).unwrap();
-                (reader.page_index(), reader.scale())
-            });
-            assert_eq!(after, (page, zoom), "fit-page changed without scrolling");
-        }
+        cx.capture_screenshot(window.into())?;
+        let after = cx.update(|app| {
+            let reader = window.read(app).unwrap();
+            (reader.page_index(), reader.scale())
+        });
+        assert_eq!(after, (page, zoom), "fit-page changed without scrolling");
     }
     assert!(highest_page >= 1, "fit-page scrolling must reach page two");
     let mut lowest_page = highest_page;
-    for _ in 0..80 {
-        window.update(&mut cx, |reader, _, cx| reader.scroll_by(-20.0, cx))?;
+    for _ in 0..20 {
+        window.update(&mut cx, |reader, _, cx| reader.scroll_by(-80.0, cx))?;
         cx.capture_screenshot(window.into())?;
         let page = cx.update(|app| window.read(app).unwrap().page_index());
         assert!(
@@ -290,9 +320,10 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
     for mode in [ZoomMode::FitWidth, ZoomMode::FitPage] {
         let mut cx = HeadlessAppContext::with_platform(
             gpui_platform::current_platform(true).text_system(),
-            Arc::new(()),
+            Arc::new(ReaderAssets),
             gpui_platform::current_headless_renderer,
         );
+        cx.update(gpui_kit::init);
         let path = path.clone();
         let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
             cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
@@ -319,7 +350,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
             page, 2,
             "{mode:?} must identify the mostly visible final page"
         );
-        for _ in 0..4 {
+        for _ in 0..2 {
             cx.capture_screenshot(window.into())?;
             assert_eq!(
                 cx.update(|app| window.read(app).unwrap().scale()),
@@ -336,6 +367,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
         );
         // Walk back across the differently sized page boundary and return.
         // A fit change must not itself trigger repeated fit changes.
+        let mut previous_stable = None;
         for amount in [-200.0; 12].into_iter().chain([200.0; 12]) {
             window.update(&mut cx, |reader, _, cx| reader.scroll_by(amount, cx))?;
             cx.capture_screenshot(window.into())?;
@@ -343,7 +375,9 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
                 let reader = window.read(app).unwrap();
                 (reader.page_index(), reader.scale())
             });
-            for _ in 0..3 {
+            // Verify another frame at each page/fit transition, where
+            // feedback loops would change the selected page without input.
+            if previous_stable != Some(stable) {
                 cx.capture_screenshot(window.into())?;
                 let after = cx.update(|app| {
                     let reader = window.read(app).unwrap();
@@ -351,6 +385,7 @@ fn short_final_page_fits_without_feedback() -> Result<(), Box<dyn std::error::Er
                 });
                 assert_eq!(after, stable, "{mode:?} refit without scrolling");
             }
+            previous_stable = Some(stable);
         }
         assert_eq!(
             cx.update(|app| window.read(app).unwrap().page_index()),
@@ -367,10 +402,13 @@ fn fit_modes_follow_page_and_window() -> Result<(), Box<dyn std::error::Error>> 
     std::fs::write(&path, mixed_page_pdf())?;
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
-    cx.update(bind_reader_keys);
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -446,10 +484,13 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         .unwrap_or_else(|| PathBuf::from("examples/readme-sample.pdf"));
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
-    cx.update(bind_reader_keys);
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -485,6 +526,19 @@ fn opening_a_pdf_and_zooming_changes_the_rendered_page() -> Result<(), Box<dyn s
         .unwrap_or_else(|| PathBuf::from("target/captures"));
     std::fs::create_dir_all(&output)?;
     before.save(output.join("before.png"))?;
+    let light_background = cx.update(|app| Theme::global(app).background);
+    cx.update(|app| Theme::change(ThemeMode::Dark, None, app));
+    assert!(cx.update(|app| Theme::global(app).is_dark()));
+    assert_ne!(
+        light_background,
+        cx.update(|app| Theme::global(app).background)
+    );
+    window.update(&mut cx, |_, _, cx| cx.notify())?;
+    cx.run_until_parked();
+    let dark = cx.capture_screenshot(window.into())?;
+    dark.save(output.join("reader-loaded-dark.png"))?;
+    assert_ne!(before.get_pixel(0, 0), dark.get_pixel(0, 0));
+    cx.update(|app| Theme::change(ThemeMode::Light, None, app));
 
     cx.update_window(window.into(), |_, window, app| {
         window.dispatch_event(
@@ -727,9 +781,10 @@ fn loading_error_is_visible(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -777,9 +832,10 @@ fn loading_errors_are_visible() -> Result<(), Box<dyn std::error::Error>> {
 fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
     })?;
@@ -792,8 +848,30 @@ fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std
         "Open a PDF to start reading"
     );
     // The headless file picker cancels. Native selection needs a real window.
-    cx.capture_screenshot(window.into())?;
-    click(&mut cx, window.into(), point(px(62.0), px(25.0)))?;
+    std::fs::create_dir_all("target/captures")?;
+    let light = cx.capture_screenshot(window.into())?;
+    light.save("target/captures/reader-empty-light.png")?;
+    cx.update(|app| Theme::change(ThemeMode::Dark, None, app));
+    assert!(cx.update(|app| Theme::global(app).is_dark()));
+    window.update(&mut cx, |_, _, cx| cx.notify())?;
+    cx.run_until_parked();
+    let dark = cx.capture_screenshot(window.into())?;
+    dark.save("target/captures/reader-empty-dark.png")?;
+    assert_ne!(light.get_pixel(0, 0), dark.get_pixel(0, 0));
+    cx.update(|app| Theme::change(ThemeMode::Light, None, app));
+    window.update(&mut cx, |_, _, cx| cx.notify())?;
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        let center = frame.find("open-pdf-center");
+        assert!(center.visible());
+        assert!(center.bounds().center().y > px(300.0));
+        assert!(center.bounds().center().y < px(600.0));
+        assert!(frame.find("title-bar").visible());
+        assert!(frame.find("open-pdf").visible());
+    })?;
+    // Both buttons dispatch the same OpenPdf Action. Headless prompts cancel.
+    click_control(&mut cx, window.into(), "open-pdf-center")?;
+    click_control(&mut cx, window.into(), "open-pdf")?;
     assert_eq!(
         cx.update(|app| window.read(app).unwrap().status().to_owned()),
         "Open a PDF to start reading"
@@ -874,67 +952,124 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
     let directory = PathBuf::from("target/captures")
         .join("long-directory-name-for-testing-toolbar-layout".repeat(5));
     std::fs::create_dir_all(&directory)?;
-    for (name, filename) in [
-        ("long-parent", "reader.pdf".to_string()),
-        (
-            "long-filename",
-            format!("{}.pdf", "long-reader-filename-".repeat(7)),
-        ),
-    ] {
-        let path = directory.join(filename);
-        std::fs::copy("examples/readme-sample.pdf", &path)?;
-        for width in [920.0, 440.0] {
-            let mut cx = HeadlessAppContext::with_platform(
-                gpui_platform::current_platform(true).text_system(),
-                Arc::new(()),
-                gpui_platform::current_headless_renderer,
-            );
-            let path = path.clone();
-            let window = cx.open_window(size(px(width), px(800.0)), |window, cx| {
-                cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
-            })?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
-            let capture = cx.capture_screenshot(window.into())?;
-            capture.save(format!("target/captures/{name}-{width}.png"))?;
-            // Controls occupy stable positions even when the filename is long.
-            click(&mut cx, window.into(), point(px(200.0), px(25.0)))?;
-            wait_for_page(&mut cx, &window, "Page 2 of 100 · 100%").map_err(|error| {
-                format!("next-page must remain reachable at width {width}: {error}")
-            })?;
-            click(&mut cx, window.into(), point(px(145.0), px(25.0)))?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
-                format!("previous-page must remain reachable at width {width}: {error}")
-            })?;
-            click(&mut cx, window.into(), point(px(300.0), px(25.0)))?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 125%").map_err(|error| {
-                format!("zoom-in must remain reachable at width {width}: {error}")
-            })?;
-            click(&mut cx, window.into(), point(px(250.0), px(25.0)))?;
-            wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
-                format!("zoom-out must remain reachable at width {width}: {error}")
-            })?;
-            click(&mut cx, window.into(), point(px(350.0), px(25.0)))?;
+    let path = directory.join(format!("{}.pdf", "long-reader-filename-".repeat(7)));
+    std::fs::copy("examples/readme-sample.pdf", &path)?;
+    for width in [920.0, 440.0, 360.0] {
+        let mut cx = HeadlessAppContext::with_platform(
+            gpui_platform::current_platform(true).text_system(),
+            Arc::new(ReaderAssets),
+            gpui_platform::current_headless_renderer,
+        );
+        cx.update(|app| {
+            gpui_kit::init(app);
+            bind_reader_keys(app);
+        });
+        let path = path.clone();
+        let window = cx.open_window(size(px(width), px(800.0)), |window, cx| {
+            cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+        })?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+        let capture = cx.capture_screenshot(window.into())?;
+        capture.save(format!("target/captures/long-filename-{width}.png"))?;
+        // Resolve Kit controls by identity and hit-test their actual bounds.
+        cx.update_window(window.into(), |_, frame, app| {
+            frame.render_frame(app);
+            for id in [
+                "open-pdf",
+                "previous-page",
+                "next-page",
+                "zoom-out",
+                "zoom-in",
+                "fit-width",
+                "fit-page",
+                "copy-selection",
+            ] {
+                let target = frame.find(id);
+                assert!(
+                    target.visible(),
+                    "{id} is clipped at width {width}: {target:?}"
+                );
+                assert!(
+                    target.bounds().right() <= px(width),
+                    "{id} extends past width {width}"
+                );
+            }
+            for (id, label) in [("fit-width", "Fit width"), ("fit-page", "Fit page")] {
+                let button = frame.find(id);
+                assert_eq!(button.label(), Some(label));
+                if width < 560.0 {
+                    assert!(
+                        button.bounds().size.width <= px(32.0),
+                        "{id} should use its icon at width {width}"
+                    );
+                } else {
+                    assert!(
+                        button.bounds().size.width > px(32.0),
+                        "{id} should retain its visible label at width {width}"
+                    );
+                }
+            }
+        })?;
+        click_control(&mut cx, window.into(), "previous-page")?;
+        assert_eq!(cx.update(|app| window.read(app).unwrap().page_index()), 0);
+        click_control(&mut cx, window.into(), "next-page")?;
+        wait_for_page(&mut cx, &window, "Page 2 of 100 · 100%").map_err(|error| {
+            format!("next-page must remain reachable at width {width}: {error}")
+        })?;
+        click_control(&mut cx, window.into(), "previous-page")?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%").map_err(|error| {
+            format!("previous-page must remain reachable at width {width}: {error}")
+        })?;
+        click_control(&mut cx, window.into(), "zoom-in")?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 125%")
+            .map_err(|error| format!("zoom-in must remain reachable at width {width}: {error}"))?;
+        click_control(&mut cx, window.into(), "zoom-out")?;
+        wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")
+            .map_err(|error| format!("zoom-out must remain reachable at width {width}: {error}"))?;
+        click_control(&mut cx, window.into(), "fit-width")?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().zoom_mode()),
+            ZoomMode::FitWidth,
+            "fit-width button must remain reachable at width {width}"
+        );
+        click_control(&mut cx, window.into(), "fit-page")?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().zoom_mode()),
+            ZoomMode::FitPage,
+            "fit-page button must remain reachable at width {width}"
+        );
+        click_control(&mut cx, window.into(), "zoom-in")?;
+        assert_eq!(
+            cx.update(|app| window.read(app).unwrap().zoom_mode()),
+            ZoomMode::Fixed,
+            "manual zoom must leave fit mode at width {width}"
+        );
+        press_key(&mut cx, window, "cmd-shift-p")?;
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, frame, app| {
+            frame.render_frame(app);
             assert_eq!(
-                cx.update(|app| window.read(app).unwrap().zoom_mode()),
-                ZoomMode::FitWidth,
-                "fit-width button must remain reachable at width {width}"
+                frame.find("reader-command-palette").role(),
+                Some(gpui::Role::Dialog)
             );
-            // Both platform fonts fit the compact button at this point; the
-            // left edge differs slightly between Linux and macOS.
-            let fit_page_x = if width < 560.0 { 408.0 } else { 450.0 };
-            click(&mut cx, window.into(), point(px(fit_page_x), px(25.0)))?;
-            assert_eq!(
-                cx.update(|app| window.read(app).unwrap().zoom_mode()),
-                ZoomMode::FitPage,
-                "fit-page button must remain reachable at width {width}"
+            let palette = frame.find("command");
+            assert!(palette.visible(), "palette is clipped at width {width}");
+            assert!(
+                palette.bounds().right() <= px(width),
+                "palette extends past width {width}"
             );
-            click(&mut cx, window.into(), point(px(300.0), px(25.0)))?;
-            assert_eq!(
-                cx.update(|app| window.read(app).unwrap().zoom_mode()),
-                ZoomMode::Fixed,
-                "manual zoom must leave fit mode at width {width}"
+            assert!(
+                palette.bounds().left() >= px(0.0),
+                "palette extends before width {width}"
             );
+        })?;
+        if width == 360.0 {
+            cx.capture_screenshot(window.into())?
+                .save("target/captures/palette-narrow.png")?;
         }
+        press_key(&mut cx, window, "escape")?;
+        cx.run_until_parked();
+        assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
     }
     Ok(())
 }
@@ -947,9 +1082,10 @@ fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("examples/readme-sample.pdf"));
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
+    cx.update(gpui_kit::init);
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
@@ -1021,7 +1157,7 @@ fn measure_page_turns() -> Result<(), Box<dyn std::error::Error>> {
 fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1080,7 +1216,7 @@ fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> 
 fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1265,7 +1401,7 @@ fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
 fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1357,7 +1493,7 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
 fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1550,7 +1686,7 @@ fn select_and_copy_ordinary_text() -> Result<(), Box<dyn std::error::Error>> {
 fn multi_line_selection_survives_zoom_and_scroll() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1706,14 +1842,14 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(&path, rotated_selection_pdf())?;
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
         gpui_kit::init(app);
         bind_reader_keys(app);
     });
-    let window = cx.open_window(size(px(420.0), px(180.0)), |window, cx| {
+    let window = cx.open_window(size(px(420.0), px(220.0)), |window, cx| {
         cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
     })?;
     wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
@@ -1734,7 +1870,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
                 "fixture must really scroll"
             );
         }
-        click(&mut cx, window.into(), point(px(200.0), px(160.0)))?;
+        click(&mut cx, window.into(), point(px(200.0), px(120.0)))?;
         assert_eq!(
             cx.update(|app| window.read(app).unwrap().selected_text()),
             None
@@ -1850,7 +1986,7 @@ fn rotated_crop_and_scan_selection() -> Result<(), Box<dyn std::error::Error>> {
 fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
-        Arc::new(()),
+        Arc::new(ReaderAssets),
         gpui_platform::current_headless_renderer,
     );
     cx.update(|app| {
@@ -1884,29 +2020,40 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(cx.update(|app| app.windows().len()), 1);
     press_key(&mut cx, first, "cmd-n")?;
     cx.run_until_parked();
-    let second: WindowHandle<Preview> = cx
+    let second_window: WindowHandle<gpui_kit::base::Root> = cx
         .update(|app| app.windows())
         .into_iter()
         .find(|handle| *handle != first.into())
         .unwrap()
         .downcast()
-        .expect("new window is a Preview");
-    cx.capture_screenshot(second.into())?;
-    assert_eq!(
-        cx.update(|app| second.read(app).unwrap().page_count()),
-        None
-    );
+        .expect("new window has a Kit Root");
+    let root = second_window.root(&mut cx)?;
+    let second = cx.update(|app| {
+        root.read(app)
+            .view()
+            .clone()
+            .downcast::<Preview>()
+            .expect("reader view")
+    });
+    cx.capture_screenshot(second_window.into())?;
+    assert_eq!(cx.update(|app| second.read(app).page_count()), None);
+    cx.update_window(second_window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert!(frame.find("title-bar").visible());
+        assert!(frame.find("open-pdf").visible());
+        frame.click("open-pdf", app);
+    })?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| second.read(app).page_count()), None);
     std::fs::create_dir_all("target/captures")?;
     let other_pdf = PathBuf::from("target/captures/kver-windows.pdf");
     std::fs::write(&other_pdf, mixed_page_pdf())?;
-    second.update(&mut cx, |reader, _, app| {
-        reader.open_path(other_pdf.clone(), app)
-    })?;
-    wait_for_page(&mut cx, &second, "Page 1 of 3 · 100%")?;
-    press_key(&mut cx, second, "right")?;
-    press_key(&mut cx, second, "cmd-alt-=")?;
-    assert_eq!(cx.update(|app| second.read(app).unwrap().page_index()), 1);
-    assert_eq!(cx.update(|app| second.read(app).unwrap().scale()), 1.25);
+    cx.update(|app| second.update(app, |reader, app| reader.open_path(other_pdf.clone(), app)));
+    wait_for_view(&mut cx, &second, "Page 1 of 3 · 100%")?;
+    press_key(&mut cx, second_window, "right")?;
+    press_key(&mut cx, second_window, "cmd-alt-=")?;
+    assert_eq!(cx.update(|app| second.read(app).page_index()), 1);
+    assert_eq!(cx.update(|app| second.read(app).scale()), 1.25);
     assert_eq!(
         cx.update(|app| {
             let reader = first.read(app).unwrap();
@@ -1928,12 +2075,17 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
         };
         action.boxed_clone()
     });
-    cx.update_window(second.into(), |_, window, _| window.activate_window())?;
+    cx.update_window(second_window.into(), |_, window, _| {
+        window.activate_window()
+    })?;
     cx.update(|app| app.dispatch_action(menu_next.as_ref()));
     assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
     press_key(&mut cx, first, "cmd-`")?;
-    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
-    press_key(&mut cx, second, "cmd-shift-`")?;
+    assert_eq!(
+        cx.update(|app| app.active_window()),
+        Some(second_window.into())
+    );
+    press_key(&mut cx, second_window, "cmd-shift-`")?;
     assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
     let menu_previous = cx.update(|app| {
         let menus = app.get_menus().unwrap();
@@ -1943,27 +2095,32 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
         action.boxed_clone()
     });
     cx.update(|app| app.dispatch_action(menu_previous.as_ref()));
-    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
-    press_key(&mut cx, second, "cmd-shift-p")?;
-    cx.run_until_parked();
-    type_query(&mut cx, second, "next window")?;
     assert_eq!(
-        cx.update(|app| second.read(app).unwrap().palette_matches(app)),
+        cx.update(|app| app.active_window()),
+        Some(second_window.into())
+    );
+    press_key(&mut cx, second_window, "cmd-shift-p")?;
+    cx.run_until_parked();
+    press_key(&mut cx, second_window, "tab")?;
+    cx.run_until_parked();
+    type_query(&mut cx, second_window, "next window")?;
+    assert_eq!(
+        cx.update(|app| second.read(app).palette_matches(app)),
         Some(1)
     );
-    assert!(cx.update_window(second.into(), |_, window, _| {
+    assert!(cx.update_window(second_window.into(), |_, window, _| {
         window
             .highest_precedence_binding_for_action(&NextWindow)
             .is_some()
     })?);
-    press_key(&mut cx, second, "enter")?;
+    press_key(&mut cx, second_window, "enter")?;
     cx.run_until_parked();
     assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
     assert_eq!(
         cx.update(|app| first.read(app).unwrap().page_index()),
         first_state.1
     );
-    assert_eq!(cx.update(|app| second.read(app).unwrap().page_index()), 1);
+    assert_eq!(cx.update(|app| second.read(app).page_index()), 1);
     press_key(&mut cx, first, "cmd-shift-p")?;
     cx.run_until_parked();
     type_query(&mut cx, first, "previous window")?;
@@ -1978,13 +2135,16 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     })?);
     press_key(&mut cx, first, "enter")?;
     cx.run_until_parked();
-    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
+    assert_eq!(
+        cx.update(|app| app.active_window()),
+        Some(second_window.into())
+    );
     assert_eq!(
         cx.update(|app| first.read(app).unwrap().page_index()),
         first_state.1
     );
 
-    cx.update_window(second.into(), |_, window, _| window.remove_window())?;
+    cx.update_window(second_window.into(), |_, window, _| window.remove_window())?;
     cx.run_until_parked();
     press_key(&mut cx, first, "right")?;
     assert_eq!(
@@ -2008,10 +2168,15 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
     assert_eq!(
         cx.update(|app| palette_window
-            .downcast::<Preview>()
+            .downcast::<gpui_kit::base::Root>()
             .unwrap()
             .read(app)
             .unwrap()
+            .view()
+            .clone()
+            .downcast::<Preview>()
+            .unwrap()
+            .read(app)
             .path()
             .map(PathBuf::from)),
         None

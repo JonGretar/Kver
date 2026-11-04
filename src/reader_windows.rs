@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use gpui::{App, AppContext as _, Bounds, Window, WindowBounds, WindowOptions, px, size};
+use gpui_kit as gpui;
+use gpui_kit::component::TitleBar;
+use gpui_kit::{App, AppContext as _, Bounds, Window, WindowBounds, WindowOptions, px, size};
 
 use crate::reader::Preview;
 
@@ -10,17 +12,17 @@ gpui::actions!(kver, [NewWindow, NextWindow, PreviousWindow]);
 
 pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<(), String> {
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
-    let handle = cx
-        .open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..Default::default()
-            },
-            |window, cx| cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
-        )
-        .map_err(|error| error.to_string())?;
-    handle
-        .update(cx, |_, window, _| window.activate_window())
+    let (handle, _) = gpui_kit::open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(px(360.0), px(240.0))),
+            ..TitleBar::window_options()
+        },
+        cx,
+        |window, cx| cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
+    )
+    .map_err(|error| error.to_string())?;
+    cx.update_window(handle, |_, window, _| window.activate_window())
         .map_err(|error| error.to_string())?;
     Ok(())
 }

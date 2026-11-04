@@ -14,8 +14,15 @@ depend on the PDF engine or physical keybindings.
 ## Application boundaries
 
 `src/main.rs` initializes GPUI Kit, keybindings, and the initial reader window.
+`src/assets.rs` combines Kit's default component assets with only the extra
+reader icons used by zoom and fit controls; the full icon catalog is not embedded.
 `src/reader_windows.rs` creates empty reader windows and cycles focus between
 open windows; it does not share document or viewport state between readers.
+Each window mounts its reader inside GPUI Kit's `Root`, which owns component
+overlays and applies the theme's interface scale. The window uses Kit's
+`TitleBar` options so its native controls and dragging agree with the document
+title. Kver follows the system's light/dark appearance for the reader chrome;
+the PDF page itself retains its document colors.
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, and premultiplied
@@ -52,12 +59,22 @@ navigation and loading behavior. The reader owns the file picker and ignores
 obsolete asynchronous load results, so entry points share error handling.
 Document-dependent Actions are unavailable in an empty, loading, or error
 window; each reader checks its own document state.
+Kit's `TitleBar` holds the truncating filename and persistent Open PDF button;
+the grouped `Toolbar` holds navigation, zoom, fit, and selection commands.
+`StatusBar` shows page position and zoom without taking space from the PDF.
+`Empty` shows the open, loading, or recoverable error state in the document
+area. Control presentation uses Kit's semantic theme colors and component
+states rather than a reader-specific palette.
 
 The palette is an inline overlay owned by the reader. This keeps the reader
 in its Action dispatch path rather than relying on a global handler that
-could affect another window. GPUI Kit resolves shortcut hints from active
-keybindings. Bare reading keys apply only while the reader has focus; text
-entry in the palette does not navigate the PDF.
+could affect another window. Kit's `Command` owns search and selection;
+`Root` handles the overlay's focus trap through Kit's `FocusTrapElement`.
+The overlay has a dialog role and a rem-based maximum width so it remains
+usable in narrow windows. Dismissing it restores reader focus. GPUI Kit
+resolves shortcut hints from active keybindings. Bare reading keys apply only
+while the reader has focus; text entry in the palette does not navigate the
+PDF.
 
 On macOS, `src/app_menu.rs` installs native Kver, File, Edit, and Window menus
 at startup.

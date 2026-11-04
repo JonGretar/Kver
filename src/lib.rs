@@ -1,5 +1,7 @@
 #[cfg(feature = "gui")]
 pub mod app_menu;
+#[cfg(feature = "gui")]
+pub mod assets;
 pub mod coordinates;
 pub mod pdf;
 #[cfg(feature = "gui")]

@@ -11,11 +11,11 @@ release sequence. See [features](features.md) for the corresponding scope.
 | --- | --- | --- |
 | 0. Validate the stack | **Complete** | Hayro and GPUI were validated for the initial macOS prototype, with documented limitations. |
 | 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
-| 2. Build an action-driven reader | **In progress** | The GPUI Kit reader interface, shared Actions, independent windows, and visible text selection/copy are implemented. End-to-end milestone validation (#42) remains. |
+| 2. Build an action-driven reader | **Complete** | The integrated reader passed headless checks and an Apple silicon native-window check for actions, independent windows, and visible text copy ([#42](https://github.com/JonGretar/Kver/issues/42)). |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** Follow the open child tickets of the
-[reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33).
+**Next work:** Search, outline, history, and the other
+[unscheduled goals](#goals-to-schedule-after-evidence) remain deferred.
 GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
 
@@ -128,6 +128,11 @@ a real-Mac check confirms menus, window switching, UI usability, and actual
 drag-to-copy/paste. Record text extraction limits rather than promising
 perfect copy order for every PDF. This gate does not commit to another release
 version or date.
+
+The integrated checks and native-window confirmation are recorded in
+[#42](https://github.com/JonGretar/Kver/issues/42). Selection is page-local,
+does not guarantee reading order for complex layouts or missing text mappings,
+and does not perform OCR on image-only PDFs.
 
 ## Separate platform delivery
 

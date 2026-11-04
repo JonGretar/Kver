@@ -22,7 +22,7 @@ Test with text, scanned, long, and rotated/cropped PDFs. Password-protected
 PDFs may be included if straightforward, but do not block this release.
 The MVP does not promise OCR.
 
-## Action-driven reader experience — next gate
+## Action-driven reader experience — completed gate
 
 - Refresh the reader UI with GPUI Kit components; settle its exact appearance
   during implementation rather than prescribing a layout here.
@@ -35,10 +35,13 @@ The MVP does not promise OCR.
   ordinary text PDFs. Keep selection aligned through zoom and scrolling,
   exclude off-crop text, and do not imply OCR on image-only scans.
 
-These are the next defined capability gate, not prerequisites for the first
-download. The [reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33)
-defines its acceptance checks; its child issues track implementation. This
-gate does not promise a particular release version or date.
+These capabilities were validated together in
+[#42](https://github.com/JonGretar/Kver/issues/42), following the
+[reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33).
+Selection remains page-local, uses available PDF text mappings, and does not
+include OCR or guaranteed reading order for complex layouts. Search, outline,
+history, and the goals below remain deferred; this gate does not imply another
+release version or date.
 
 ## Goals without a fixed release date
 

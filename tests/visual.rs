@@ -2530,6 +2530,16 @@ fn contents_navigation() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(cx.update(|app| reader.read(app).page_index()), 0);
     cx.update_window(window.into(), |_, window, app| {
         window.render_frame(app);
+        assert!(window.find(("contents-entry", 1usize)).visible());
+    })?;
+    window.update(&mut cx, |reader, _, cx| reader.select_page(2, cx))?;
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        window.click(("contents-disclosure", 0usize), app);
+    })?;
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), 2);
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
         assert!(window.try_find(("contents-entry", 1usize)).is_none());
     })?;
     press_key(&mut cx, window, "right")?;

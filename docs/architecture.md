@@ -102,7 +102,8 @@ preserve its native controls. `src/find_panel.rs` owns the Find query;
 `src/contents_panel.rs` owns Contents focus and GPUI Kit's virtualized
 outline tree. The tree preserves PDF hierarchy, supports collapse/expand with
 the arrow keys, and navigates when a usable row is clicked or confirmed.
-Parent-row clicks also toggle their disclosure. Both panels supply content to the same host; search and
+Only the chevron toggles disclosure by pointer; clicking the rest of a
+parent row navigates without folding it. Both panels supply content to the same host; search and
 outline state remain separate. The sidebar remains attached to the reader
 across document changes, while its outline state resets immediately and
 background extraction results carry the reader's document generation. The

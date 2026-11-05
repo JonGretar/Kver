@@ -5,9 +5,13 @@ use std::sync::Arc;
 use crate::pdf::{OutlineDestination, OutlineEntry};
 use gpui_kit::{App, Context, FocusHandle, IntoElement, Window, div, prelude::*};
 use gpui_kit::{
-    base::TestSupportExt as _,
+    base::{
+        TestSupportExt as _,
+        actions::{SelectLeft, SelectRight},
+    },
     component::{
-        ActiveTheme, Icon, IconName,
+        ActiveTheme, IconName, Sizable as _,
+        button::{Button, ButtonVariants},
         list::ListItem,
         tree::{TreeItem, TreeState, tree},
     },
@@ -125,7 +129,8 @@ impl ContentsPanel {
             .cloned()
             .unwrap_or_default();
         let owner = cx.weak_entity();
-        let content = tree(&self.tree, move |_, entry, selected, _, _| {
+        let tree_state = self.tree.clone();
+        let content = tree(&self.tree, move |row_ix, entry, selected, _, _| {
             let ix = entry
                 .item()
                 .id
@@ -133,11 +138,16 @@ impl ContentsPanel {
                 .and_then(|id| id.parse::<usize>().ok())
                 .expect("Contents tree IDs come from outline_tree");
             let navigable = entries[ix].destination().is_some();
+            let folder = entry.is_folder();
+            let expanded = entry.is_expanded();
             let owner = owner.clone();
+            let selection = tree_state.clone();
+            let disclosure = tree_state.clone();
             ListItem::new(("contents-entry", ix))
                 .accessibility_label(entry.item().label.clone())
                 .selected(selected)
                 .h_8()
+                .text_sm()
                 .pl(gpui_kit::rems((entry.depth().min(8) as f32) * 0.75))
                 .child(
                     div()
@@ -145,23 +155,50 @@ impl ContentsPanel {
                         .items_center()
                         .min_w_0()
                         .gap_2()
-                        .child(div().w_4().flex_shrink_0().when(entry.is_folder(), |icon| {
-                            icon.child(
-                                Icon::new(if entry.is_expanded() {
+                        .child(if folder {
+                            Button::new(("contents-disclosure", ix))
+                                .ghost()
+                                .xsmall()
+                                .icon(if expanded {
                                     IconName::ChevronDown
                                 } else {
                                     IconName::ChevronRight
                                 })
-                                .size_4(),
-                            )
-                        }))
+                                .accessibility_label(format!(
+                                    "{} {}",
+                                    if expanded { "Collapse" } else { "Expand" },
+                                    entry.item().label
+                                ))
+                                .on_click(move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    disclosure.update(cx, |tree, cx| {
+                                        tree.set_selected_index(Some(row_ix), cx);
+                                        tree.focus(window, cx);
+                                    });
+                                    if expanded {
+                                        window.dispatch_action(Box::new(SelectLeft), cx);
+                                    } else {
+                                        window.dispatch_action(Box::new(SelectRight), cx);
+                                    }
+                                })
+                                .into_any_element()
+                        } else {
+                            div().w_5().flex_shrink_0().into_any_element()
+                        })
                         .child(entry.item().label.clone()),
                 )
-                .when(navigable, |item| {
-                    item.on_click(move |_, window, cx| {
+                .on_click(move |_, window, cx| {
+                    // Tree toggles the entire row by default. Keep its keyboard
+                    // behavior, but reserve pointer disclosure for the chevron.
+                    cx.stop_propagation();
+                    selection.update(cx, |tree, cx| {
+                        tree.set_selected_index(Some(row_ix), cx);
+                        tree.focus(window, cx);
+                    });
+                    if navigable {
                         let _ =
                             owner.update(cx, |reader, cx| reader.select_outline(ix, window, cx));
-                    })
+                    }
                 })
         })
         .when(available, |tree| tree.size_full())

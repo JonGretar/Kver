@@ -132,7 +132,7 @@ its own terms.
 Follow [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 Write notable changes under `## [Unreleased]`, using only relevant categories
 such as `Added`, `Changed`, and `Fixed`. Describe the change from a reader's
-perspective, not as a list of commits; omit routine internal work.
+perspective, not as a list of commits; omit routine internal work. The changelog is meant for the users of the app to see changes. Avoid lengthy technical information or instructions unless it's valuable for the user.
 
 Prepare a release only when explicitly requested. Move the released entries
 under `## [x.y.z] - YYYY-MM-DD`, leave a new `## [Unreleased]` at the top,

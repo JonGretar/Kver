@@ -2467,11 +2467,26 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
             Some("Type a phrase to find it in this PDF")
         );
     })?;
+    press_key(&mut cx, window, "cmd-b")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| reader.read(app).sidebar_panel()), None);
+    press_key(&mut cx, window, "cmd-b")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
     type_query(&mut cx, window, "KVER")?;
+    cx.run_until_parked();
+    press_key(&mut cx, window, "cmd-b")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| reader.read(app).sidebar_panel()), None);
+    press_key(&mut cx, window, "cmd-b")?;
     cx.run_until_parked();
     cx.update_window(window.into(), |_, frame, app| {
         frame.render_frame(app);
         assert_eq!(frame.find("find-query").value(), Some("KVER"));
+        assert_eq!(frame.find("find-query").focused(), Some(true));
         assert!(
             frame
                 .find("find-status")
@@ -2525,7 +2540,15 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     cx.update(|app| reader.update(app, |reader, app| reader.open_path(rotated.clone(), app)));
     wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
-    press_key(&mut cx, window, "cmd-a")?;
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").value(), Some(""));
+        assert_eq!(
+            frame.find("find-status").label(),
+            Some("Type a phrase to find it in this PDF")
+        );
+        assert!(frame.try_find("find-highlight").is_none());
+    })?;
     type_query(&mut cx, window, "visible")?;
     cx.run_until_parked();
     cx.update_window(window.into(), |_, frame, app| {
@@ -2559,6 +2582,12 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(&scan, image_only_pdf())?;
     cx.update(|app| reader.update(app, |reader, app| reader.open_path(scan.clone(), app)));
     wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").value(), Some(""));
+        assert!(frame.try_find("find-highlight").is_none());
+    })?;
+    type_query(&mut cx, window, "visible")?;
     cx.run_until_parked();
     cx.update_window(window.into(), |_, frame, app| {
         frame.render_frame(app);

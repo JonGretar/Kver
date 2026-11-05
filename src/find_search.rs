@@ -99,6 +99,17 @@ pub fn page_rect(hit: &FindMatch, size: (f32, f32)) -> (f32, f32, f32, f32) {
     )
 }
 
+/// Expand the overlay in page/document points, clamped to the visible crop.
+/// The underlying match corners remain unchanged for navigation and zoom.
+pub fn highlight_rect(hit: &FindMatch, size: (f32, f32)) -> (f32, f32, f32, f32) {
+    let (left, top, width, height) = page_rect(hit, size);
+    let x = (left - 2.).max(0.);
+    let y = (top - 2.).max(0.);
+    let right = (left + width + 2.).min(size.0);
+    let bottom = (top + height + 2.).min(size.1);
+    (x, y, right - x, bottom - y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +166,7 @@ mod tests {
         let hit = &matches_on_page(&page, 0, "äb")[0];
         let rect = page_rect(hit, (200., 100.));
         assert_eq!(rect, (28., 10., 14., 20.));
+        assert_eq!(highlight_rect(hit, (200., 100.)), (26., 8., 18., 24.));
         let original = crate::coordinates::PageViewport::new(
             hit.transform,
             1.,

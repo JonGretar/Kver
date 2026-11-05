@@ -4,13 +4,14 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use gpui_kit as gpui;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
-    App, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, RenderImage, ScrollHandle,
-    Window, div, img, point, prelude::*, px, rgb,
+    Animation, AnimationExt, App, BoxShadow, ClipboardItem, Context, Entity, FocusHandle,
+    KeyBinding, RenderImage, ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
     base::{Disableable, FocusTrapElement, TestSupportExt as _},
@@ -74,6 +75,7 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("cmd-f", ShowFind, None),
+        KeyBinding::new("cmd-b", ToggleSidebar, None),
         KeyBinding::new("cmd-g", NextMatch, None),
         KeyBinding::new("cmd-shift-g", PreviousMatch, None),
         KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
@@ -324,6 +326,7 @@ pub struct Preview {
     focus_initialized: bool,
     palette: Option<Entity<CommandState>>,
     sidebar: Option<ReaderSidebar>,
+    pending_find_reset: bool,
     status: String,
 }
 
@@ -354,6 +357,7 @@ impl Preview {
             focus_initialized: false,
             palette: None,
             sidebar: None,
+            pending_find_reset: false,
             status: "Open a PDF to start reading".into(),
         };
         if reader.path.is_some() {
@@ -373,6 +377,7 @@ impl Preview {
         self.selection = None;
         if let Some(sidebar) = self.sidebar.as_mut() {
             sidebar.find_mut().clear_results();
+            self.pending_find_reset = true;
         }
         self.dragging = false;
         self.path = Some(path);
@@ -562,7 +567,9 @@ impl Preview {
             ),
         ));
         if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.find_mut().active = Some(index);
+            let find = sidebar.find_mut();
+            find.active = Some(index);
+            find.pulse = find.pulse.wrapping_add(1);
         }
         self.sync_viewport(cx);
         cx.notify();
@@ -651,11 +658,6 @@ impl Preview {
         self.selected_page = Some(0);
         self.status = self.ready_status();
         self.sync_viewport(cx);
-        if let Some(query) = self.sidebar.as_ref().map(|s| s.find().query(cx))
-            && !query.trim().is_empty()
-        {
-            self.find_query_changed(query, cx);
-        }
     }
 
     fn ready_status(&self) -> String {
@@ -1091,6 +1093,17 @@ impl Preview {
 
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.pending_find_reset {
+            self.pending_find_reset = false;
+            // InputState::set_value needs a Window. Defer the one-shot reset
+            // until after this render, without changing open_path's document API.
+            cx.defer_in(window, |this, window, cx| {
+                if let Some(sidebar) = this.sidebar.as_ref() {
+                    sidebar.find().reset_query(window, cx);
+                    cx.notify();
+                }
+            });
+        }
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
             cx.observe_window_appearance(window, |_, window, cx| {
@@ -1149,28 +1162,56 @@ impl Render for Preview {
                 .when_some(image, |element, image| {
                     element.child(img(image).size_full())
                 });
-            if let Some(hit) = self
+            if let Some((hit, pulse)) = self
                 .sidebar
                 .as_ref()
                 .and_then(|sidebar| {
                     let find = sidebar.find();
-                    find.active.and_then(|active| find.results.get(active))
+                    find.active
+                        .and_then(|active| find.results.get(active))
+                        .map(|hit| (hit, find.pulse))
                 })
-                .filter(|hit| hit.page == index)
+                .filter(|(hit, _)| hit.page == index)
             {
-                let (left, top, width, height) = find_search::page_rect(hit, self.pages[index]);
+                let (left, top, width, height) =
+                    find_search::highlight_rect(hit, self.pages[index]);
+                let (x, y, w, h) = (
+                    left * self.scale,
+                    top * self.scale,
+                    width * self.scale,
+                    height * self.scale,
+                );
+                let color = cx.theme().primary;
+                let scale = self.scale;
                 page = page.child(
                     div()
                         .id("find-highlight")
                         .test_support()
                         .absolute()
-                        .left(px(left * self.scale))
-                        .top(px(top * self.scale))
-                        .w(px(width * self.scale))
-                        .h(px(height * self.scale))
-                        .bg(cx.theme().primary.opacity(0.25))
-                        .border_1()
-                        .border_color(cx.theme().primary),
+                        .left(px(x))
+                        .top(px(y))
+                        .w(px(w))
+                        .h(px(h))
+                        .rounded(px(2. * scale))
+                        .bg(color.opacity(0.27))
+                        .shadow(vec![
+                            BoxShadow::new(px(0.), px(0.), color.opacity(0.28))
+                                .blur_radius(px(4. * scale))
+                                .spread_radius(px(scale)),
+                        ])
+                        .with_animation(
+                            ("find-jump", pulse),
+                            Animation::new(Duration::from_millis(340))
+                                .with_easing(gpui::ease_out_quint()),
+                            move |highlight, phase| {
+                                let jump = (1. - phase) * 5. * scale;
+                                highlight
+                                    .left(px(x - jump))
+                                    .top(px(y - jump))
+                                    .w(px(w + 2. * jump))
+                                    .h(px(h + 2. * jump))
+                            },
+                        ),
                 );
             }
             if let (Some(selection), Some(text)) = (self.selection, self.text.get(&index))

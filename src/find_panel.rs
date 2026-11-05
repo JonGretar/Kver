@@ -22,6 +22,7 @@ pub(crate) struct FindPanel {
     _subscription: Subscription,
     pub(crate) results: Vec<FindMatch>,
     pub(crate) active: Option<usize>,
+    pub(crate) pulse: u64,
     pub(crate) scanned: usize,
     pub(crate) mapped_pages: usize,
     pub(crate) failed_pages: usize,
@@ -43,6 +44,7 @@ impl FindPanel {
             _subscription: subscription,
             results: Vec::new(),
             active: None,
+            pulse: 0,
             scanned: 0,
             mapped_pages: 0,
             failed_pages: 0,
@@ -65,6 +67,17 @@ impl FindPanel {
         self.failed_pages = 0;
         self.truncated = false;
         self.searching = false;
+    }
+
+    /// A new document gets a fresh query (and no undo history from the old PDF).
+    /// `open_path` has no Window, so the reader performs this in its next frame.
+    pub(crate) fn reset_query(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        self.query
+            .update(cx, |query, cx| query.set_value("", window, cx));
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<crate::reader::Preview>) {

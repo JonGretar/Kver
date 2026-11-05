@@ -2494,6 +2494,9 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap()
                 .contains("matches")
         );
+        let snippet = frame.find(("find-snippet", 0usize)).bounds();
+        let page = frame.find(("find-location", 0usize)).bounds();
+        assert!(snippet.right() <= page.left());
     })?;
     press_key(&mut cx, window, "enter")?;
     cx.run_until_parked();
@@ -2514,6 +2517,26 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
     cx.update_window(window.into(), |_, frame, app| {
         frame.render_frame(app);
         assert_eq!(frame.find("find-query").focused(), Some(true));
+        assert!(
+            frame
+                .find("find-status")
+                .label()
+                .unwrap()
+                .starts_with("2 / ")
+        );
+        frame.click("find-previous", app);
+    })?;
+    assert_eq!(
+        cx.update(|app| reader.read(app).active_find_match().map(|hit| hit.0)),
+        Some(0)
+    );
+    click_control(&mut cx, window.into(), "find-next")?;
+    assert_eq!(
+        cx.update(|app| reader.read(app).active_find_match().map(|hit| hit.0)),
+        Some(1)
+    );
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
         frame.click(("find-result", 0usize), app);
     })?;
     let first_page = cx.update(|app| reader.read(app).page_index());
@@ -2527,6 +2550,30 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
         frame.render_frame(app);
         assert!(frame.find("find-highlight").visible());
     })?;
+    cx.update_window(window.into(), |_, frame, _| {
+        frame.resize(size(px(500.), px(700.)));
+    })?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert!(frame.find("find-query").visible());
+        assert!(frame.find("find-next").visible());
+        let snippet = frame.find(("find-snippet", 0usize)).bounds();
+        let page = frame.find(("find-location", 0usize)).bounds();
+        assert!(snippet.right() <= page.left());
+        assert!(page.right() <= frame.find("reader-sidebar").bounds().right());
+    })?;
+    cx.update(|app| Theme::change(ThemeMode::Dark, None, app));
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert!(frame.find(("find-snippet", 0usize)).visible());
+        assert!(frame.find("find-next").visible());
+    })?;
+    cx.update(|app| Theme::change(ThemeMode::Light, None, app));
+    cx.update_window(window.into(), |_, frame, _| {
+        frame.resize(size(px(920.), px(800.)));
+    })?;
+    cx.run_until_parked();
     let rotated = PathBuf::from("target/captures/find-rotated.pdf");
     std::fs::create_dir_all("target/captures")?;
     std::fs::write(&rotated, rotated_selection_pdf())?;
@@ -2581,7 +2628,7 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
     );
     cx.update_window(window.into(), |_, frame, app| {
         frame.render_frame(app);
-        assert_eq!(frame.find("find-status").label(), Some("1 match"));
+        assert_eq!(frame.find("find-status").label(), Some("1 / 1 match"));
         frame.click(("find-result", 0usize), app);
         assert!(frame.find("find-highlight").visible());
     })?;

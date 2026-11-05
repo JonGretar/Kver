@@ -2,13 +2,9 @@
 
 use gpui_kit::base::{Disableable, TestSupportExt as _};
 use gpui_kit::component::{
-    ActiveTheme, Selectable,
-    input::{Input, InputState},
-};
-use gpui_kit::component::{
-    Sizable,
+    ActiveTheme, Icon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants},
-    input::InputEvent,
+    input::{Input, InputEvent, InputState},
 };
 use gpui_kit::{Context, Entity, IntoElement, Subscription, Window, div, prelude::*};
 
@@ -123,10 +119,13 @@ impl FindPanel {
             "No searchable text in this PDF · scans need OCR".to_owned()
         } else if self.results.is_empty() {
             "No matches in mapped text".to_owned()
-        } else if self.results.len() == 1 {
-            "1 match".to_owned()
         } else {
-            format!("{} matches", self.results.len())
+            let count = self.results.len();
+            let label = if count == 1 { "match" } else { "matches" };
+            match self.active {
+                Some(active) => format!("{} / {count} {label}", active + 1),
+                None => format!("{count} {label}"),
+            }
         };
         let status =
             if self.failed_pages > 0 && !self.searching && !blank && !self.results.is_empty() {
@@ -137,66 +136,126 @@ impl FindPanel {
         div()
             .flex()
             .flex_col()
-            .gap_3()
+            .gap_2()
             .child(
                 Input::new(&self.query)
                     .id("find-query")
                     .w_full()
+                    .prefix(Icon::new(IconName::Search).small())
                     .cleanable(true),
             )
             .child(
                 div()
                     .flex()
-                    .gap_2()
+                    .items_center()
+                    .justify_between()
+                    .gap_1()
                     .child(
-                        Button::new("find-previous")
-                            .small()
-                            .label("Previous")
-                            .disabled(self.results.is_empty())
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(crate::reader::PreviousMatch), cx)
-                            }),
+                        div()
+                            .id("find-status")
+                            .test_support()
+                            .role(gpui_kit::Role::Status)
+                            .aria_label(status.clone())
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
                     )
                     .child(
-                        Button::new("find-next")
-                            .small()
-                            .label("Next")
-                            .disabled(self.results.is_empty())
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(crate::reader::NextMatch), cx)
-                            }),
+                        div()
+                            .flex()
+                            .flex_shrink_0()
+                            .items_center()
+                            .child(
+                                Button::new("find-previous")
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::ArrowUp)
+                                    .accessibility_label("Previous match")
+                                    .tooltip_with_action(
+                                        "Previous match",
+                                        &crate::reader::PreviousMatch,
+                                        None,
+                                    )
+                                    .disabled(self.results.is_empty())
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(crate::reader::PreviousMatch),
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(
+                                Button::new("find-next")
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::ArrowDown)
+                                    .accessibility_label("Next match")
+                                    .tooltip_with_action(
+                                        "Next match",
+                                        &crate::reader::NextMatch,
+                                        None,
+                                    )
+                                    .disabled(self.results.is_empty())
+                                    .on_click(|_, window, cx| {
+                                        window
+                                            .dispatch_action(Box::new(crate::reader::NextMatch), cx)
+                                    }),
+                            ),
                     ),
             )
             .child(
-                div()
-                    .id("find-status")
-                    .test_support()
-                    .role(gpui_kit::Role::Status)
-                    .aria_label(status.clone())
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
-            )
-            .children(
-                self.results[visible_start..visible_end]
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, hit)| {
-                        let index = visible_start + offset;
-                        let label = format!("Page {} · {}", hit.page + 1, hit.snippet);
-                        Button::new(("find-result", index))
-                            .ghost()
-                            .w_full()
-                            .selected(self.active == Some(index))
-                            .label(label)
-                            .on_click({
-                                let owner = owner.clone();
-                                move |_, _, cx| {
-                                    let _ = owner
-                                        .update(cx, |reader, cx| reader.select_match(index, cx));
-                                }
-                            })
-                    }),
+                div().flex().flex_col().gap_1().children(
+                    self.results[visible_start..visible_end]
+                        .iter()
+                        .enumerate()
+                        .map(|(offset, hit)| {
+                            let index = visible_start + offset;
+                            let page_label = format!("Page {}", hit.page + 1);
+                            Button::new(("find-result", index))
+                                .ghost()
+                                .small()
+                                .compact()
+                                .w_full()
+                                .selected(self.active == Some(index))
+                                .accessibility_label(format!("{page_label}: {}", hit.snippet))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
+                                        .min_w_0()
+                                        .w_full()
+                                        .child(
+                                            div()
+                                                .id(("find-snippet", index))
+                                                .test_support()
+                                                .min_w_0()
+                                                .flex_1()
+                                                .truncate()
+                                                .child(hit.snippet.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .id(("find-location", index))
+                                                .test_support()
+                                                .flex_shrink_0()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(page_label),
+                                        ),
+                                )
+                                .on_click({
+                                    let owner = owner.clone();
+                                    move |_, _, cx| {
+                                        let _ = owner.update(cx, |reader, cx| {
+                                            reader.select_match(index, cx)
+                                        });
+                                    }
+                                })
+                        }),
+                ),
             )
             .when(self.results.len() > VISIBLE_RESULTS, |panel| {
                 panel.child(

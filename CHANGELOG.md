@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-05
+
 ### Changed
 
 - Read in a theme-aware window with a document title bar, compact navigation and zoom controls, and visible page/zoom feedback; opening a PDF from the centered empty state or recovering from a failed open is easier to find.

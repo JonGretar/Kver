@@ -847,7 +847,6 @@ fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std
         cx.update(|app| window.read(app).unwrap().status().to_owned()),
         "Open a PDF to start reading"
     );
-    // The headless file picker cancels. Native selection needs a real window.
     std::fs::create_dir_all("target/captures")?;
     let light = cx.capture_screenshot(window.into())?;
     light.save("target/captures/reader-empty-light.png")?;
@@ -869,14 +868,8 @@ fn opening_from_empty_window_and_replacing_documents() -> Result<(), Box<dyn std
         assert!(frame.find("title-bar").visible());
         assert!(frame.find("open-pdf").visible());
     })?;
-    // Both buttons dispatch the same OpenPdf Action. Headless prompts cancel.
-    click_control(&mut cx, window.into(), "open-pdf-center")?;
-    click_control(&mut cx, window.into(), "open-pdf")?;
-    assert_eq!(
-        cx.update(|app| window.read(app).unwrap().status().to_owned()),
-        "Open a PDF to start reading"
-    );
-
+    // A native file picker can appear even in a headless window. Check
+    // discoverability here; exercise the actual picker in a visible Mac window.
     let sample = PathBuf::from("examples/readme-sample.pdf");
     let invalid = PathBuf::from("target/captures/not-a-pdf.pdf");
     std::fs::create_dir_all("target/captures")?;
@@ -1198,13 +1191,16 @@ fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> 
     assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
     press_key(&mut cx, window, "cmd-shift-p")?;
     cx.run_until_parked();
-    press_key(&mut cx, window, "enter")?;
+    type_query(&mut cx, window, "Open PDF")?;
+    assert_eq!(
+        cx.update(|app| window.read(app).unwrap().palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, window, "escape")?;
+    cx.run_until_parked();
+    press_key(&mut cx, window, "escape")?;
     cx.run_until_parked();
     assert!(!cx.update(|app| window.read(app).unwrap().palette_open()));
-    assert_eq!(
-        cx.update(|app| window.read(app).unwrap().status().to_owned()),
-        "Open a PDF to start reading"
-    ); // Headless picker cancels.
     press_key(&mut cx, window, "cmd-shift-p")?;
     cx.run_until_parked();
     cx.capture_screenshot(window.into())?;
@@ -1396,9 +1392,8 @@ fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Native menus call App::dispatch_action, which routes to the active window.
-/// The headless platform stores menu Actions but its picker always cancels.
-fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
+/// Inspect native menu Actions without opening a real picker during a headless test.
+fn menu_actions_and_shortcuts() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
         Arc::new(ReaderAssets),
@@ -1409,7 +1404,7 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
         bind_reader_keys(app);
         app_menu::install(app);
     });
-    let (open, quit) = cx.update(|app| {
+    let quit = cx.update(|app| {
         let menus = app.get_menus().unwrap();
         assert_eq!(menus.len(), 4);
         assert_eq!(menus[0].name.as_ref(), "Kver");
@@ -1436,7 +1431,7 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
         };
         assert_eq!(name, "Open PDF…");
         assert!(open.as_any().is::<OpenPdf>());
-        (open.boxed_clone(), quit.boxed_clone())
+        quit.boxed_clone()
     });
     let first = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
         cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
@@ -1447,34 +1442,9 @@ fn menu_open_action_targets_window() -> Result<(), Box<dyn std::error::Error>> {
     cx.capture_screenshot(first.into())?;
     cx.capture_screenshot(second.into())?;
     cx.update_window(first.into(), |_, window, _| window.activate_window())?;
-    cx.update(|app| {
-        assert_eq!(app.active_window(), Some(first.into()));
-        app.dispatch_action(open.as_ref());
-    });
-    cx.run_until_parked();
-    assert_eq!(
-        cx.update(|app| first.read(app).unwrap().status().to_owned()),
-        "Open a PDF to start reading"
-    ); // Headless picker cancels.
-    assert_eq!(
-        cx.update(|app| second.read(app).unwrap().status().to_owned()),
-        "Open a PDF to start reading"
-    );
+    assert_eq!(cx.update(|app| app.active_window()), Some(first.into()));
     cx.update_window(second.into(), |_, window, _| window.activate_window())?;
-    cx.update(|app| {
-        assert_eq!(app.active_window(), Some(second.into()));
-        app.dispatch_action(open.as_ref());
-    });
-    cx.run_until_parked();
-    assert_eq!(
-        cx.update(|app| second.read(app).unwrap().status().to_owned()),
-        "Open a PDF to start reading"
-    );
-    assert_eq!(cx.update(|app| first.read(app).unwrap().page_count()), None);
-    assert_eq!(
-        cx.update(|app| second.read(app).unwrap().page_count()),
-        None
-    );
+    assert_eq!(cx.update(|app| app.active_window()), Some(second.into()));
     assert!(cx.update_window(first.into(), |_, window, _| {
         window
             .highest_precedence_binding_for_action(&OpenPdf)
@@ -2041,10 +2011,7 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
         frame.render_frame(app);
         assert!(frame.find("title-bar").visible());
         assert!(frame.find("open-pdf").visible());
-        frame.click("open-pdf", app);
     })?;
-    cx.run_until_parked();
-    assert_eq!(cx.update(|app| second.read(app).page_count()), None);
     std::fs::create_dir_all("target/captures")?;
     let other_pdf = PathBuf::from("target/captures/kver-windows.pdf");
     std::fs::write(&other_pdf, mixed_page_pdf())?;
@@ -2223,6 +2190,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     select_and_copy_ordinary_text()?;
     multi_line_selection_survives_zoom_and_scroll()?;
     rotated_crop_and_scan_selection()?;
-    menu_open_action_targets_window()?;
+    menu_actions_and_shortcuts()?;
     long_path_keeps_toolbar_clickable()
 }

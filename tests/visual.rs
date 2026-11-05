@@ -7,7 +7,7 @@
 use gpui_kit as gpui;
 use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::platform as gpui_platform;
-use gpui_kit::test::{TestQueryExt, TestWindowExt};
+use gpui_kit::test::{TestEventExt, TestQueryExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, AppContext as _, AsKeystroke as _, HeadlessAppContext, InputEvent as _,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -211,7 +211,7 @@ fn contents_pdf() -> Vec<u8> {
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 384 504] >>",
         "<< /Type /Outlines /First 7 0 R /Last 9 0 R >>",
         "<< /Title (Beginning) /Dest [3 0 R /Fit] /Next 8 0 R /First 10 0 R >>",
-        "<< /Title (Rotated target) /Dest [4 0 R /XYZ 100 80 0] /Next 9 0 R >>",
+        "<< /Title (Rotated target with an exceptionally long outline label that occupies more than three lines at the default sidebar width) /Dest [4 0 R /XYZ 100 80 0] /Next 9 0 R >>",
         "<< /Title (Broken target) /Dest [99 0 R /Fit] >>",
         "<< /Title (Nested end) /Dest [5 0 R /Fit] >>",
     ];
@@ -1345,6 +1345,73 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         assert!(sidebar.bottom() > page.bottom());
         assert!(page.size.width > px(500.));
     })?;
+    let first_width = cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        let start = window.find("sidebar-resize-handle").bounds().center();
+        window.pointer_down(start, MouseButton::Left, app);
+        window.pointer_move(start + point(px(8.), px(0.)), Some(MouseButton::Left), app);
+        window.pointer_move(start + point(px(96.), px(0.)), Some(MouseButton::Left), app);
+        let width = window.find("reader-sidebar").bounds().size.width;
+        assert!(width > px(330.), "drag should widen the shared sidebar");
+        assert!(window.find("page").bounds().size.width > px(400.));
+        window.pointer_up(start + point(px(96.), px(0.)), MouseButton::Left, app);
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        width
+    })?;
+    click_panel_tab(&mut cx, first.into(), "Contents")?;
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(
+            window.find("reader-sidebar").bounds().size.width,
+            first_width
+        );
+        let start = window.find("sidebar-resize-handle").bounds().center();
+        window.pointer_down(start, MouseButton::Left, app);
+        window.pointer_move(start + point(px(8.), px(0.)), Some(MouseButton::Left), app);
+        window.pointer_move(
+            start + point(px(600.), px(0.)),
+            Some(MouseButton::Left),
+            app,
+        );
+        window.pointer_up(start + point(px(600.), px(0.)), MouseButton::Left, app);
+        let wide = window.find("reader-sidebar").bounds().size.width;
+        assert!(
+            wide <= px(368.),
+            "wide sidebar must leave the page readable"
+        );
+        let start = window.find("sidebar-resize-handle").bounds().center();
+        window.pointer_down(start, MouseButton::Left, app);
+        window.pointer_move(start + point(px(-8.), px(0.)), Some(MouseButton::Left), app);
+        window.pointer_move(
+            start + point(px(-600.), px(0.)),
+            Some(MouseButton::Left),
+            app,
+        );
+        window.pointer_up(start + point(px(-600.), px(0.)), MouseButton::Left, app);
+        let small = window.find("reader-sidebar").bounds().size.width;
+        assert!(
+            small >= px(160.),
+            "sidebar must retain usable tabs and text"
+        );
+        assert!(small < first_width);
+    })?;
+    click_panel_tab(&mut cx, first.into(), "Find")?;
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(window.find("reader-sidebar").bounds().size.width, px(160.));
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        window.double_click("sidebar-resize-handle", app);
+        assert_eq!(window.find("reader-sidebar").bounds().size.width, px(256.));
+        assert_eq!(window.find("find-query").focused(), Some(true));
+    })?;
+    press_key(&mut cx, second, "cmd-f")?;
+    cx.run_until_parked();
+    cx.update_window(second.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.find("reader-sidebar").bounds().size.width < first_width);
+    })?;
+    press_key(&mut cx, second, "escape")?;
+    cx.run_until_parked();
     type_query(&mut cx, first, "nfpw=-")?;
     assert_eq!(cx.update(|app| first_reader.read(app).page_index()), 0);
     assert_eq!(cx.update(|app| first_reader.read(app).scale()), 1.);
@@ -1505,6 +1572,18 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         assert!(tabs.top() > page.top());
         assert!(tabs.bottom() <= sidebar.bottom());
         assert!(tabs.size.width > sidebar.size.width / 3.);
+        let start = window.find("sidebar-resize-handle").bounds().center();
+        window.pointer_down(start, MouseButton::Left, app);
+        window.pointer_move(start + point(px(8.), px(0.)), Some(MouseButton::Left), app);
+        window.pointer_move(
+            start + point(px(600.), px(0.)),
+            Some(MouseButton::Left),
+            app,
+        );
+        window.pointer_up(start + point(px(600.), px(0.)), MouseButton::Left, app);
+        let sidebar = window.find("reader-sidebar").bounds();
+        let page = window.find("page").bounds();
+        assert!(page.size.width > sidebar.size.width);
     })?;
     std::fs::create_dir_all("target/captures")?;
     cx.capture_screenshot(narrow.into())?
@@ -2827,6 +2906,22 @@ fn contents_navigation() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(Duration::from_millis(1));
     }
     cx.forbid_parking();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        let title = frame.find(("contents-title", 2usize)).bounds();
+        let next = frame.find(("contents-entry", 3usize)).bounds();
+        assert!(
+            title.bottom() <= next.top(),
+            "outline title must not paint into the next row"
+        );
+        assert!(title.right() <= frame.find("reader-sidebar").bounds().right());
+        assert_eq!(
+            frame.find(("contents-entry", 2usize)).label(),
+            Some(
+                "Rotated target with an exceptionally long outline label that occupies more than three lines at the default sidebar width"
+            )
+        );
+    })?;
     cx.update_window(window.into(), |_, window, app| {
         window.render_frame(app);
         window.click(("contents-entry", 2usize), app);

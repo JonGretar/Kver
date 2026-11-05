@@ -1,10 +1,13 @@
 //! One window-local sidebar host. Find and Contents own their own retained content.
 
-use gpui_kit::{Context, FocusHandle, IntoElement, Window, div, prelude::*};
 use gpui_kit::{
-    base::TestSupportExt as _,
+    Axis, Context, DragMoveEvent, Empty, FocusHandle, IntoElement, Window, div, prelude::*,
+};
+use gpui_kit::{
+    base::{InteractiveElementExt as _, TestSupportExt as _},
     component::{
         ActiveTheme,
+        resizable::{HandleEdge, resize_handle},
         scroll::ScrollableElement as _,
         tab::{Tab, TabBar},
     },
@@ -19,11 +22,25 @@ pub enum SidebarPanel {
     Contents,
 }
 
+const DEFAULT_WIDTH_REMS: f32 = 16.;
+const MIN_WIDTH_REMS: f32 = 10.;
+const MAX_WIDTH_REMS: f32 = 24.;
+
+#[derive(Clone)]
+struct ResizeSidebar;
+
+impl gpui_kit::Render for ResizeSidebar {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
 /// Host-to-panel seam: the host selects and focuses a panel; each panel owns
 /// its retained content and implements its own actions without host-owned data.
 pub struct ReaderSidebar {
     active: Option<SidebarPanel>,
     last: SidebarPanel,
+    width_rems: f32,
     find: FindPanel,
     contents: ContentsPanel,
 }
@@ -33,9 +50,27 @@ impl ReaderSidebar {
         Self {
             active: None,
             last: SidebarPanel::Find,
+            width_rems: DEFAULT_WIDTH_REMS,
             find: FindPanel::new(window, cx),
             contents: ContentsPanel::new(cx),
         }
+    }
+
+    fn bounded_width(width_rems: f32, window_rems: f32) -> f32 {
+        // The PDF stays wider even when a narrow window cannot accommodate
+        // the sidebar's preferred minimum width.
+        let maximum = MAX_WIDTH_REMS.min(window_rems * 0.4);
+        width_rems.clamp(MIN_WIDTH_REMS.min(maximum), maximum)
+    }
+
+    pub(crate) fn resize(&mut self, position: f32, window: &Window) {
+        let rem = f32::from(window.rem_size());
+        let window_rems = f32::from(window.bounds().size.width) / rem;
+        self.width_rems = Self::bounded_width(position / rem, window_rems);
+    }
+
+    pub(crate) fn reset_width(&mut self) {
+        self.width_rems = DEFAULT_WIDTH_REMS;
     }
 
     pub fn active(&self) -> Option<SidebarPanel> {
@@ -121,11 +156,10 @@ impl ReaderSidebar {
         cx: &mut Context<crate::reader::Preview>,
     ) -> impl IntoElement {
         let active = self.active.expect("only render an open sidebar");
-        // Keep the document wider than the auxiliary region at the minimum
-        // window width, while growing the sidebar to a comfortable reading size.
-        let width_rems = (f32::from(window.bounds().size.width) / f32::from(window.rem_size())
-            * 0.4)
-            .clamp(10., 16.);
+        let width_rems = Self::bounded_width(
+            self.width_rems,
+            f32::from(window.bounds().size.width) / f32::from(window.rem_size()),
+        );
         let panel = match active {
             SidebarPanel::Find => div()
                 .flex_1()
@@ -145,6 +179,16 @@ impl ReaderSidebar {
         div()
             .id("reader-sidebar")
             .test_support()
+            .relative()
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<ResizeSidebar>, window, cx| {
+                    this.resize_sidebar(
+                        f32::from(event.event.position.x - event.bounds.left()),
+                        window,
+                        cx,
+                    );
+                }),
+            )
             .key_context("ReaderSidebar")
             .role(gpui_kit::Role::Complementary)
             .aria_label("Document sidebar")
@@ -153,8 +197,6 @@ impl ReaderSidebar {
             .h_full()
             .w(gpui_kit::rems(width_rems))
             .flex_shrink_0()
-            .border_r_1()
-            .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
             .child(panel)
@@ -178,6 +220,14 @@ impl ReaderSidebar {
                             window.dispatch_action(action, cx);
                         }),
                 ),
+            )
+            .child(
+                resize_handle("sidebar-resize-handle", Axis::Horizontal)
+                    .inside(HandleEdge::Trailing)
+                    .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                    .on_double_click(cx.listener(|this, _, _, cx| {
+                        this.reset_sidebar_width(cx);
+                    })),
             )
     }
 }

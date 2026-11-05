@@ -39,7 +39,10 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
+          python3 scripts/release-metadata.py --tag "$RELEASE_TAG" --notes > "$RUNNER_TEMP/release-notes.md"
+          printf '\nUnsigned Apple silicon macOS app. See the [download/security instructions](https://github.com/%s/blob/%s/docs/macos-app.md).\n' \
+            "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" \
             "target/release/Kver-v${version}-macos-arm64.zip" \
             --verify-tag --title "Kver $version" \
-            --notes "Unsigned Apple silicon macOS app. See the [changelog](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/CHANGELOG.md) and [download/security instructions](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/docs/macos-app.md)."
+            --notes-file "$RUNNER_TEMP/release-notes.md"

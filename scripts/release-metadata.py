@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate release metadata before publishing; print the package version for packaging."""
+"""Validate release metadata and emit the package version or changelog chapter."""
 
 import argparse
 import datetime
@@ -44,18 +44,38 @@ def validate(tag: str, version: str, changelog: str) -> None:
         raise ValueError(f"invalid changelog date: {dates[0]}") from exc
 
 
+def changelog_chapter(version: str, changelog: str) -> str:
+    """Return the dated release chapter, including its heading, without later releases."""
+    heading = re.search(
+        rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$",
+        changelog,
+        re.MULTILINE,
+    )
+    if heading is None:
+        raise ValueError(f"missing dated changelog chapter for {version}")
+    next_heading = re.search(r"^## ", changelog[heading.end() :], re.MULTILINE)
+    end = heading.end() + next_heading.start() if next_heading else len(changelog)
+    return changelog[heading.start() : end].strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="validate release tag and dated changelog")
     parser.add_argument("--version", action="store_true", help="print package version only")
+    parser.add_argument("--notes", action="store_true", help="print the validated changelog chapter")
     args = parser.parse_args()
     if args.version == bool(args.tag):
         parser.error("choose exactly one of --tag or --version")
+    if args.notes and not args.tag:
+        parser.error("--notes requires --tag")
     try:
         version = package_version((ROOT / "Cargo.toml").read_text())
         if args.tag:
-            validate(args.tag, version, (ROOT / "CHANGELOG.md").read_text())
-        print(version)
+            changelog = (ROOT / "CHANGELOG.md").read_text()
+            validate(args.tag, version, changelog)
+            print(changelog_chapter(version, changelog) if args.notes else version)
+        else:
+            print(version)
     except (ValueError, OSError) as exc:
         print(f"Release metadata error: {exc}", file=sys.stderr)
         return 1

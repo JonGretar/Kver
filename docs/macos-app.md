@@ -61,7 +61,8 @@ release. Before an authorized tag, move release notes from `Unreleased` into
 release commit has been reviewed. The job rejects any tag that does not
 match the package version and exactly one valid dated changelog heading
 before it builds or publishes. It then builds and inspects the archive
-with `scripts/package-macos-app.sh` and creates the GitHub Release.
+with `scripts/package-macos-app.sh` and creates the GitHub Release with that
+version's changelog chapter in its notes.
 This does not replace the real-Mac window and reading check in issue #18.
 No experimental Linux artifact is attached: the current Linux build depends
 on host GUI and software-rendering libraries, and portable packaging/runtime

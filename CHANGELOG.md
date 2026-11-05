@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-05
+
 ### Changed
 
 - Choose Light, Dark, or System appearance from an icon-only toolbar menu. The choice applies to all reader windows for the current session; Copy remains available through shortcuts and menus instead of a toolbar button.

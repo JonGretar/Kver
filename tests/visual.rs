@@ -3065,6 +3065,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }
+    std::fs::create_dir_all("target/captures")?;
     toolbar_theme_selection()?;
     sidebar_host()?;
     find_matches_in_reader()?;

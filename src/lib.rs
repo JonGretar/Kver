@@ -1,4 +1,6 @@
 #[cfg(feature = "gui")]
+mod about;
+#[cfg(feature = "gui")]
 pub mod app_menu;
 #[cfg(feature = "gui")]
 pub mod assets;

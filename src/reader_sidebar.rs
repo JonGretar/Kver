@@ -45,6 +45,14 @@ impl ReaderSidebar {
         self.last
     }
 
+    pub(crate) fn find(&self) -> &FindPanel {
+        &self.find
+    }
+
+    pub(crate) fn find_mut(&mut self) -> &mut FindPanel {
+        &mut self.find
+    }
+
     pub fn open(
         &mut self,
         panel: SidebarPanel,
@@ -74,6 +82,7 @@ impl ReaderSidebar {
     pub fn render(
         &self,
         window: &Window,
+        total_pages: usize,
         cx: &mut Context<crate::reader::Preview>,
     ) -> impl IntoElement {
         let active = self.active.expect("only render an open sidebar");
@@ -104,7 +113,7 @@ impl ReaderSidebar {
                     .overflow_y_scrollbar()
                     .p_3()
                     .child(match active {
-                        SidebarPanel::Find => self.find.render(cx).into_any_element(),
+                        SidebarPanel::Find => self.find.render(total_pages, cx).into_any_element(),
                         SidebarPanel::Contents => self.contents.render(cx).into_any_element(),
                     }),
             )

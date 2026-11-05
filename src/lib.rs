@@ -7,6 +7,7 @@ mod contents_panel;
 pub mod coordinates;
 #[cfg(feature = "gui")]
 mod find_panel;
+pub mod find_search;
 pub mod pdf;
 #[cfg(feature = "gui")]
 pub mod reader;

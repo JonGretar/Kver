@@ -33,7 +33,8 @@ use image::{Frame, RgbaImage};
 
 use crate::{
     coordinates::{PageViewport, Point},
-    pdf,
+    find_panel::MAX_MATCHES,
+    find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, NewWindow, NextWindow, PreviousWindow},
 };
@@ -56,6 +57,8 @@ gpui::actions!(
         FitPage,
         Copy,
         ShowFind,
+        NextMatch,
+        PreviousMatch,
         ShowContents,
         ToggleSidebar
     ]
@@ -71,6 +74,8 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("cmd-f", ShowFind, None),
+        KeyBinding::new("cmd-g", NextMatch, None),
+        KeyBinding::new("cmd-shift-g", PreviousMatch, None),
         KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
@@ -366,6 +371,9 @@ impl Preview {
         self.text_failed.clear();
         self.text_in_flight = None;
         self.selection = None;
+        if let Some(sidebar) = self.sidebar.as_mut() {
+            sidebar.find_mut().clear_results();
+        }
         self.dragging = false;
         self.path = Some(path);
         self.scale = 1.0;
@@ -445,6 +453,137 @@ impl Preview {
         sidebar.open(panel, window, cx);
     }
 
+    pub(crate) fn find_query_changed(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(sidebar) = self.sidebar.as_mut() else {
+            return;
+        };
+        sidebar.find_mut().clear_results();
+        if !query.trim().is_empty() && !self.pages.is_empty() {
+            sidebar.find_mut().searching = true;
+            self.search_next_batch(query, cx);
+        }
+        cx.notify();
+    }
+
+    fn search_next_batch(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(find) = self.sidebar.as_ref().map(ReaderSidebar::find) else {
+            return;
+        };
+        if !find.searching || find.scanned >= self.pages.len() || find.results.len() >= MAX_MATCHES
+        {
+            return;
+        }
+        let start = find.scanned;
+        let end = (start + 4).min(self.pages.len());
+        let revision = find.revision;
+        let document = self.document_generation;
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let worker_query = query.clone();
+        let work = cx.background_executor().spawn(async move {
+            pdf::page_text_batch(&path, start..end)
+                .into_iter()
+                .enumerate()
+                .map(|(offset, page)| match page {
+                    Ok(text) => {
+                        let mapped = !text.glyphs.is_empty();
+                        (
+                            mapped,
+                            find_search::matches_on_page(&text, start + offset, &worker_query),
+                            false,
+                        )
+                    }
+                    Err(_) => (false, Vec::new(), true),
+                })
+                .collect::<Vec<_>>()
+        });
+        cx.spawn(async move |this, cx| {
+            let batch = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.document_generation != document {
+                    return;
+                }
+                let Some(find) = this.sidebar.as_mut().map(ReaderSidebar::find_mut) else {
+                    return;
+                };
+                if find.revision != revision {
+                    return;
+                }
+                for (mapped, hits, failed) in batch {
+                    find.scanned += 1;
+                    find.mapped_pages += usize::from(mapped);
+                    find.failed_pages += usize::from(failed);
+                    let remaining = MAX_MATCHES.saturating_sub(find.results.len());
+                    if hits.len() > remaining {
+                        find.truncated = true;
+                    }
+                    find.results.extend(hits.into_iter().take(remaining));
+                }
+                if find.scanned >= this.pages.len() || find.results.len() >= MAX_MATCHES {
+                    find.searching = false;
+                    find.truncated |= find.scanned < this.pages.len();
+                } else {
+                    this.search_next_batch(query, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn select_match(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(hit) = self
+            .sidebar
+            .as_ref()
+            .and_then(|sidebar| sidebar.find().results.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        let (_, width, height) = self.viewport();
+        self.page_index = hit.page;
+        self.selected_page = Some(hit.page);
+        self.apply_fit(
+            hit.page,
+            Position {
+                page: hit.page,
+                y: 0.,
+            },
+            (width, height),
+            0.,
+        );
+        let y = find_search::page_rect(&hit, self.pages[hit.page]).1;
+        self.scroll.set_offset(point(
+            self.scroll.offset().x,
+            px(
+                -(page_top(&self.pages, self.scale, hit.page) + y * self.scale - height * 0.25)
+                    .max(0.),
+            ),
+        ));
+        if let Some(sidebar) = self.sidebar.as_mut() {
+            sidebar.find_mut().active = Some(index);
+        }
+        self.sync_viewport(cx);
+        cx.notify();
+    }
+
+    fn step_match(&mut self, direction: i32, cx: &mut Context<Self>) {
+        let Some(find) = self.sidebar.as_ref().map(ReaderSidebar::find) else {
+            return;
+        };
+        if find.results.is_empty() {
+            return;
+        }
+        let next = match (find.active, direction) {
+            (Some(0), -1) | (None, -1) => find.results.len() - 1,
+            (Some(index), -1) => index - 1,
+            (Some(index), _) => (index + 1) % find.results.len(),
+            (None, _) => 0,
+        };
+        self.select_match(next, cx);
+    }
+
     fn close_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(sidebar) = self.sidebar.as_mut()
             && sidebar.active().is_some()
@@ -512,6 +651,11 @@ impl Preview {
         self.selected_page = Some(0);
         self.status = self.ready_status();
         self.sync_viewport(cx);
+        if let Some(query) = self.sidebar.as_ref().map(|s| s.find().query(cx))
+            && !query.trim().is_empty()
+        {
+            self.find_query_changed(query, cx);
+        }
     }
 
     fn ready_status(&self) -> String {
@@ -1005,6 +1149,30 @@ impl Render for Preview {
                 .when_some(image, |element, image| {
                     element.child(img(image).size_full())
                 });
+            if let Some(hit) = self
+                .sidebar
+                .as_ref()
+                .and_then(|sidebar| {
+                    let find = sidebar.find();
+                    find.active.and_then(|active| find.results.get(active))
+                })
+                .filter(|hit| hit.page == index)
+            {
+                let (left, top, width, height) = find_search::page_rect(hit, self.pages[index]);
+                page = page.child(
+                    div()
+                        .id("find-highlight")
+                        .test_support()
+                        .absolute()
+                        .left(px(left * self.scale))
+                        .top(px(top * self.scale))
+                        .w(px(width * self.scale))
+                        .h(px(height * self.scale))
+                        .bg(cx.theme().primary.opacity(0.25))
+                        .border_1()
+                        .border_color(cx.theme().primary),
+                );
+            }
             if let (Some(selection), Some(text)) = (self.selection, self.text.get(&index))
                 && selection.start.page == index
                 && selected_text(selection, text).is_some()
@@ -1114,6 +1282,8 @@ impl Render for Preview {
                     this.show_sidebar(SidebarPanel::Find, window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &NextMatch, _, cx| this.step_match(1, cx)))
+            .on_action(cx.listener(|this, _: &PreviousMatch, _, cx| this.step_match(-1, cx)))
             .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
                 if !this.pages.is_empty() {
                     this.show_sidebar(SidebarPanel::Contents, window, cx);
@@ -1234,7 +1404,7 @@ impl Render for Preview {
                         self.sidebar
                             .as_ref()
                             .filter(|sidebar| sidebar.active().is_some()),
-                        |row, sidebar| row.child(sidebar.render(window, cx)),
+                        |row, sidebar| row.child(sidebar.render(window, self.pages.len(), cx)),
                     )
                     .child(
                         div()
@@ -1526,6 +1696,26 @@ impl Render for Preview {
                                                 .label("Find")
                                                 .action(Box::new(ShowFind))
                                                 .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Next match")
+                                                .action(Box::new(NextMatch))
+                                                .disabled(
+                                                    self.sidebar.as_ref().is_none_or(|s| {
+                                                        s.find().results.is_empty()
+                                                    }),
+                                                ),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Previous match")
+                                                .action(Box::new(PreviousMatch))
+                                                .disabled(
+                                                    self.sidebar.as_ref().is_none_or(|s| {
+                                                        s.find().results.is_empty()
+                                                    }),
+                                                ),
                                         )
                                         .item(
                                             CommandItem::new()

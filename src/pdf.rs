@@ -172,6 +172,32 @@ pub fn page_text(path: &Path, page_index: usize) -> Result<PageText, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
     let pdf = open_pdf(data)?;
+    page_text_in_pdf(&pdf, page_index)
+}
+
+/// Decode a small consecutive batch with one PDF load; callers retain only
+/// extracted matches, not the page text or the parsed document.
+pub fn page_text_batch(
+    path: &Path,
+    pages: std::ops::Range<usize>,
+) -> Vec<Result<PageText, String>> {
+    let count = pages.len();
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(error) => {
+            return (0..count)
+                .map(|_| Err(format!("Cannot read {}: {error}", path.display())))
+                .collect();
+        }
+    };
+    let pdf = match open_pdf(data) {
+        Ok(pdf) => pdf,
+        Err(error) => return (0..count).map(|_| Err(error.clone())).collect(),
+    };
+    pages.map(|index| page_text_in_pdf(&pdf, index)).collect()
+}
+
+fn page_text_in_pdf(pdf: &Pdf, page_index: usize) -> Result<PageText, String> {
     let page = pdf
         .pages()
         .get(page_index)

@@ -2436,11 +2436,130 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(ReaderAssets),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let window = cx.open_window(size(px(920.), px(800.)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some("examples/readme-sample.pdf".into()),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 100 · 100%")?;
+    let reader = window.root(&mut cx)?;
+    press_key(&mut cx, window, "cmd-f")?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").focused(), Some(true));
+        assert_eq!(
+            frame.find("find-status").label(),
+            Some("Type a phrase to find it in this PDF")
+        );
+    })?;
+    type_query(&mut cx, window, "KVER")?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").value(), Some("KVER"));
+        assert!(
+            frame
+                .find("find-status")
+                .label()
+                .unwrap()
+                .contains("matches")
+        );
+        frame.click(("find-result", 0usize), app);
+    })?;
+    let first_page = cx.update(|app| reader.read(app).page_index());
+    press_key(&mut cx, window, "cmd-g")?;
+    cx.run_until_parked();
+    assert!(cx.update(|app| reader.read(app).page_index()) >= first_page);
+    press_key(&mut cx, window, "cmd-shift-g")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), first_page);
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert!(frame.find("find-highlight").visible());
+    })?;
+    press_key(&mut cx, window, "cmd-a")?;
+    type_query(&mut cx, window, "phrase-not-in-this-pdf")?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(
+            frame.find("find-status").label(),
+            Some("No matches in mapped text")
+        );
+        assert!(frame.try_find("find-highlight").is_none());
+    })?;
+    let rotated = PathBuf::from("target/captures/find-rotated.pdf");
+    std::fs::create_dir_all("target/captures")?;
+    std::fs::write(&rotated, rotated_selection_pdf())?;
+    cx.update(|app| reader.update(app, |reader, app| reader.open_path(rotated.clone(), app)));
+    wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
+    press_key(&mut cx, window, "cmd-a")?;
+    type_query(&mut cx, window, "visible")?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-status").label(), Some("1 match"));
+        frame.click(("find-result", 0usize), app);
+        assert!(frame.find("find-highlight").visible());
+    })?;
+    let before = cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        frame.find("find-highlight").bounds()
+    })?;
+    cx.update(|app| reader.update(app, |reader, app| reader.zoom_in(app)));
+    let after = cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        frame.find("find-highlight").bounds()
+    })?;
+    assert!(after.size.width > before.size.width);
+    assert!(after.size.height > before.size.height);
+    cx.update_window(window.into(), |_, frame, _| {
+        frame.resize(size(px(740.), px(680.)));
+    })?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert!(frame.find("find-highlight").bounds().size.width > px(0.));
+    })?;
+    std::fs::remove_file(rotated)?;
+    let scan = PathBuf::from("target/captures/find-scan.pdf");
+    std::fs::create_dir_all("target/captures")?;
+    std::fs::write(&scan, image_only_pdf())?;
+    cx.update(|app| reader.update(app, |reader, app| reader.open_path(scan.clone(), app)));
+    wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
+    cx.run_until_parked();
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(
+            frame.find("find-status").label(),
+            Some("No searchable text in this PDF · scans need OCR")
+        );
+    })?;
+    std::fs::remove_file(scan)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }
     sidebar_host()?;
+    find_matches_in_reader()?;
     independent_reader_windows()?;
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
     fit_modes_follow_page_and_window()?;

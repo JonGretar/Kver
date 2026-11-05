@@ -21,14 +21,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Private-repo pause (#29): restore this matrix when public.
-        # os: [ubuntu-24.04, macos-15]
-        os: [ubuntu-24.04]
+        os: [ubuntu-24.04, macos-15]
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Test release metadata validation
+      - name: Test release and update tooling
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Install stable Rust

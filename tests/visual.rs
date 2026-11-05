@@ -1811,9 +1811,19 @@ fn menu_actions_and_shortcuts() -> Result<(), Box<dyn std::error::Error>> {
         assert!(matches!(&menus[1].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
         assert!(matches!(&menus[3].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
         assert!(matches!(&menus[3].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));
+        // Headless/development executables have neither an update feed nor a
+        // bundled framework. Keep the command discoverable but unavailable.
+        assert!(menus[0].items.iter().any(|item| matches!(
+            item,
+            OwnedMenuItem::Action { name, action, disabled: true, .. }
+                if name == "Check for Updates…" && action.as_any().is::<app_menu::CheckForUpdates>()
+        )));
         let OwnedMenuItem::Action {
             name, action: quit, ..
-        } = &menus[0].items[2]
+        } = menus[0].items.iter().find(|item| matches!(
+            item,
+            OwnedMenuItem::Action { action, .. } if action.as_any().is::<Quit>()
+        )).expect("Quit menu item is missing")
         else {
             panic!("Quit menu item is not an Action")
         };

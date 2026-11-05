@@ -8,10 +8,14 @@ use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding, Menu, MenuItem
 use crate::reader::{Copy, OpenPdf, ShowContents, ShowFind, ToggleSidebar};
 use crate::reader_windows::{NewWindow, NextWindow, PreviousWindow};
 
-gpui::actions!(kver, [AboutKver, Quit]);
+gpui::actions!(kver, [AboutKver, CheckForUpdates, Quit]);
 
 pub fn install(cx: &mut App) {
     crate::about::bind_keys(cx);
+    #[cfg(target_os = "macos")]
+    let updates_available = crate::updater::install(cx);
+    #[cfg(not(target_os = "macos"))]
+    let updates_available = false;
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.on_action(move |_: &AboutKver, cx| {
@@ -32,6 +36,7 @@ pub fn install(cx: &mut App) {
     cx.set_menus([
         Menu::new("Kver").items([
             MenuItem::action("About Kver", AboutKver),
+            MenuItem::action("Check for Updates…", CheckForUpdates).disabled(!updates_available),
             MenuItem::separator(),
             MenuItem::action("Quit Kver", Quit),
         ]),

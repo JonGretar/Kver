@@ -22,6 +22,17 @@ if [ -z "$version" ]; then
     exit 1
 fi
 
+# Local builds omit the updater unless a public verification key is supplied.
+# Validate before building/downloading; never consume a private signing key here.
+sparkle_dir=
+if [ -n "${KVER_UPDATE_PUBLIC_KEY:-}" ]; then
+    python3 scripts/update-metadata.py
+    sparkle_dir=$(sh scripts/fetch-sparkle.sh)
+elif [ -n "${KVER_UPDATE_FEED_URL:-}" ]; then
+    echo "KVER_UPDATE_FEED_URL requires KVER_UPDATE_PUBLIC_KEY." >&2
+    exit 1
+fi
+
 if command -v corgi >/dev/null 2>&1; then
     corgi build --release --bin kver --target-dir "${CARGO_TARGET_DIR:-target}"
 else
@@ -63,6 +74,14 @@ cat > "$stage/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+
+if [ -n "$sparkle_dir" ]; then
+    mkdir -p "$stage/Contents/Frameworks"
+    # ditto preserves Sparkle's framework and helper symlinks and signatures.
+    ditto "$sparkle_dir/Sparkle.framework" "$stage/Contents/Frameworks/Sparkle.framework"
+    install -m 644 "$sparkle_dir/LICENSE" "$stage/Contents/Resources/Sparkle-LICENSE"
+    python3 scripts/update-metadata.py "$stage/Contents/Info.plist"
+fi
 
 plutil -lint "$stage/Contents/Info.plist"
 # Replace the linker's executable-only signature after all bundle files exist.

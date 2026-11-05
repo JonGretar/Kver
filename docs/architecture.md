@@ -134,6 +134,33 @@ use the same reader Actions as shortcuts and the palette; only the focused
 window handles a window command. Closing a window does not quit while other
 readers remain open. macOS menu setup stays separate from reader operations.
 
+### macOS updates
+
+`src/updater.rs` retains one Sparkle 2 controller through the application-wide
+`CheckForUpdates` Action. It loads only `Contents/Frameworks/Sparkle.framework`
+from a configured app bundle, using `objc2` and Foundation at this boundary.
+Ordinary unbundled executables and local bundles built without a public key
+do not load Sparkle or check the network; their update menu item is disabled.
+The reader and PDF adapter have no updater dependency.
+
+Sparkle owns optional background-check consent and scheduling, download
+progress, verification, installation, and relaunch prompts. Kver requires
+signed feeds and Ed25519 archive verification before extraction, and disables
+automatic installation: the reader approves installing an update. Sparkle's
+preferences are its source of truth, not a second Kver settings store.
+The framework is version- and checksum-pinned during packaging, rather than
+downloaded at application runtime or required to compile the Rust binary.
+
+The tag-only release workflow signs the ZIP and feed with a GitHub Actions
+secret and attaches both to the same GitHub Release. The default feed is
+`https://github.com/JonGretar/Kver/releases/latest/download/appcast.xml`;
+each enclosure points to its version-specific release archive. Releases are
+stable-only, full Apple silicon archives, without delta updates or a custom
+update server. Sparkle signing is independent of Apple Developer ID signing
+and notarization; the initial unsigned download still requires macOS approval.
+See [macOS packaging](macos-app.md#configure-updates-maintainers) for key setup
+and the first-release bootstrap requirement.
+
 ## Document coordinates
 
 Reader navigation anchors use page-local PDF points, not screen pixels.

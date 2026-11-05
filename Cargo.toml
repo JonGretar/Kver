@@ -7,7 +7,7 @@ license = "MIT"
 
 [features]
 default = ["gui"]
-gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:url"]
+gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:url", "dep:objc2", "dep:objc2-foundation"]
 screenshot = ["gui", "gpui-kit/test-support"]
 
 [[bin]]
@@ -30,3 +30,8 @@ image = { version = "0.25", default-features = false, optional = true }
 rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }
 url = { version = "2", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Native Sparkle bridge only; these versions are already used by the GUI stack.
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", features = ["NSBundle", "NSError", "NSString"], optional = true }

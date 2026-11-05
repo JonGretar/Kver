@@ -2492,6 +2492,26 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
         frame.render_frame(app);
         assert!(frame.find("find-highlight").visible());
     })?;
+    let rotated = PathBuf::from("target/captures/find-rotated.pdf");
+    std::fs::create_dir_all("target/captures")?;
+    std::fs::write(&rotated, rotated_selection_pdf())?;
+    let other = cx.open_window(size(px(740.), px(680.)), |window, cx| {
+        cx.new(|cx| Preview::new(Some(rotated.clone()), window.scale_factor(), cx))
+    })?;
+    wait_for_page(&mut cx, &other, "Page 1 of 1 · 100%")?;
+    press_key(&mut cx, other, "cmd-f")?;
+    cx.run_until_parked();
+    type_query(&mut cx, other, "visible")?;
+    cx.run_until_parked();
+    cx.update_window(other.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-status").label(), Some("1 match"));
+    })?;
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").value(), Some("KVER"));
+        assert!(frame.find("find-highlight").visible());
+    })?;
     press_key(&mut cx, window, "cmd-a")?;
     type_query(&mut cx, window, "phrase-not-in-this-pdf")?;
     cx.run_until_parked();
@@ -2503,9 +2523,6 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
         );
         assert!(frame.try_find("find-highlight").is_none());
     })?;
-    let rotated = PathBuf::from("target/captures/find-rotated.pdf");
-    std::fs::create_dir_all("target/captures")?;
-    std::fs::write(&rotated, rotated_selection_pdf())?;
     cx.update(|app| reader.update(app, |reader, app| reader.open_path(rotated.clone(), app)));
     wait_for_page(&mut cx, &window, "Page 1 of 1 · 100%")?;
     press_key(&mut cx, window, "cmd-a")?;

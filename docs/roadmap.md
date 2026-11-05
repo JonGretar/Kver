@@ -2,8 +2,8 @@
 
 Kver's first job is to read PDFs well. The first downloadable product is an
 Apple silicon macOS MVP, not a replacement for every existing reader.
-The next gate improves the reader experience; other goals have no fixed
-release sequence. See [features](features.md) for the corresponding scope.
+The action-driven reader and Find/Contents gates are complete; further goals
+have no fixed release sequence. See [features](features.md) for their scope.
 
 ## Where we are
 
@@ -12,18 +12,12 @@ release sequence. See [features](features.md) for the corresponding scope.
 | 0. Validate the stack | **Complete** | Hayro and GPUI were validated for the initial macOS prototype, with documented limitations. |
 | 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
 | 2. Build an action-driven reader | **Complete** | The integrated reader passed headless checks and an Apple silicon native-window check for actions, independent windows, and visible text copy ([#42](https://github.com/JonGretar/Kver/issues/42)). |
-| 3. Find and navigate a document | **Planned** | Find text and navigate the PDF's contents through two panels in one sidebar ([spec #54](https://github.com/JonGretar/Kver/issues/54)); no release version or date is assigned. |
+| 3. Find and navigate a document | **Complete** | Find and Contents work together in one sidebar, with headless and real-Mac checks ([#58](https://github.com/JonGretar/Kver/issues/58)); no release version or date is assigned. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** Validate Find and Contents together in a real Mac window
-([#58](https://github.com/JonGretar/Kver/issues/58)) after the
-[Find implementation (#56)](https://github.com/JonGretar/Kver/issues/56)
-lands alongside the completed [Contents (#57)](https://github.com/JonGretar/Kver/issues/57)
-and [shared sidebar (#55)](https://github.com/JonGretar/Kver/issues/55).
-The [Find and Contents spec (#54)](https://github.com/JonGretar/Kver/issues/54)
-defines this gate; history, internal links, and the other
-[unscheduled goals](#goals-to-schedule-after-evidence) remain deferred.
-GitHub Issues tracks live ownership and blockers; the
+**Next work:** No further reader gate is scheduled. History, internal links,
+and the other [unscheduled goals](#goals-to-schedule-after-evidence) remain
+deferred. GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
 
 ## 0. Validate the stack
@@ -159,6 +153,8 @@ do not replace a newer query or document. A real-Mac window check confirms
 focus, controls, panel switching, and result/outline navigation. OCR,
 persistent highlights, configurable panels, and trackpad pinch-to-zoom are
 not release requirements. No release version or date is assigned to this gate.
+The combined validation and supported limits are recorded in
+[#58](https://github.com/JonGretar/Kver/issues/58).
 
 ## Separate platform delivery
 

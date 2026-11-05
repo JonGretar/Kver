@@ -40,10 +40,10 @@ These capabilities were validated together in
 [reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33).
 Selection remains page-local, uses available PDF text mappings, and does not
 include OCR or guaranteed reading order for complex layouts. Find and Contents
-belong to the next gate; history and the goals below remain deferred. This
-completed gate does not imply another release version or date.
+are delivered in the following gate; history and the goals below remain
+deferred. This completed gate does not imply another release version or date.
 
-## Find and Contents — planned reader gate
+## Find and Contents — completed reader gate
 
 - Find mapped text across the current PDF, navigate matches, and show short
   result snippets and transient highlights on the page. Scans without a text
@@ -57,8 +57,9 @@ completed gate does not imply another release version or date.
   dismissible and the PDF readable.
 
 The [spec (#54)](https://github.com/JonGretar/Kver/issues/54) defines the
-scope and validation. This gate has no assigned release version or date.
-Trackpad pinch-to-zoom may be investigated separately, but does not block it.
+scope; [#58](https://github.com/JonGretar/Kver/issues/58) records the combined
+validation and supported limitations. This gate has no assigned release
+version or date. Trackpad pinch-to-zoom may be investigated separately.
 
 ## Goals without a fixed release date
 

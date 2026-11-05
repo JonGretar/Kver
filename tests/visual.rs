@@ -202,6 +202,42 @@ fn pdf_with_page_sizes(sizes: [(u32, u32); 3]) -> Vec<u8> {
     pdf
 }
 
+fn contents_pdf() -> Vec<u8> {
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 384 504] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [10 20 210 320] /CropBox [30 50 130 250] /Rotate 90 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 384 504] >>",
+        "<< /Type /Outlines /First 7 0 R /Last 9 0 R >>",
+        "<< /Title (Beginning) /Dest [3 0 R /Fit] /Next 8 0 R /First 10 0 R >>",
+        "<< /Title (Rotated target) /Dest [4 0 R /XYZ 100 80 0] /Next 9 0 R >>",
+        "<< /Title (Broken target) /Dest [99 0 R /Fit] >>",
+        "<< /Title (Nested end) /Dest [5 0 R /Fit] >>",
+    ];
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes(),
+    );
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
 // A real PDF page stream with a nonzero crop origin, 90° rotation, text
 // crossing the crop edge, and entirely hidden text.
 fn rotated_selection_pdf() -> Vec<u8> {
@@ -1327,8 +1363,8 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
     cx.update_window(first.into(), |_, window, app| {
         window.render_frame(app);
         assert!(window.try_find("find-query").is_none());
-        assert!(window.find("contents-placeholder").visible());
-        assert_eq!(window.find("contents-placeholder").focused(), Some(true));
+        assert!(window.find("contents-panel").visible());
+        assert_eq!(window.find("contents-panel").focused(), Some(true));
     })?;
     click_control(&mut cx, first.into(), "toggle-sidebar")?;
     assert_eq!(
@@ -2436,11 +2472,100 @@ fn independent_reader_windows() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn contents_navigation() -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all("target/captures")?;
+    let path = PathBuf::from("target/captures/contents.pdf");
+    std::fs::write(&path, contents_pdf())?;
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(ReaderAssets),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let window = cx.open_window(size(px(700.), px(650.)), |window, cx| {
+        cx.new(|cx| Preview::new(Some(path), window.scale_factor(), cx))
+    })?;
+    wait_for_page(&mut cx, &window, "Page 1 of 3 · 100%")?;
+    let reader = window.root(&mut cx)?;
+    window.update(&mut cx, |_, window, app| {
+        window.dispatch_action(Box::new(kver::reader::ShowContents), app);
+    })?;
+    cx.allow_parking();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        cx.run_until_parked();
+        let ready = cx.update_window(window.into(), |_, window, app| {
+            window.render_frame(app);
+            window.try_find(("contents-entry", 1usize)).is_some()
+        })?;
+        if ready {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err("outline did not load".into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    cx.forbid_parking();
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(window.find("contents-panel").focused(), Some(true));
+        assert_eq!(
+            window.find(("contents-entry", 3usize)).disabled(),
+            Some(true)
+        );
+        window.click(("contents-entry", 2usize), app);
+    })?;
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), 1);
+    assert!((cx.update(|app| reader.read(app).reading_position().1) - 70.).abs() < 1.);
+    press_key(&mut cx, window, "up")?;
+    press_key(&mut cx, window, "enter")?;
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), 2);
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.find("reader-sidebar").visible());
+        assert!(window.find("page").visible());
+    })?;
+    let empty = PathBuf::from("target/captures/contents-absent.pdf");
+    std::fs::write(&empty, pdf_with_page_sizes([(384, 504); 3]))?;
+    window.update(&mut cx, |reader, _, cx| reader.open_path(empty, cx))?;
+    cx.allow_parking();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        cx.run_until_parked();
+        let empty = cx.update_window(window.into(), |_, window, app| {
+            window.render_frame(app);
+            window.try_find("contents-empty").is_some()
+        })?;
+        if empty {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err("old outline survived document replacement".into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    cx.forbid_parking();
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), 0);
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.try_find(("contents-entry", 2usize)).is_none());
+        assert!(window.find("contents-panel").visible());
+    })?;
+    std::fs::remove_file("target/captures/contents.pdf")?;
+    std::fs::remove_file("target/captures/contents-absent.pdf")?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }
     sidebar_host()?;
+    contents_navigation()?;
     independent_reader_windows()?;
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
     fit_modes_follow_page_and_window()?;

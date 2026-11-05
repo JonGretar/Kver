@@ -25,8 +25,9 @@ title. Kver follows the system's light/dark appearance for the reader chrome;
 the PDF page itself retains its document colors.
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
-it returns page dimensions, page geometry, positioned text, and premultiplied
-BGRA pixels, not Hayro types, to the reader. The adapter currently reads and
+it returns page dimensions, page geometry, positioned text, document outline
+entries and destinations, and premultiplied BGRA pixels, not Hayro types, to
+the reader. The adapter currently reads and
 parses the document for each raster and text request. Reusing a parsed
 document or prefetching pages should be driven by measurements, not a new
 worker architecture upfront.
@@ -98,12 +99,24 @@ the same `ToggleSidebar` Action, reopening the last-selected panel. Bottom,
 equal-width `TabBar` tabs switch panels; the panel content owns the scroll
 region above them. The macOS title bar stays across the full window to
 preserve its native controls. `src/find_panel.rs` owns the Find query;
-`src/contents_panel.rs` owns Contents focus. Both supply content to the same
-host through `new`, `focus`, and `render`; future search and outline actions
-belong to their respective panels, not to a shared query or outline model.
-The sidebar remains attached to the reader across document changes, while
-document-specific work must be invalidated by the panels that own it. The
-current interim text does not claim that search or outline extraction ran.
+`src/contents_panel.rs` owns Contents focus, keyboard selection, and a
+virtualized outline list. Both supply content to the same host; search and
+outline state remain separate. The sidebar remains attached to the reader
+across document changes, while its outline state resets immediately and
+background extraction results carry the reader's document generation. The
+Find panel is still an interim surface, not a search result.
+
+Hayro 0.8 exposes the PDF catalog through `xref.root_id()` and `xref.get`,
+and individual page dictionaries through `page.raw()`. The PDF adapter
+traverses the catalog's linked outline hierarchy and resolves direct,
+legacy-named, and name-tree destinations using those lower-level objects.
+It bounds malformed cycles and depth, retains non-navigable headings,
+and converts supported `/Fit`, `/FitB`, `/FitH`, `/FitBH`, and `/XYZ`
+destinations into page-local positions using the target page's crop and
+rotation transform. Unsupported destination modes remain disabled rather
+than guessing a position. Outline parsing starts on a background worker
+only when Contents first opens for a document;
+the reader applies destinations through its existing page/zoom/scroll model.
 
 On macOS, `src/app_menu.rs` installs native Kver, File, Edit, Window, and View menus
 at startup.

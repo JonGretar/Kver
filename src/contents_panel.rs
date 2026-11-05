@@ -147,7 +147,7 @@ impl ContentsPanel {
                 .accessibility_label(entry.item().label.clone())
                 .selected(selected)
                 .h_8()
-                .text_sm()
+                .text_xs()
                 .pl(gpui_kit::rems((entry.depth().min(8) as f32) * 0.75))
                 .child(
                     div()
@@ -185,7 +185,7 @@ impl ContentsPanel {
                         } else {
                             div().w_5().flex_shrink_0().into_any_element()
                         })
-                        .child(entry.item().label.clone()),
+                        .child(div().min_w_0().text_xs().child(entry.item().label.clone())),
                 )
                 .on_click(move |_, window, cx| {
                     // Tree toggles the entire row by default. Keep its keyboard

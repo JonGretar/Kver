@@ -15,10 +15,12 @@ release sequence. See [features](features.md) for the corresponding scope.
 | 3. Find and navigate a document | **Planned** | Find text and navigate the PDF's contents through two panels in one sidebar ([spec #54](https://github.com/JonGretar/Kver/issues/54)); no release version or date is assigned. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** Start the [shared sidebar (#55)](https://github.com/JonGretar/Kver/issues/55);
-the [Find and Contents spec (#54)](https://github.com/JonGretar/Kver/issues/54)
-links its implementation tickets and dependencies. History, internal links, and the other
-[unscheduled goals](#goals-to-schedule-after-evidence) remain deferred.
+**Next work:** Build [Find (#56)](https://github.com/JonGretar/Kver/issues/56) and
+[Contents (#57)](https://github.com/JonGretar/Kver/issues/57) on the
+[shared sidebar (#55)](https://github.com/JonGretar/Kver/issues/55).
+The [Find and Contents spec (#54)](https://github.com/JonGretar/Kver/issues/54)
+links the remaining implementation tickets. History, internal links, and the
+other [unscheduled goals](#goals-to-schedule-after-evidence) remain deferred.
 GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
 

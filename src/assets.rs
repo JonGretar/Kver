@@ -1,4 +1,4 @@
-//! Keep Kit's component icons and embed only Kver's additional reader icons.
+//! Keep Kit's component icons and embed Kver's reader icons and app artwork.
 
 use std::borrow::Cow;
 
@@ -14,6 +14,11 @@ pub struct ReaderAssets;
 
 impl AssetSource for ReaderAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path == "images/kver.png" {
+            return Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/png/128.png"
+            ))));
+        }
         if let Some(bytes) = ReaderIcons.load(path)? {
             return Ok(Some(bytes));
         }
@@ -22,6 +27,9 @@ impl AssetSource for ReaderAssets {
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = Assets.list(path)?;
+        if "images/kver.png".starts_with(path) {
+            paths.push("images/kver.png".into());
+        }
         paths.extend(ReaderIcons.list(path)?);
         paths.sort();
         paths.dedup();
@@ -45,5 +53,17 @@ mod tests {
             assert!(ReaderAssets.load(path).unwrap().is_some(), "{path}");
             assert!(ReaderAssets.list("icons/").unwrap().contains(&path.into()));
         }
+    }
+
+    #[test]
+    fn serves_embedded_about_icon() {
+        let bytes = ReaderAssets.load("images/kver.png").unwrap().unwrap();
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(
+            ReaderAssets
+                .list("images/")
+                .unwrap()
+                .contains(&"images/kver.png".into())
+        );
     }
 }

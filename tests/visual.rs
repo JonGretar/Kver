@@ -1679,7 +1679,7 @@ fn menu_actions_and_shortcuts() -> Result<(), Box<dyn std::error::Error>> {
         assert!(matches!(&menus[3].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));
         let OwnedMenuItem::Action {
             name, action: quit, ..
-        } = &menus[0].items[0]
+        } = &menus[0].items[2]
         else {
             panic!("Quit menu item is not an Action")
         };
@@ -1717,6 +1717,65 @@ fn menu_actions_and_shortcuts() -> Result<(), Box<dyn std::error::Error>> {
             .highest_precedence_binding_for_action(&Quit)
             .is_some()
     })?);
+    cx.update(|app| app.dispatch_action(&app_menu::AboutKver));
+    cx.run_until_parked();
+    let about = cx.update(|app| app.active_window().unwrap());
+    assert_ne!(about, second.into());
+    assert_eq!(cx.update(|app| app.windows().len()), 3);
+    std::fs::create_dir_all("target/captures")?;
+    let light = cx.capture_screenshot(about)?;
+    light.save("target/captures/about-kver.png")?;
+    let (ok_fill, copy_fill) = cx.update_window(about, |_, window, _| {
+        let sample = |label| {
+            let bounds = window.find_by_label(label).bounds();
+            let scale = window.scale_factor();
+            (
+                (f32::from(bounds.left() + bounds.size.width / 4.0) * scale) as u32,
+                (f32::from(bounds.center().y) * scale) as u32,
+            )
+        };
+        (sample("OK"), sample("Copy"))
+    })?;
+    assert_eq!(
+        light.get_pixel(ok_fill.0, ok_fill.1),
+        light.get_pixel(copy_fill.0, copy_fill.1),
+        "About buttons should share the standard light-theme fill"
+    );
+    cx.update(|app| Theme::change(ThemeMode::Dark, None, app));
+    cx.update_window(about, |_, window, _| window.refresh())?;
+    cx.run_until_parked();
+    let dark = cx.capture_screenshot(about)?;
+    dark.save("target/captures/about-kver-dark.png")?;
+    assert_eq!(
+        dark.get_pixel(ok_fill.0, ok_fill.1),
+        dark.get_pixel(copy_fill.0, copy_fill.1),
+        "About buttons should share the standard dark-theme fill"
+    );
+    assert_ne!(light.get_pixel(0, 100), dark.get_pixel(0, 100));
+    cx.update(|app| Theme::change(ThemeMode::Light, None, app));
+    cx.update_window(about, |_, window, _| window.refresh())?;
+    click_control(&mut cx, about, "about-copy")?;
+    assert_eq!(
+        cx.update(|app| app.read_from_clipboard().unwrap().text()),
+        Some(format!(
+            "Kver\nVersion {}\nhttps://github.com/JonGretar/Kver",
+            env!("CARGO_PKG_VERSION")
+        ))
+    );
+    cx.update(|app| app.dispatch_action(&app_menu::AboutKver));
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| app.windows().len()), 3);
+    click_control(&mut cx, about, "about-ok")?;
+    assert_eq!(cx.update(|app| app.windows().len()), 2);
+    cx.update_window(second.into(), |_, window, _| window.activate_window())?;
+    cx.update(|app| app.dispatch_action(&app_menu::AboutKver));
+    cx.run_until_parked();
+    let about = cx.update(|app| app.active_window().unwrap());
+    cx.capture_screenshot(about)?;
+    press_key(&mut cx, about, "escape")?;
+    cx.run_until_parked();
+    assert_eq!(cx.update(|app| app.windows().len()), 2);
+    cx.update_window(second.into(), |_, window, _| window.activate_window())?;
     cx.update(|app| app.dispatch_action(quit.as_ref()));
     cx.run_until_parked();
     Ok(())

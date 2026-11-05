@@ -10,6 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Open a window-local sidebar for Find or Contents from the toolbar, menu, or command palette; switch panels with bottom tabs and dismiss it without losing the document view. Search and outline navigation are not yet available.
+- On macOS, choose Kver → About Kver for an About window with the app icon, version, GitHub link, and a button to copy app details.
 
 ## [0.2.0] - 2026-11-05
 

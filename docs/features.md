@@ -39,9 +39,24 @@ These capabilities were validated together in
 [#42](https://github.com/JonGretar/Kver/issues/42), following the
 [reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33).
 Selection remains page-local, uses available PDF text mappings, and does not
-include OCR or guaranteed reading order for complex layouts. Search, outline,
-history, and the goals below remain deferred; this gate does not imply another
-release version or date.
+include OCR or guaranteed reading order for complex layouts. Find and Contents
+belong to the next gate; history and the goals below remain deferred. This
+completed gate does not imply another release version or date.
+
+## Find and Contents — planned reader gate
+
+- Find mapped text across the current PDF, navigate matches, and show short
+  result snippets and transient highlights on the page. Scans without a text
+  layer have no searchable text; this does not include OCR.
+- Browse the PDF's table of contents when it provides an outline, and jump to
+  its destinations. Show an honest empty state when no usable outline exists.
+- Give each reader window one sidebar hosting distinct Find and Contents
+  panels. Show only one panel at a time by default; keep the sidebar
+  dismissible and the PDF readable.
+
+The [spec (#54)](https://github.com/JonGretar/Kver/issues/54) defines the
+scope and validation. This gate has no assigned release version or date.
+Trackpad pinch-to-zoom may be investigated separately, but does not block it.
 
 ## Goals without a fixed release date
 
@@ -55,8 +70,7 @@ promise for the immediately following release.
 
 ### More navigation and desktop controls
 
-- Search document text and navigate transiently highlighted results; follow
-  internal links and display the PDF outline when present.
+- Follow internal links.
 - Navigate backward and forward and restore the last reading position.
   Search-result highlights are not saved annotations.
 - Configurable keybindings and preferences.

@@ -12,9 +12,12 @@ release sequence. See [features](features.md) for the corresponding scope.
 | 0. Validate the stack | **Complete** | Hayro and GPUI were validated for the initial macOS prototype, with documented limitations. |
 | 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
 | 2. Build an action-driven reader | **Complete** | The integrated reader passed headless checks and an Apple silicon native-window check for actions, independent windows, and visible text copy ([#42](https://github.com/JonGretar/Kver/issues/42)). |
+| 3. Find and navigate a document | **Planned** | Find text and navigate the PDF's contents through two panels in one sidebar ([spec #54](https://github.com/JonGretar/Kver/issues/54)); no release version or date is assigned. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** Search, outline, history, and the other
+**Next work:** Start the [shared sidebar (#55)](https://github.com/JonGretar/Kver/issues/55);
+the [Find and Contents spec (#54)](https://github.com/JonGretar/Kver/issues/54)
+links its implementation tickets and dependencies. History, internal links, and the other
 [unscheduled goals](#goals-to-schedule-after-evidence) remain deferred.
 GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
@@ -134,6 +137,25 @@ The integrated checks and native-window confirmation are recorded in
 does not guarantee reading order for complex layouts or missing text mappings,
 and does not perform OCR on image-only PDFs.
 
+## 3. Find and navigate a document
+
+**Outcome:** Find text across the current PDF and use its table of contents
+without crowding the reading area. The [spec (#54)](https://github.com/JonGretar/Kver/issues/54)
+defines the agreed scope and links the implementation tickets and dependencies.
+
+- Find mapped document text, navigate matches, and show temporary page
+  highlights and result snippets.
+- Show the PDF's outline when available and navigate its entries.
+- Use one sidebar with separate Find and Contents panels, one visible at a
+  time. Keep the sidebar dismissible and each reader window independent.
+
+**Gate:** Search and outline navigation work on representative PDFs, including
+long, rotated/cropped, scanned, and no-outline cases; obsolete search results
+do not replace a newer query or document. A real-Mac window check confirms
+focus, controls, panel switching, and result/outline navigation. OCR,
+persistent highlights, configurable panels, and trackpad pinch-to-zoom are
+not release requirements. No release version or date is assigned to this gate.
+
 ## Separate platform delivery
 
 Linux and Windows remain product targets. Their compatibility is checked
@@ -147,8 +169,8 @@ supported download; they are not part of the first Apple silicon release.
 
 Keep these visible without implying a date or order:
 
-- Document-text search and transient result highlights; internal links and
-  outline; navigation history and restoration of the last reading position.
+- Internal links; navigation history and restoration of the last reading
+  position.
 - Visual ruler: keyboard movement along text lines, a positional fallback on
   scans, and stable placement through zoom/scroll. Validate its coordinate and
   text-geometry prerequisites in Phase 0; implement it when ready.

@@ -178,7 +178,6 @@ Keep these visible without implying a date or order:
   text-geometry prerequisites in Phase 0; implement it when ready.
 - Configurable keybindings, numeric counts, multi-key commands, named marks,
   recent-file search, and drag-and-drop.
-- Tabs, if useful beyond independent windows.
 - Password-protected PDFs if not shipped in the MVP.
 - Notes, persistent highlights, and annotation interchange.
 - Reload after PDF rebuilds and SyncTeX source/PDF navigation for LaTeX.

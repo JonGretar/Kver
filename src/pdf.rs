@@ -1,7 +1,10 @@
 //! Provisional PDF backend for the reader prototype.
 //!
 //! The UI receives bitmap pixels and document-space text geometry, never Hayro types.
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use hayro::{
     PixmapSettings, RenderCache, RenderSettings,
@@ -12,7 +15,10 @@ use hayro::{
         hayro_cmap::BfString,
         interpret_page,
     },
-    hayro_syntax::{LoadPdfError, Pdf},
+    hayro_syntax::{
+        LoadPdfError, Pdf,
+        object::{Array, Dict, MaybeRef, Object, ObjectIdentifier},
+    },
     kurbo::{Affine, BezPath, Point as KurboPoint, Rect, Shape},
     render,
     vello_cpu::{Pixmap, color::palette::css::WHITE},
@@ -50,6 +56,257 @@ pub struct PageGeometry {
     pub width: f32,
     pub height: f32,
     pub transform: PageTransform,
+}
+
+/// PDF-authored outline in document order, including non-navigable headings.
+#[derive(Clone, Debug)]
+pub struct OutlineEntry {
+    title: String,
+    depth: usize,
+    destination: Option<OutlineDestination>,
+}
+
+impl OutlineEntry {
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+    pub fn destination(&self) -> Option<OutlineDestination> {
+        self.destination
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutlineDestination {
+    page: usize,
+    /// PDF document-space point; absent for a page-level destination.
+    point: Option<Point>,
+    /// Position in the rendered page's logical coordinates, after crop/rotation.
+    page_x: Option<f32>,
+    page_y: Option<f32>,
+    /// Explicit /XYZ zoom; other destinations keep reader zoom.
+    zoom: Option<f32>,
+}
+
+impl OutlineDestination {
+    pub fn page(&self) -> usize {
+        self.page
+    }
+    pub fn point(&self) -> Option<Point> {
+        self.point
+    }
+    pub fn page_position(&self) -> Option<(f32, f32)> {
+        Some((self.page_x?, self.page_y?))
+    }
+    pub fn zoom(&self) -> Option<f32> {
+        self.zoom
+    }
+}
+
+/// Extract outline metadata on a background worker, never on the UI thread.
+pub fn document_outline(path: &Path) -> Result<Vec<OutlineEntry>, String> {
+    let data =
+        std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    outline_bytes(data)
+}
+
+fn outline_bytes(data: Vec<u8>) -> Result<Vec<OutlineEntry>, String> {
+    let pdf = open_pdf(data)?;
+    let xref = pdf.xref();
+    let Some(catalog) = xref.get::<Dict<'_>>(xref.root_id()) else {
+        return Ok(Vec::new());
+    };
+    let Some(root) = catalog.get::<Dict<'_>>(b"Outlines") else {
+        return Ok(Vec::new());
+    };
+    let page_ids: HashMap<_, _> = pdf
+        .pages()
+        .iter()
+        .enumerate()
+        .filter_map(|(ix, page)| page.raw().obj_id().map(|id| (id, ix)))
+        .collect();
+    let names = named_destinations(&catalog);
+    let mut entries = Vec::new();
+    let mut seen = HashSet::new();
+    let mut stack = vec![(root.get_ref(b"First"), 0usize)];
+    // Linked outline lists can contain cycles. Bound depth and size before
+    // malformed documents can consume unbounded worker memory.
+    while let Some((next, depth)) = stack.pop() {
+        let Some(id) = next else { continue };
+        if entries.len() >= 100_000 || depth >= 128 || !seen.insert(id) {
+            continue;
+        }
+        let Some(item) = xref.get::<Dict<'_>>(id.into()) else {
+            continue;
+        };
+        stack.push((item.get_ref(b"Next"), depth));
+        stack.push((item.get_ref(b"First"), depth + 1));
+        let title = item
+            .get::<hayro::hayro_syntax::object::String<'_>>(b"Title")
+            .map(|value| outline_title(value.as_bytes()))
+            .unwrap_or_default();
+        if title.trim().is_empty() {
+            continue;
+        }
+        let dest = item.get::<Object<'_>>(b"Dest").or_else(|| {
+            let action = item.get::<Dict<'_>>(b"A")?;
+            (action
+                .get::<hayro::hayro_syntax::object::Name<'_>>(b"S")?
+                .as_ref()
+                == b"GoTo")
+                .then(|| action.get::<Object<'_>>(b"D"))?
+        });
+        entries.push(OutlineEntry {
+            title,
+            depth,
+            destination: dest
+                .and_then(|dest| outline_destination(dest, &pdf, &catalog, &names, &page_ids)),
+        });
+    }
+    Ok(entries)
+}
+
+fn outline_title(bytes: &[u8]) -> String {
+    if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        String::from_utf16_lossy(
+            &rest
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| u16::from_be_bytes(*p))
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        // ASCII matches PDFDocEncoding; preserve other bytes instead of inventing text.
+        bytes.iter().map(|&b| char::from(b)).collect()
+    }
+}
+
+fn outline_destination(
+    object: Object<'_>,
+    pdf: &Pdf,
+    catalog: &Dict<'_>,
+    names: &HashMap<Vec<u8>, Array<'_>>,
+    page_ids: &HashMap<ObjectIdentifier, usize>,
+) -> Option<OutlineDestination> {
+    let array = match object {
+        Object::Array(array) => array,
+        Object::Name(name) => named_destination(name.as_ref(), catalog, names)?,
+        Object::String(name) => named_destination(name.as_bytes(), catalog, names)?,
+        Object::Dict(dict) => dict.get::<Array<'_>>(b"D")?,
+        _ => return None,
+    };
+    let mut items = array.raw_iter();
+    let page = match items.next()? {
+        MaybeRef::Ref(id) => *page_ids.get(&id.into())?,
+        _ => return None,
+    };
+    let kind = match items.next()? {
+        MaybeRef::NotRef(Object::Name(name)) => name,
+        _ => return None,
+    };
+    let crop = pdf.pages()[page].intersected_crop_box();
+    let number = |item: Option<MaybeRef<Object<'_>>>| -> Option<f64> {
+        match item? {
+            MaybeRef::NotRef(Object::Number(n)) => {
+                let v = n.as_f64();
+                v.is_finite().then_some(v)
+            }
+            _ => None,
+        }
+    };
+    let (point, zoom) = match kind.as_ref() {
+        b"Fit" | b"FitB" => (None, None),
+        b"FitH" | b"FitBH" => {
+            let y = number(items.next()).unwrap_or(crop.y1);
+            (Some(Point { x: crop.x0, y }), None)
+        }
+        b"XYZ" => {
+            let x = number(items.next()).unwrap_or(crop.x0);
+            let y = number(items.next()).unwrap_or(crop.y1);
+            let zoom = number(items.next())
+                .filter(|&z| z > 0.0 && z <= 4.0)
+                .map(|z| z as f32);
+            (Some(Point { x, y }), zoom)
+        }
+        _ => return None,
+    };
+    // Do not navigate to a point outside the visible crop.
+    if point.is_some_and(|p| p.x < crop.x0 || p.x > crop.x1 || p.y < crop.y0 || p.y > crop.y1) {
+        return None;
+    }
+    let page_point = point.map(|p| {
+        PageTransform::from_coefficients(pdf.pages()[page].initial_transform(true).as_coeffs())
+            .document_to_page(p)
+    });
+    Some(OutlineDestination {
+        page,
+        point,
+        page_x: page_point.map(|p| p.x as f32),
+        page_y: page_point.map(|p| p.y as f32),
+        zoom,
+    })
+}
+
+fn named_destination<'a>(
+    name: &[u8],
+    catalog: &Dict<'a>,
+    names: &HashMap<Vec<u8>, Array<'a>>,
+) -> Option<Array<'a>> {
+    if let Some(dict) = catalog.get::<Dict<'_>>(b"Dests")
+        && let Some(dest) = dict.get::<Object<'_>>(name)
+    {
+        return match dest {
+            Object::Array(array) => Some(array),
+            Object::Dict(dict) => dict.get::<Array<'_>>(b"D"),
+            _ => None,
+        };
+    }
+    names.get(name).cloned()
+}
+
+fn named_destinations<'a>(catalog: &Dict<'a>) -> HashMap<Vec<u8>, Array<'a>> {
+    let mut destinations = HashMap::new();
+    let Some(root) = catalog
+        .get::<Dict<'_>>(b"Names")
+        .and_then(|names| names.get::<Dict<'_>>(b"Dests"))
+    else {
+        return destinations;
+    };
+    let mut stack = vec![root];
+    let mut seen = HashSet::new();
+    let mut steps = 0;
+    while let Some(node) = stack.pop() {
+        steps += 1;
+        if steps > 100_000 {
+            break;
+        }
+        if let Some(id) = node.obj_id()
+            && !seen.insert(id)
+        {
+            continue;
+        }
+        if let Some(names) = node.get::<Array<'_>>(b"Names") {
+            let mut iter = names.flex_iter();
+            while let Some(key) = iter.next::<hayro::hayro_syntax::object::String<'_>>() {
+                let value = iter.next::<Object<'_>>();
+                let array = match value {
+                    Some(Object::Array(array)) => Some(array),
+                    Some(Object::Dict(dict)) => dict.get::<Array<'_>>(b"D"),
+                    _ => None,
+                };
+                if let Some(array) = array {
+                    destinations.insert(key.as_bytes().to_vec(), array);
+                }
+            }
+        }
+        if let Some(kids) = node.get::<Array<'_>>(b"Kids") {
+            stack.extend(kids.iter::<Dict<'_>>());
+        }
+    }
+    destinations
 }
 
 /// A decoded glyph's advance and visible height in document coordinates.
@@ -385,6 +642,128 @@ mod tests {
     // not depend on a developer's documents or a downloaded fixture.
     fn blank_pdf() -> Vec<u8> {
         blank_pdf_with_size("72", "96")
+    }
+
+    fn outlined_pdf() -> Vec<u8> {
+        let objects: [&[u8]; 13] = [
+            b"<< /Type /Catalog /Pages 2 0 R /Outlines 5 0 R /Names << /Dests 12 0 R >> >>",
+            b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [10 20 210 320] /CropBox [30 50 130 250] /Rotate 90 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>",
+            b"<< /Type /Outlines /First 6 0 R /Last 11 0 R >>",
+            b"<< /Title (Chapter) /First 7 0 R /Next 8 0 R /Dest [3 0 R /Fit] >>",
+            b"<< /Title <FEFF00530065006300740069006F006E> /Dest [3 0 R /XYZ 100 80 0] >>",
+            b"<< /Title (Named) /Dest (part) /Next 9 0 R >>",
+            b"<< /Title (Unsupported) /Dest [4 0 R /FitR 0 0 20 30] /Next 10 0 R >>",
+            b"<< /Title (Broken) /Dest [99 0 R /Fit] /Next 11 0 R >>",
+            b"<< /Title (End) /A << /S /GoTo /D [4 0 R /FitH 180] >> >>",
+            b"<< /Names [(part) 13 0 R] >>",
+            b"<< /D [4 0 R /XYZ 40 150 1.5] >>",
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = vec![0];
+        for (ix, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n", ix + 1).as_bytes());
+            pdf.extend_from_slice(object);
+            pdf.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes(),
+        );
+        for offset in offsets.iter().skip(1) {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                offsets.len()
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    #[test]
+    fn outlines_expose_nested_named_and_rotated_destinations() {
+        let entries = outline_bytes(outlined_pdf()).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| (e.title.as_str(), e.depth))
+                .collect::<Vec<_>>(),
+            [
+                ("Chapter", 0),
+                ("Section", 1),
+                ("Named", 0),
+                ("Unsupported", 0),
+                ("Broken", 0),
+                ("End", 0)
+            ]
+        );
+        assert_eq!(entries[0].destination.unwrap().page, 0);
+        let rotated = entries[1].destination.unwrap();
+        assert_eq!(rotated.point, Some(Point { x: 100.0, y: 80.0 }));
+        assert!((rotated.page_y.unwrap() - 70.0).abs() < 0.001);
+        assert_eq!(entries[2].destination.unwrap().zoom, Some(1.5));
+        assert_eq!(entries[2].destination.unwrap().page_y, Some(150.0));
+        assert!(entries[3].destination.is_none());
+        assert!(entries[4].destination.is_none());
+        assert_eq!(entries[5].destination.unwrap().page_y, Some(120.0));
+    }
+
+    #[test]
+    fn absent_outline_and_real_pdf_are_safe() {
+        assert!(outline_bytes(blank_pdf()).unwrap().is_empty());
+        // The 100-page sample is a real PDF rather than the small hand-built fixture.
+        assert!(document_outline(Path::new("examples/readme-sample.pdf")).is_ok());
+    }
+
+    #[test]
+    fn large_cyclic_outline_stays_bounded_and_in_order() {
+        let count = 1_200;
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>".to_owned(),
+            "<< /Type /Outlines /First 5 0 R >>".to_owned(),
+        ];
+        for ix in 0..count {
+            // The last link loops back to the first outline item.
+            let next = if ix + 1 == count { 5 } else { ix + 6 };
+            objects.push(format!(
+                "<< /Title (Section {ix}) /Dest [3 0 R /Fit] /Next {next} 0 R >>"
+            ));
+        }
+        let mut bytes = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (ix, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", ix + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        let entries = outline_bytes(bytes).unwrap();
+        assert_eq!(entries.len(), count);
+        assert_eq!(entries[1_199].title, "Section 1199");
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.destination.unwrap().page == 0)
+        );
     }
 
     fn blank_pdf_with_size(width: &str, height: &str) -> Vec<u8> {

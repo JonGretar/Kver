@@ -22,6 +22,7 @@ pub enum SidebarPanel {
 /// its retained content and implements its own actions without host-owned data.
 pub struct ReaderSidebar {
     active: Option<SidebarPanel>,
+    last: SidebarPanel,
     find: FindPanel,
     contents: ContentsPanel,
 }
@@ -30,6 +31,7 @@ impl ReaderSidebar {
     pub fn new(window: &mut Window, cx: &mut Context<crate::reader::Preview>) -> Self {
         Self {
             active: None,
+            last: SidebarPanel::Find,
             find: FindPanel::new(window, cx),
             contents: ContentsPanel::new(cx),
         }
@@ -39,6 +41,10 @@ impl ReaderSidebar {
         self.active
     }
 
+    pub fn last(&self) -> SidebarPanel {
+        self.last
+    }
+
     pub fn open(
         &mut self,
         panel: SidebarPanel,
@@ -46,6 +52,7 @@ impl ReaderSidebar {
         cx: &mut Context<crate::reader::Preview>,
     ) {
         self.active = Some(panel);
+        self.last = panel;
         match panel {
             SidebarPanel::Find => self.find.focus(window, cx),
             SidebarPanel::Contents => self.contents.focus(window, cx),

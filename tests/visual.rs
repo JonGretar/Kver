@@ -1242,6 +1242,24 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_page(&mut cx, &second, "Page 1 of 100 · 100%")?;
     let first_reader = first.root(&mut cx)?;
     let second_reader = second.root(&mut cx)?;
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.find("toggle-sidebar").visible());
+        assert!(
+            window.find("toggle-sidebar").bounds().left()
+                < window.find("previous-page").bounds().left()
+        );
+        window.click("toggle-sidebar", app);
+    })?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    click_control(&mut cx, first.into(), "toggle-sidebar")?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
     press_key(&mut cx, first, "cmd-f")?;
     cx.run_until_parked();
     assert_eq!(
@@ -1260,6 +1278,8 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         let sidebar = window.find("reader-sidebar").bounds();
         let page = window.find("page").bounds();
         assert!(sidebar.right() <= page.left());
+        assert!(sidebar.top() < page.top());
+        assert!(sidebar.bottom() > page.bottom());
         assert!(page.size.width > px(500.));
     })?;
     type_query(&mut cx, first, "nfpw=-")?;
@@ -1286,6 +1306,16 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         assert!(window.find("contents-placeholder").visible());
         assert_eq!(window.find("contents-placeholder").focused(), Some(true));
     })?;
+    click_control(&mut cx, first.into(), "toggle-sidebar")?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    click_control(&mut cx, first.into(), "toggle-sidebar")?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Contents)
+    );
     press_key(&mut cx, first, "escape")?;
     cx.run_until_parked();
     assert_eq!(

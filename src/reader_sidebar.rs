@@ -10,6 +10,7 @@ use gpui_kit::{
     },
 };
 
+use crate::pdf::{OutlineDestination, OutlineEntry};
 use crate::{contents_panel::ContentsPanel, find_panel::FindPanel};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +54,40 @@ impl ReaderSidebar {
         &mut self.find
     }
 
+    pub fn reset_document(&mut self, cx: &mut Context<crate::reader::Preview>) {
+        self.contents.reset(cx);
+    }
+
+    pub fn has_outline(&self) -> bool {
+        self.contents.has_outline()
+    }
+
+    pub fn install_outline(
+        &mut self,
+        result: Result<Vec<OutlineEntry>, String>,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        self.contents.install(result, cx);
+    }
+
+    pub fn focus_loaded_outline(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        if self.active == Some(SidebarPanel::Contents) {
+            self.contents.focus_loaded(window, cx);
+        }
+    }
+
+    pub fn outline_destination(&self, index: usize) -> Option<OutlineDestination> {
+        self.contents.destination(index)
+    }
+
+    pub fn selected_outline(&self, cx: &gpui_kit::App) -> Option<OutlineDestination> {
+        self.contents.selected_destination(cx)
+    }
+
     pub fn open(
         &mut self,
         panel: SidebarPanel,
@@ -91,6 +126,22 @@ impl ReaderSidebar {
         let width_rems = (f32::from(window.bounds().size.width) / f32::from(window.rem_size())
             * 0.4)
             .clamp(10., 16.);
+        let panel = match active {
+            SidebarPanel::Find => div()
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scrollbar()
+                .p_3()
+                .child(self.find.render(total_pages, cx))
+                .into_any_element(),
+            SidebarPanel::Contents => div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .p_2()
+                .child(self.contents.render(cx))
+                .into_any_element(),
+        };
         div()
             .id("reader-sidebar")
             .test_support()
@@ -106,17 +157,7 @@ impl ReaderSidebar {
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scrollbar()
-                    .p_3()
-                    .child(match active {
-                        SidebarPanel::Find => self.find.render(total_pages, cx).into_any_element(),
-                        SidebarPanel::Contents => self.contents.render(cx).into_any_element(),
-                    }),
-            )
+            .child(panel)
             .child(
                 div().border_t_1().border_color(cx.theme().border).child(
                     TabBar::new("sidebar-panels")

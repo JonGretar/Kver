@@ -50,6 +50,8 @@ completed gate does not imply another release version or date.
   layer have no searchable text; this does not include OCR.
 - Browse the PDF's table of contents when it provides an outline, and jump to
   its destinations. Show an honest empty state when no usable outline exists.
+  Command-T opens Contents; Kver uses independent windows rather than document
+  tabs.
 - Give each reader window one sidebar hosting distinct Find and Contents
   panels. Show only one panel at a time by default; keep the sidebar
   dismissible and the PDF readable.
@@ -75,7 +77,7 @@ promise for the immediately following release.
   Search-result highlights are not saved annotations.
 - Configurable keybindings and preferences.
 - Vim-style sequences, numeric counts, and named marks.
-- Recent-file search, tabs, and drag-and-drop.
+- Recent-file search and drag-and-drop.
 - Password-protected PDFs if deferred from MVP.
 - Link hints and keyboard-driven text selection.
 

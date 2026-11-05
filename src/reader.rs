@@ -61,7 +61,8 @@ gpui::actions!(
         NextMatch,
         PreviousMatch,
         ShowContents,
-        ToggleSidebar
+        ToggleSidebar,
+        ActivateOutline
     ]
 );
 
@@ -78,7 +79,9 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-b", ToggleSidebar, None),
         KeyBinding::new("cmd-g", NextMatch, None),
         KeyBinding::new("cmd-shift-g", PreviousMatch, None),
+        KeyBinding::new("cmd-t", ShowContents, None),
         KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
+        KeyBinding::new("enter", ActivateOutline, Some("ContentsPanel")),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
         KeyBinding::new("left", PreviousPage, Some("Reader")),
@@ -327,6 +330,7 @@ pub struct Preview {
     palette: Option<Entity<CommandState>>,
     sidebar: Option<ReaderSidebar>,
     pending_find_reset: bool,
+    outline_in_flight: bool,
     status: String,
 }
 
@@ -358,6 +362,7 @@ impl Preview {
             palette: None,
             sidebar: None,
             pending_find_reset: false,
+            outline_in_flight: false,
             status: "Open a PDF to start reading".into(),
         };
         if reader.path.is_some() {
@@ -371,6 +376,10 @@ impl Preview {
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.generation += 1;
         self.document_generation += 1;
+        if let Some(sidebar) = self.sidebar.as_mut() {
+            sidebar.reset_document(cx);
+        }
+        self.outline_in_flight = false;
         self.text.clear();
         self.text_failed.clear();
         self.text_in_flight = None;
@@ -456,6 +465,9 @@ impl Preview {
             .sidebar
             .get_or_insert_with(|| ReaderSidebar::new(window, cx));
         sidebar.open(panel, window, cx);
+        if panel == SidebarPanel::Contents && !self.outline_in_flight && !sidebar.has_outline() {
+            self.load_outline(cx);
+        }
     }
 
     pub(crate) fn find_query_changed(&mut self, query: String, cx: &mut Context<Self>) {
@@ -683,7 +695,42 @@ impl Preview {
         self.pages = pages;
         self.selected_page = Some(0);
         self.status = self.ready_status();
+        if self.sidebar_panel() == Some(SidebarPanel::Contents) {
+            self.load_outline(cx);
+        }
         self.sync_viewport(cx);
+    }
+
+    fn load_outline(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        self.outline_in_flight = true;
+        let generation = self.document_generation;
+        let work = cx
+            .background_executor()
+            .spawn(async move { pdf::document_outline(&path) });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if generation != this.document_generation {
+                    return;
+                }
+                this.outline_in_flight = false;
+                if let Some(sidebar) = this.sidebar.as_mut() {
+                    sidebar.install_outline(result, cx);
+                    // Tree's focus handle is tracked by the newly rendered tree.
+                    // Transfer focus after that render, not before it exists.
+                    cx.on_next_frame(window, |this, window, cx| {
+                        if let Some(sidebar) = &this.sidebar {
+                            sidebar.focus_loaded_outline(window, cx);
+                        }
+                    });
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn ready_status(&self) -> String {
@@ -987,6 +1034,51 @@ impl Preview {
         self.scroll.set_offset(point(
             self.scroll.offset().x,
             px(-page_top(&self.pages, self.scale, index)),
+        ));
+        self.schedule(cx);
+        cx.notify();
+    }
+    pub(crate) fn select_outline(
+        &mut self,
+        index: usize,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let destination = self
+            .sidebar
+            .as_ref()
+            .and_then(|sidebar| sidebar.outline_destination(index));
+        if let Some(destination) = destination {
+            self.navigate_outline(destination, cx);
+        }
+    }
+
+    fn navigate_outline(&mut self, destination: pdf::OutlineDestination, cx: &mut Context<Self>) {
+        let page = destination.page();
+        if page >= self.pages.len() {
+            return;
+        }
+        self.page_index = page;
+        self.selected_page = Some(page);
+        if let Some(zoom) = destination.zoom() {
+            self.zoom_mode = ZoomMode::Fixed;
+            self.set_scale(zoom, Position { page, y: 0.0 }, 0.0);
+        } else {
+            let (_, width, height) = self.viewport();
+            self.apply_fit(page, Position { page, y: 0.0 }, (width, height), 0.0);
+        }
+        let (page_x, page_y) = destination.page_position().unwrap_or((0.0, 0.0));
+        let y = page_y.clamp(0.0, self.pages[page].1);
+        let (_, width, _) = self.viewport();
+        let page_width = self.pages[page].0 * self.scale;
+        let x = if page_width > width - PAGE_PADDING * 2.0 {
+            page_x.clamp(0.0, self.pages[page].0) * self.scale
+        } else {
+            0.0
+        };
+        self.scroll.set_offset(point(
+            px(-x),
+            px(-(page_top(&self.pages, self.scale, page) + y * self.scale)),
         ));
         self.schedule(cx);
         cx.notify();
@@ -1358,6 +1450,15 @@ impl Render for Preview {
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
                 this.toggle_sidebar(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ActivateOutline, _, cx| {
+                if let Some(dest) = this
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sidebar| sidebar.selected_outline(cx))
+                {
+                    this.navigate_outline(dest, cx);
+                }
             }))
             .on_action(cx.listener(Self::on_copy))
             .on_mouse_up(

@@ -58,8 +58,6 @@ gpui::actions!(
         ShowFind,
         ShowContents,
         ToggleSidebar,
-        NextOutline,
-        PreviousOutline,
         ActivateOutline
     ]
 );
@@ -75,8 +73,6 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("cmd-f", ShowFind, None),
         KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
-        KeyBinding::new("down", NextOutline, Some("ContentsPanel")),
-        KeyBinding::new("up", PreviousOutline, Some("ContentsPanel")),
         KeyBinding::new("enter", ActivateOutline, Some("ContentsPanel")),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
@@ -371,7 +367,7 @@ impl Preview {
         self.generation += 1;
         self.document_generation += 1;
         if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.reset_document();
+            sidebar.reset_document(cx);
         }
         self.outline_in_flight = false;
         self.text.clear();
@@ -543,13 +539,20 @@ impl Preview {
             .spawn(async move { pdf::document_outline(&path) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 if generation != this.document_generation {
                     return;
                 }
                 this.outline_in_flight = false;
                 if let Some(sidebar) = this.sidebar.as_mut() {
-                    sidebar.install_outline(result);
+                    sidebar.install_outline(result, cx);
+                    // Tree's focus handle is tracked by the newly rendered tree.
+                    // Transfer focus after that render, not before it exists.
+                    cx.on_next_frame(window, |this, window, cx| {
+                        if let Some(sidebar) = &this.sidebar {
+                            sidebar.focus_loaded_outline(window, cx);
+                        }
+                    });
                 }
                 cx.notify();
             });
@@ -870,8 +873,8 @@ impl Preview {
     ) {
         let destination = self
             .sidebar
-            .as_mut()
-            .and_then(|sidebar| sidebar.select_outline(index));
+            .as_ref()
+            .and_then(|sidebar| sidebar.outline_destination(index));
         if let Some(destination) = destination {
             self.navigate_outline(destination, cx);
         }
@@ -1210,23 +1213,11 @@ impl Render for Preview {
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
                 this.toggle_sidebar(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &NextOutline, _, cx| {
-                if let Some(sidebar) = this.sidebar.as_mut() {
-                    sidebar.step_outline(true);
-                    cx.notify();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &PreviousOutline, _, cx| {
-                if let Some(sidebar) = this.sidebar.as_mut() {
-                    sidebar.step_outline(false);
-                    cx.notify();
-                }
-            }))
             .on_action(cx.listener(|this, _: &ActivateOutline, _, cx| {
                 if let Some(dest) = this
                     .sidebar
                     .as_ref()
-                    .and_then(ReaderSidebar::selected_outline)
+                    .and_then(|sidebar| sidebar.selected_outline(cx))
                 {
                     this.navigate_outline(dest, cx);
                 }

@@ -46,28 +46,38 @@ impl ReaderSidebar {
         self.last
     }
 
-    pub fn reset_document(&mut self) {
-        self.contents.reset();
+    pub fn reset_document(&mut self, cx: &mut Context<crate::reader::Preview>) {
+        self.contents.reset(cx);
     }
 
     pub fn has_outline(&self) -> bool {
         self.contents.has_outline()
     }
 
-    pub fn install_outline(&mut self, result: Result<Vec<OutlineEntry>, String>) {
-        self.contents.install(result);
+    pub fn install_outline(
+        &mut self,
+        result: Result<Vec<OutlineEntry>, String>,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        self.contents.install(result, cx);
     }
 
-    pub fn select_outline(&mut self, index: usize) -> Option<OutlineDestination> {
-        self.contents.select(index)
+    pub fn focus_loaded_outline(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        if self.active == Some(SidebarPanel::Contents) {
+            self.contents.focus_loaded(window, cx);
+        }
     }
 
-    pub fn step_outline(&mut self, forward: bool) {
-        self.contents.step(forward);
+    pub fn outline_destination(&self, index: usize) -> Option<OutlineDestination> {
+        self.contents.destination(index)
     }
 
-    pub fn selected_outline(&self) -> Option<OutlineDestination> {
-        self.contents.selected_destination()
+    pub fn selected_outline(&self, cx: &gpui_kit::App) -> Option<OutlineDestination> {
+        self.contents.selected_destination(cx)
     }
 
     pub fn open(

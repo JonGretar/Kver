@@ -3,23 +3,20 @@
 use std::sync::Arc;
 
 use crate::pdf::{OutlineDestination, OutlineEntry};
+use gpui_kit::{App, Context, FocusHandle, IntoElement, Window, div, prelude::*};
 use gpui_kit::{
-    Context, FocusHandle, IntoElement, ScrollStrategy, UniformListScrollHandle, Window, div,
-    prelude::*, uniform_list,
-};
-use gpui_kit::{
-    base::{Disableable, TestSupportExt as _},
+    base::TestSupportExt as _,
     component::{
-        ActiveTheme, Selectable,
-        button::{Button, ButtonVariants},
+        ActiveTheme, Icon, IconName,
+        list::ListItem,
+        tree::{TreeItem, TreeState, tree},
     },
 };
 
 pub(crate) struct ContentsPanel {
     focus: FocusHandle,
     outline: Option<Result<Arc<Vec<OutlineEntry>>, String>>,
-    selected: Option<usize>,
-    scroll: UniformListScrollHandle,
+    tree: gpui_kit::Entity<TreeState>,
 }
 
 impl ContentsPanel {
@@ -27,24 +24,30 @@ impl ContentsPanel {
         Self {
             focus: cx.focus_handle().tab_stop(true),
             outline: None,
-            selected: None,
-            scroll: UniformListScrollHandle::default(),
+            tree: cx.new(|cx| TreeState::new(cx)),
         }
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub(crate) fn reset(&mut self, cx: &mut Context<crate::reader::Preview>) {
         self.outline = None;
-        self.selected = None;
-        self.scroll = UniformListScrollHandle::default();
+        self.tree.update(cx, |tree, cx| tree.set_items(vec![], cx));
     }
 
     pub(crate) fn has_outline(&self) -> bool {
         self.outline.is_some()
     }
 
-    pub(crate) fn install(&mut self, result: Result<Vec<OutlineEntry>, String>) {
+    pub(crate) fn install(
+        &mut self,
+        result: Result<Vec<OutlineEntry>, String>,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        let items = result
+            .as_ref()
+            .map(|entries| outline_tree(entries))
+            .unwrap_or_default();
+        self.tree.update(cx, |tree, cx| tree.set_items(items, cx));
         self.outline = Some(result.map(Arc::new));
-        self.selected = None;
     }
 
     pub(crate) fn destination(&self, index: usize) -> Option<OutlineDestination> {
@@ -56,93 +59,113 @@ impl ContentsPanel {
             .destination()
     }
 
-    pub(crate) fn select(&mut self, index: usize) -> Option<OutlineDestination> {
-        let dest = self.destination(index)?;
-        self.selected = Some(index);
-        Some(dest)
-    }
-
-    pub(crate) fn step(&mut self, forward: bool) {
-        let Some(Ok(entries)) = &self.outline else {
-            return;
-        };
-        let start = self
-            .selected
-            .unwrap_or(if forward { usize::MAX } else { entries.len() });
-        let next = if forward {
-            (start.wrapping_add(1)..entries.len()).find(|&ix| entries[ix].destination().is_some())
-        } else {
-            (0..start)
-                .rev()
-                .find(|&ix| entries[ix].destination().is_some())
-        };
-        if let Some(ix) = next {
-            self.selected = Some(ix);
-            self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
-        }
-    }
-
-    pub(crate) fn selected_destination(&self) -> Option<OutlineDestination> {
-        self.destination(self.selected?)
+    pub(crate) fn selected_destination(&self, cx: &App) -> Option<OutlineDestination> {
+        let id = &self.tree.read(cx).selected_item()?.id;
+        self.destination(id.strip_prefix("contents-")?.parse().ok()?)
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<crate::reader::Preview>) {
-        window.focus(&self.focus, cx);
+        if self.has_navigable_entries() {
+            self.tree.update(cx, |tree, cx| tree.focus(window, cx));
+        } else {
+            window.focus(&self.focus, cx);
+        }
+    }
+
+    fn has_navigable_entries(&self) -> bool {
+        self.outline.as_ref().is_some_and(|result| {
+            result
+                .as_ref()
+                .is_ok_and(|entries| entries.iter().any(|entry| entry.destination().is_some()))
+        })
+    }
+
+    pub(crate) fn focus_loaded(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<crate::reader::Preview>,
+    ) {
+        if self.has_navigable_entries() && self.focus.is_focused(window) {
+            self.tree.update(cx, |tree, cx| tree.focus(window, cx));
+        }
     }
 
     pub(crate) fn render(&self, cx: &mut Context<crate::reader::Preview>) -> impl IntoElement {
-        let body = match &self.outline {
-            None => div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child("Loading contents…")
-                .into_any_element(),
-            Some(Err(_)) => div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child("Couldn’t read this PDF’s contents. You can still read its pages.")
-                .into_any_element(),
-            Some(Ok(entries)) if entries.iter().all(|entry| entry.destination().is_none()) => div()
-                .id("contents-empty")
-                .test_support()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child("This PDF has no navigable contents.")
-                .into_any_element(),
-            Some(Ok(entries)) => {
-                let entries = entries.clone();
-                let selected = self.selected;
-                let owner = cx.weak_entity();
-                uniform_list("contents-list", entries.len(), move |range, _, _| {
-                    range
-                        .map(|ix| {
-                            let entry = &entries[ix];
-                            let owner = owner.clone();
-                            div()
-                                .h_8()
-                                .w_full()
-                                .pl(gpui_kit::rems((entry.depth().min(8) as f32) * 0.75))
-                                .child(
-                                    Button::new(("contents-entry", ix))
-                                        .label(entry.title().to_owned())
-                                        .ghost()
-                                        .w_full()
-                                        .selected(selected == Some(ix))
-                                        .disabled(entry.destination().is_none())
-                                        .on_click(move |_, window, cx| {
-                                            let _ = owner.update(cx, |reader, cx| {
-                                                reader.select_outline(ix, window, cx)
-                                            });
-                                        }),
-                                )
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .track_scroll(&self.scroll)
-                .size_full()
-                .into_any_element()
-            }
+        let status = match &self.outline {
+            None => Some(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Loading contents…")
+                    .into_any_element(),
+            ),
+            Some(Err(_)) => Some(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Couldn’t read this PDF’s contents. You can still read its pages.")
+                    .into_any_element(),
+            ),
+            Some(Ok(entries)) if entries.iter().all(|entry| entry.destination().is_none()) => Some(
+                div()
+                    .id("contents-empty")
+                    .test_support()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("This PDF has no navigable contents.")
+                    .into_any_element(),
+            ),
+            Some(Ok(_)) => None,
         };
+        let available = status.is_none();
+        let entries = self
+            .outline
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .cloned()
+            .unwrap_or_default();
+        let owner = cx.weak_entity();
+        let content = tree(&self.tree, move |_, entry, selected, _, _| {
+            let ix = entry
+                .item()
+                .id
+                .strip_prefix("contents-")
+                .and_then(|id| id.parse::<usize>().ok())
+                .expect("Contents tree IDs come from outline_tree");
+            let navigable = entries[ix].destination().is_some();
+            let owner = owner.clone();
+            ListItem::new(("contents-entry", ix))
+                .accessibility_label(entry.item().label.clone())
+                .selected(selected)
+                .h_8()
+                .pl(gpui_kit::rems((entry.depth().min(8) as f32) * 0.75))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .min_w_0()
+                        .gap_2()
+                        .child(div().w_4().flex_shrink_0().when(entry.is_folder(), |icon| {
+                            icon.child(
+                                Icon::new(if entry.is_expanded() {
+                                    IconName::ChevronDown
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .size_4(),
+                            )
+                        }))
+                        .child(entry.item().label.clone()),
+                )
+                .when(navigable, |item| {
+                    item.on_click(move |_, window, cx| {
+                        let _ =
+                            owner.update(cx, |reader, cx| reader.select_outline(ix, window, cx));
+                    })
+                })
+        })
+        .when(available, |tree| tree.size_full())
+        .when(!available, |tree| tree.h_0());
         div()
             .id("contents-panel")
             .test_support()
@@ -153,6 +176,46 @@ impl ContentsPanel {
             .flex_1()
             .min_h_0()
             .w_full()
-            .child(body)
+            .when_some(status, |panel, status| panel.child(status))
+            .child(content)
     }
+}
+
+/// Convert flat PDF outline order to Tree's owned hierarchy without recursion.
+/// PDF indices are document-local stable IDs even when branches are collapsed.
+fn outline_tree(entries: &[OutlineEntry]) -> Vec<TreeItem> {
+    let mut roots = Vec::new();
+    let mut stack: Vec<(usize, TreeItem)> = Vec::new();
+    for (ix, entry) in entries.iter().enumerate() {
+        while stack
+            .last()
+            .is_some_and(|(depth, _)| *depth >= entry.depth())
+        {
+            let (_, child) = stack.pop().unwrap();
+            if let Some((_, parent)) = stack.last_mut() {
+                parent.children.push(child);
+            } else {
+                roots.push(child);
+            }
+        }
+        stack.push((
+            entry.depth(),
+            TreeItem::new(format!("contents-{ix}"), entry.title())
+                .expanded(entry.depth() == 0)
+                .disabled(
+                    entry.destination().is_none()
+                        && entries
+                            .get(ix + 1)
+                            .is_none_or(|next| next.depth() <= entry.depth()),
+                ),
+        ));
+    }
+    while let Some((_, child)) = stack.pop() {
+        if let Some((_, parent)) = stack.last_mut() {
+            parent.children.push(child);
+        } else {
+            roots.push(child);
+        }
+    }
+    roots
 }

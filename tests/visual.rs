@@ -1364,7 +1364,6 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         window.render_frame(app);
         assert!(window.try_find("find-query").is_none());
         assert!(window.find("contents-panel").visible());
-        assert_eq!(window.find("contents-panel").focused(), Some(true));
     })?;
     click_control(&mut cx, first.into(), "toggle-sidebar")?;
     assert_eq!(
@@ -2512,18 +2511,32 @@ fn contents_navigation() -> Result<(), Box<dyn std::error::Error>> {
     cx.forbid_parking();
     cx.update_window(window.into(), |_, window, app| {
         window.render_frame(app);
-        assert_eq!(window.find("contents-panel").focused(), Some(true));
-        assert_eq!(
-            window.find(("contents-entry", 3usize)).disabled(),
-            Some(true)
-        );
         window.click(("contents-entry", 2usize), app);
     })?;
     assert_eq!(cx.update(|app| reader.read(app).page_index()), 1);
     assert!((cx.update(|app| reader.read(app).reading_position().1) - 70.).abs() < 1.);
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        window.click(("contents-entry", 3usize), app);
+    })?;
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), 1);
     press_key(&mut cx, window, "up")?;
     press_key(&mut cx, window, "enter")?;
     assert_eq!(cx.update(|app| reader.read(app).page_index()), 2);
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        window.click(("contents-entry", 0usize), app);
+    })?;
+    assert_eq!(cx.update(|app| reader.read(app).page_index()), 0);
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.try_find(("contents-entry", 1usize)).is_none());
+    })?;
+    press_key(&mut cx, window, "right")?;
+    cx.update_window(window.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.find(("contents-entry", 1usize)).visible());
+    })?;
     cx.update_window(window.into(), |_, window, app| {
         window.render_frame(app);
         assert!(window.find("reader-sidebar").visible());

@@ -99,8 +99,10 @@ the same `ToggleSidebar` Action, reopening the last-selected panel. Bottom,
 equal-width `TabBar` tabs switch panels; the panel content owns the scroll
 region above them. The macOS title bar stays across the full window to
 preserve its native controls. `src/find_panel.rs` owns the Find query;
-`src/contents_panel.rs` owns Contents focus, keyboard selection, and a
-virtualized outline list. Both supply content to the same host; search and
+`src/contents_panel.rs` owns Contents focus and GPUI Kit's virtualized
+outline tree. The tree preserves PDF hierarchy, supports collapse/expand with
+the arrow keys, and navigates when a usable row is clicked or confirmed.
+Parent-row clicks also toggle their disclosure. Both panels supply content to the same host; search and
 outline state remain separate. The sidebar remains attached to the reader
 across document changes, while its outline state resets immediately and
 background extraction results carry the reader's document generation. The
@@ -113,10 +115,10 @@ legacy-named, and name-tree destinations using those lower-level objects.
 It bounds malformed cycles and depth, retains non-navigable headings,
 and converts supported `/Fit`, `/FitB`, `/FitH`, `/FitBH`, and `/XYZ`
 destinations into page-local positions using the target page's crop and
-rotation transform. Unsupported destination modes remain disabled rather
-than guessing a position. Outline parsing starts on a background worker
-only when Contents first opens for a document;
-the reader applies destinations through its existing page/zoom/scroll model.
+rotation transform. Unsupported destination modes cannot navigate; headings
+with children remain expandable. Outline parsing starts on a background worker
+only when Contents first opens for a document. The reader applies destinations
+through its existing page/zoom/scroll model.
 
 On macOS, `src/app_menu.rs` installs native Kver, File, Edit, Window, and View menus
 at startup.

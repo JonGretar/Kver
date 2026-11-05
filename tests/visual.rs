@@ -1024,7 +1024,7 @@ fn long_path_keeps_toolbar_clickable() -> Result<(), Box<dyn std::error::Error>>
                 "zoom-in",
                 "fit-width",
                 "fit-page",
-                "copy-selection",
+                "theme-menu",
             ] {
                 let target = frame.find(id);
                 assert!(
@@ -2603,10 +2603,76 @@ fn contents_navigation() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn toolbar_theme_selection() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(ReaderAssets),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(gpui_kit::init);
+    let first = cx.open_window(size(px(560.0), px(600.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    let second = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
+        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+    })?;
+    cx.update_window(first.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert!(frame.try_find("copy-selection").is_none());
+        assert_eq!(frame.find("theme-menu").label(), Some("Theme: System"));
+        assert!(frame.find("theme-menu").bounds().size.width <= px(32.0));
+    })?;
+
+    for (keys, expected, mode) in [
+        (vec!["down", "down"], "Dark", Some(ThemeMode::Dark)),
+        (vec!["down"], "Light", Some(ThemeMode::Light)),
+        (vec!["down", "down", "down"], "System", None),
+    ] {
+        click_control(&mut cx, first.into(), "theme-menu")?;
+        for key in keys {
+            press_key(&mut cx, first, key)?;
+        }
+        press_key(&mut cx, first, "enter")?;
+        cx.run_until_parked();
+        let resolved = mode.unwrap_or(cx.update_window(first.into(), |_, frame, _| {
+            ThemeMode::from(frame.appearance())
+        })?);
+        assert_eq!(cx.update(|app| Theme::global(app).mode), resolved);
+        for window in [first, second] {
+            cx.update_window(window.into(), |_, frame, app| {
+                frame.render_frame(app);
+                assert_eq!(
+                    frame.find("theme-menu").label(),
+                    Some(format!("Theme: {expected}").as_str())
+                );
+            })?;
+        }
+    }
+    // Escape dismisses without changing the committed preference.
+    click_control(&mut cx, first.into(), "theme-menu")?;
+    cx.update_window(first.into(), |_, frame, app| {
+        frame.render_frame(app);
+        for label in ["Light", "Dark", "System"] {
+            assert!(frame.find_by_label(label).visible());
+        }
+    })?;
+    cx.capture_screenshot(first.into())?
+        .save("target/captures/theme-menu.png")?;
+    press_key(&mut cx, first, "up")?;
+    press_key(&mut cx, first, "escape")?;
+    cx.run_until_parked();
+    cx.update_window(first.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("theme-menu").label(), Some("Theme: System"));
+    })?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }
+    toolbar_theme_selection()?;
     sidebar_host()?;
     contents_navigation()?;
     independent_reader_windows()?;

@@ -13,7 +13,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Open a window-local sidebar for Find or Contents from the toolbar, menu, or command palette; switch panels with bottom tabs and dismiss it without losing the document view. Search is not yet available.
+- Open a window-local sidebar for Find or Contents from the toolbar, menu, or command palette; switch panels with bottom tabs and dismiss it without losing the document view.
+- Find mapped text across a PDF with a search query, page-labelled snippets, next/previous navigation, and a temporary highlight on the page.
 - Browse a PDF's own Contents hierarchy and jump to supported page destinations, including positions on cropped or rotated pages. PDFs without navigable contents show an empty state.
 - On macOS, choose Kver → About Kver for an About window with the app icon, version, GitHub link, and a button to copy app details.
 

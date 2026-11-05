@@ -315,6 +315,9 @@ pub struct TextGlyph {
     pub text: String,
     pub start: Point,
     pub end: Point,
+    /// Right edge of visible ink, when the font exposes an outline. Unlike
+    /// `end`, this does not absorb PDF word spacing before the next glyph.
+    pub ink_right: Option<f64>,
     pub top: f64,
     pub bottom: f64,
 }
@@ -417,6 +420,7 @@ impl<'a> Device<'a> for TextCollector {
                     x: next.x,
                     y: next.y,
                 },
+                ink_right: outline.map(|bounds| bounds.x1),
                 top: bounds.y1.max(origin.y + 8.0),
                 bottom: bounds.y0.min(origin.y - 2.0),
             });
@@ -429,6 +433,32 @@ pub fn page_text(path: &Path, page_index: usize) -> Result<PageText, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
     let pdf = open_pdf(data)?;
+    page_text_in_pdf(&pdf, page_index)
+}
+
+/// Decode a small consecutive batch with one PDF load; callers retain only
+/// extracted matches, not the page text or the parsed document.
+pub fn page_text_batch(
+    path: &Path,
+    pages: std::ops::Range<usize>,
+) -> Vec<Result<PageText, String>> {
+    let count = pages.len();
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(error) => {
+            return (0..count)
+                .map(|_| Err(format!("Cannot read {}: {error}", path.display())))
+                .collect();
+        }
+    };
+    let pdf = match open_pdf(data) {
+        Ok(pdf) => pdf,
+        Err(error) => return (0..count).map(|_| Err(error.clone())).collect(),
+    };
+    pages.map(|index| page_text_in_pdf(&pdf, index)).collect()
+}
+
+fn page_text_in_pdf(pdf: &Pdf, page_index: usize) -> Result<PageText, String> {
     let page = pdf
         .pages()
         .get(page_index)
@@ -623,6 +653,7 @@ mod tests {
             text: text.into(),
             start: Point { x, y },
             end: Point { x: x + 10.0, y },
+            ink_right: Some(x + 10.0),
             top: y + 10.0,
             bottom: y - 2.0,
         })

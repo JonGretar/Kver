@@ -58,6 +58,9 @@ pub struct TextGlyph {
     pub text: String,
     pub start: Point,
     pub end: Point,
+    /// Right edge of visible ink, when the font exposes an outline. Unlike
+    /// `end`, this does not absorb PDF word spacing before the next glyph.
+    pub ink_right: Option<f64>,
     pub top: f64,
     pub bottom: f64,
 }
@@ -160,6 +163,7 @@ impl<'a> Device<'a> for TextCollector {
                     x: next.x,
                     y: next.y,
                 },
+                ink_right: outline.map(|bounds| bounds.x1),
                 top: bounds.y1.max(origin.y + 8.0),
                 bottom: bounds.y0.min(origin.y - 2.0),
             });
@@ -392,6 +396,7 @@ mod tests {
             text: text.into(),
             start: Point { x, y },
             end: Point { x: x + 10.0, y },
+            ink_right: Some(x + 10.0),
             top: y + 10.0,
             bottom: y - 2.0,
         })

@@ -84,12 +84,23 @@ in its Action dispatch path rather than relying on a global handler that
 could affect another window. Kit's `Command` owns search and selection;
 `Root` handles the overlay's focus trap through Kit's `FocusTrapElement`.
 The overlay has a dialog role and a rem-based maximum width so it remains
-usable in narrow windows. Dismissing it restores reader focus. GPUI Kit
+usable in narrow windows. Dismissing it restores the active sidebar panel's
+focus when one is open, otherwise reader focus. GPUI Kit
 resolves shortcut hints from active keybindings. Bare reading keys apply only
 while the reader has focus; text entry in the palette does not navigate the
 PDF.
 
-On macOS, `src/app_menu.rs` installs native Kver, File, Edit, and Window menus
+The reader owns one `ReaderSidebar` per window in `src/reader_sidebar.rs`. It
+selects one panel, reserves a bounded part of the document row, and transfers
+focus on open, switch, and close. `src/find_panel.rs` owns the Find query;
+`src/contents_panel.rs` owns Contents focus. Both supply content to the same
+host through `new`, `focus`, and `render`; future search and outline actions
+belong to their respective panels, not to a shared query or outline model.
+The sidebar remains attached to the reader across document changes, while
+document-specific work must be invalidated by the panels that own it. The
+current interim text does not claim that search or outline extraction ran.
+
+On macOS, `src/app_menu.rs` installs native Kver, File, Edit, Window, and View menus
 at startup.
 File → Open PDF dispatches the same window-local `OpenPdf` Action; the
 application-wide `Quit` Action shuts down GPUI rather than just closing one

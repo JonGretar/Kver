@@ -16,6 +16,7 @@ use gpui_kit::{
 use kver::app_menu::{self, Quit};
 use kver::assets::ReaderAssets;
 use kver::reader::{Copy, OpenPdf, Preview, ZoomIn, ZoomMode, bind_reader_keys};
+use kver::reader_sidebar::SidebarPanel;
 use kver::reader_windows::{NewWindow, NextWindow, PreviousWindow};
 use std::{
     path::PathBuf,
@@ -1209,6 +1210,211 @@ fn open_pdf_palette_in_empty_window() -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = HeadlessAppContext::with_platform(
+        gpui_platform::current_platform(true).text_system(),
+        Arc::new(ReaderAssets),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|app| {
+        gpui_kit::init(app);
+        bind_reader_keys(app);
+    });
+    let first = cx.open_window(size(px(920.), px(800.)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some("examples/readme-sample.pdf".into()),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    let second = cx.open_window(size(px(920.), px(800.)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some("examples/readme-sample.pdf".into()),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &first, "Page 1 of 100 · 100%")?;
+    wait_for_page(&mut cx, &second, "Page 1 of 100 · 100%")?;
+    let first_reader = first.root(&mut cx)?;
+    let second_reader = second.root(&mut cx)?;
+    press_key(&mut cx, first, "cmd-f")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    assert_eq!(
+        cx.update(|app| second_reader.read(app).sidebar_panel()),
+        None
+    );
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.find("reader-sidebar").visible());
+        assert!(window.find("find-query").visible());
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        let sidebar = window.find("reader-sidebar").bounds();
+        let page = window.find("page").bounds();
+        assert!(sidebar.right() <= page.left());
+        assert!(page.size.width > px(500.));
+    })?;
+    type_query(&mut cx, first, "nfpw=-")?;
+    assert_eq!(cx.update(|app| first_reader.read(app).page_index()), 0);
+    assert_eq!(cx.update(|app| first_reader.read(app).scale()), 1.);
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(window.find("find-query").value(), Some("nfpw=-"));
+        window.click("zoom-in", app);
+    })?;
+    assert_eq!(cx.update(|app| first_reader.read(app).scale()), 1.25);
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        window.click("sidebar-contents", app);
+    })?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Contents)
+    );
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.try_find("find-query").is_none());
+        assert!(window.find("contents-placeholder").visible());
+        assert_eq!(window.find("contents-placeholder").focused(), Some(true));
+    })?;
+    press_key(&mut cx, first, "escape")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    press_key(&mut cx, first, "cmd-f")?;
+    cx.run_until_parked();
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(window.find("find-query").value(), Some("nfpw=-"));
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        window.click("sidebar-contents", app);
+    })?;
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        window.click("sidebar-find", app);
+    })?;
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(window.find("find-query").value(), Some("nfpw=-"));
+        window.click("sidebar-close", app);
+    })?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    let focus = cx.update(|app| first_reader.read(app).reader_focus());
+    assert!(cx.update_window(first.into(), |_, window, _| focus.is_focused(window))?);
+    press_key(&mut cx, first, "n")?;
+    assert_eq!(cx.update(|app| first_reader.read(app).page_index()), 1);
+    press_key(&mut cx, first, "cmd-f")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    press_key(&mut cx, first, "escape")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    press_key(&mut cx, second, "cmd-f")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| second_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    first_reader.update(&mut cx, |reader, app| {
+        reader.open_path("examples/readme-sample.pdf".into(), app);
+    });
+    wait_for_view(&mut cx, &first_reader, "Page 1 of 100 · 100%")?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    press_key(&mut cx, first, "cmd-f")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    assert_eq!(
+        cx.update(|app| second_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    std::fs::create_dir_all("target/captures")?;
+    let replacement = PathBuf::from("target/captures/sidebar-replacement.pdf");
+    std::fs::write(&replacement, mixed_page_pdf())?;
+    first_reader.update(&mut cx, |reader, app| {
+        reader.open_path(replacement.clone(), app)
+    });
+    wait_for_view(&mut cx, &first_reader, "Page 1 of 3 · 100%")?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Find)
+    );
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert_eq!(window.find_all("reader-sidebar").len(), 1);
+    })?;
+    assert_eq!(
+        cx.update(|app| second_reader.read(app).page_count()),
+        Some(100)
+    );
+    std::fs::remove_file(replacement)?;
+    let narrow = cx.open_window(size(px(360.), px(500.)), |window, cx| {
+        cx.new(|cx| {
+            Preview::new(
+                Some("examples/readme-sample.pdf".into()),
+                window.scale_factor(),
+                cx,
+            )
+        })
+    })?;
+    wait_for_page(&mut cx, &narrow, "Page 1 of 100 · 100%")?;
+    press_key(&mut cx, narrow, "cmd-f")?;
+    cx.run_until_parked();
+    cx.update_window(narrow.into(), |_, window, app| {
+        window.render_frame(app);
+        let sidebar = window.find("reader-sidebar").bounds();
+        let page = window.find("page").bounds();
+        assert!(page.size.width > sidebar.size.width);
+        assert!(window.find("sidebar-close").visible());
+        assert!(window.find("sidebar-contents").visible());
+    })?;
+    std::fs::create_dir_all("target/captures")?;
+    cx.capture_screenshot(narrow.into())?
+        .save("target/captures/sidebar-narrow-light.png")?;
+    cx.update(|app| Theme::change(ThemeMode::Dark, None, app));
+    narrow.update(&mut cx, |_, _, app| app.notify())?;
+    cx.run_until_parked();
+    cx.capture_screenshot(narrow.into())?
+        .save("target/captures/sidebar-narrow-dark.png")?;
+    cx.update_window(narrow.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(window.find("reader-sidebar").visible());
+        assert!(window.find("find-query").visible());
+        window.click("sidebar-close", app);
+    })?;
+    Ok(())
+}
+
 fn shared_reader_actions() -> Result<(), Box<dyn std::error::Error>> {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
@@ -1406,12 +1612,14 @@ fn menu_actions_and_shortcuts() -> Result<(), Box<dyn std::error::Error>> {
     });
     let quit = cx.update(|app| {
         let menus = app.get_menus().unwrap();
-        assert_eq!(menus.len(), 4);
+        assert_eq!(menus.len(), 5);
         assert_eq!(menus[0].name.as_ref(), "Kver");
         assert_eq!(menus[1].name.as_ref(), "File");
         assert_eq!(menus[2].name.as_ref(), "Edit");
         assert!(matches!(&menus[2].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<Copy>()));
         assert_eq!(menus[3].name.as_ref(), "Window");
+        assert_eq!(menus[4].name.as_ref(), "View");
+        assert!(matches!(&menus[4].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<kver::reader::ShowContents>()));
         assert!(matches!(&menus[1].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
         assert!(matches!(&menus[3].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
         assert!(matches!(&menus[3].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));
@@ -2178,6 +2386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KVER_BENCH").is_some() {
         return measure_page_turns();
     }
+    sidebar_host()?;
     independent_reader_windows()?;
     opening_a_pdf_and_zooming_changes_the_rendered_page()?;
     fit_modes_follow_page_and_window()?;

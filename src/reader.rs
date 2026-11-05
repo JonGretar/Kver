@@ -34,6 +34,7 @@ use image::{Frame, RgbaImage};
 use crate::{
     coordinates::{PageViewport, Point},
     pdf,
+    reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, NewWindow, NextWindow, PreviousWindow},
 };
 
@@ -53,7 +54,10 @@ gpui::actions!(
         ZoomOut,
         FitWidth,
         FitPage,
-        Copy
+        Copy,
+        ShowFind,
+        ShowContents,
+        CloseSidebar
     ]
 );
 
@@ -66,6 +70,8 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-`", NextWindow, None),
         KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
+        KeyBinding::new("cmd-f", ShowFind, None),
+        KeyBinding::new("escape", CloseSidebar, Some("ReaderSidebar")),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
         KeyBinding::new("left", PreviousPage, Some("Reader")),
@@ -312,6 +318,7 @@ pub struct Preview {
     palette_focus: FocusHandle,
     focus_initialized: bool,
     palette: Option<Entity<CommandState>>,
+    sidebar: Option<ReaderSidebar>,
     status: String,
 }
 
@@ -341,6 +348,7 @@ impl Preview {
             palette_focus: cx.focus_handle(),
             focus_initialized: false,
             palette: None,
+            sidebar: None,
             status: "Open a PDF to start reading".into(),
         };
         if reader.path.is_some() {
@@ -420,8 +428,44 @@ impl Preview {
 
     fn dismiss_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.palette = None;
-        window.focus(&self.focus, cx);
+        if let Some(sidebar) = self.sidebar.as_mut()
+            && let Some(panel) = sidebar.active()
+        {
+            sidebar.open(panel, window, cx);
+        } else {
+            window.focus(&self.focus, cx);
+        }
         cx.notify();
+    }
+
+    fn show_sidebar(&mut self, panel: SidebarPanel, window: &mut Window, cx: &mut Context<Self>) {
+        let sidebar = self
+            .sidebar
+            .get_or_insert_with(|| ReaderSidebar::new(window, cx));
+        sidebar.open(panel, window, cx);
+    }
+
+    fn close_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(sidebar) = self.sidebar.as_mut()
+            && sidebar.active().is_some()
+        {
+            sidebar.close(window, &self.focus, cx);
+        }
+    }
+
+    // The root receives bubbled key-down events even when a panel owns focus.
+    // Only the focused reader handles bare scrolling keys.
+    fn reading_allowed(&self, window: &Window) -> bool {
+        self.palette.is_some()
+            || self
+                .sidebar
+                .as_ref()
+                .is_none_or(|sidebar| sidebar.active().is_none())
+            || self.focus.is_focused(window)
+    }
+
+    pub fn sidebar_panel(&self) -> Option<SidebarPanel> {
+        self.sidebar.as_ref().and_then(ReaderSidebar::active)
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
@@ -1036,9 +1080,10 @@ impl Render for Preview {
         div()
             .size_full()
             .track_focus(&self.focus)
-            .when(self.palette.is_none(), |reader| {
-                reader.key_context("Reader")
-            })
+            .when(
+                self.palette.is_none() && self.focus.is_focused(window),
+                |reader| reader.key_context("Reader"),
+            )
             .on_action(cx.listener(Self::on_open_pdf))
             .on_action(cx.listener(|_, _: &NewWindow, _, cx| {
                 if let Err(error) = reader_windows::open(cx, None) {
@@ -1052,6 +1097,19 @@ impl Render for Preview {
                 reader_windows::cycle(window, cx, -1);
             }))
             .on_action(cx.listener(Self::on_show_palette))
+            .on_action(cx.listener(|this, _: &ShowFind, window, cx| {
+                if !this.pages.is_empty() {
+                    this.show_sidebar(SidebarPanel::Find, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
+                if !this.pages.is_empty() {
+                    this.show_sidebar(SidebarPanel::Contents, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CloseSidebar, window, cx| {
+                this.close_sidebar(window, cx);
+            }))
             .on_action(cx.listener(Self::on_copy))
             .on_mouse_up(
                 gpui::MouseButton::Left,
@@ -1087,8 +1145,8 @@ impl Render for Preview {
                     this.fit_page(cx);
                 }
             }))
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
-                if this.palette.is_some() {
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.palette.is_some() || !this.reading_allowed(window) {
                     cx.propagate();
                     return;
                 }
@@ -1234,97 +1292,140 @@ impl Render for Preview {
                                 Box::new(Copy),
                                 self.selected_text().is_some(),
                                 false,
+                            ))
+                            .child(reader_button(
+                                "open-find",
+                                "Find",
+                                Some(IconName::Search),
+                                Box::new(ShowFind),
+                                has_document,
+                                self.sidebar_panel() == Some(SidebarPanel::Find),
+                            ))
+                            .child(reader_button(
+                                "open-contents",
+                                "Contents",
+                                Some(IconName::List),
+                                Box::new(ShowContents),
+                                has_document,
+                                self.sidebar_panel() == Some(SidebarPanel::Contents),
                             )),
                     ),
             )
             .child(
                 div()
-                    .id("page")
+                    .flex()
+                    .items_stretch()
                     .flex_1()
-                    .overflow_y_scroll()
-                    .overflow_x_scroll()
-                    .track_scroll(&self.scroll)
-                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
-                        if event.pressed_button == Some(gpui::MouseButton::Left) {
-                            this.extend_selection(event.position, cx);
-                        }
-                    }))
-                    .on_mouse_up(
-                        gpui::MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
-                            this.extend_selection(event.position, cx);
-                            this.dragging = false;
-                        }),
+                    .min_h_0()
+                    .when_some(
+                        self.sidebar
+                            .as_ref()
+                            .filter(|sidebar| sidebar.active().is_some()),
+                        |row, sidebar| row.child(sidebar.render(window, cx)),
                     )
-                    .on_scroll(cx.listener(|this, _, _, cx| {
-                        this.selected_page = None;
-                        this.sync_viewport(cx);
-                    }))
-                    .bg(cx.theme().muted)
-                    .p_4()
-                    .child(if self.path.is_none() || self.pages.is_empty() {
-                        let loading = self.status == "Loading document…";
+                    .child(
                         div()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                Empty::new()
-                                    .flex_none()
-                                    .max_w(gpui::rems(28.))
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background)
-                                    .header(
-                                        EmptyHeader::new()
-                                            .media(
-                                                EmptyMedia::new()
-                                                    .with_variant(EmptyMediaVariant::Icon)
-                                                    .child(if loading {
-                                                        Spinner::new().into_any_element()
-                                                    } else {
-                                                        gpui_kit::component::Icon::new(
-                                                            IconName::FileText,
-                                                        )
-                                                        .into_any_element()
-                                                    }),
-                                            )
-                                            .title(EmptyTitle::new().child(
-                                                if self.path.is_none() {
-                                                    "Open a PDF to start reading"
-                                                } else if loading {
-                                                    "Opening document…"
-                                                } else {
-                                                    "Couldn’t open this PDF"
-                                                },
-                                            ))
-                                            .description(EmptyDescription::new().child(
-                                                if self.path.is_none() {
-                                                    "Choose a document to begin.".to_owned()
-                                                } else {
-                                                    self.status.clone()
-                                                },
-                                            )),
-                                    )
-                                    .content(
-                                        EmptyContent::new().child(
-                                            Button::new("open-pdf-center")
-                                                .label(if self.path.is_none() {
-                                                    "Open PDF…"
-                                                } else {
-                                                    "Choose another PDF…"
-                                                })
-                                                .on_click(|_, window, cx| {
-                                                    window.dispatch_action(Box::new(OpenPdf), cx)
-                                                }),
-                                        ),
-                                    ),
+                            .id("page")
+                            .test_support()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .overflow_x_scroll()
+                            .track_scroll(&self.scroll)
+                            .on_mouse_move(cx.listener(
+                                |this, event: &gpui::MouseMoveEvent, _, cx| {
+                                    if event.pressed_button == Some(gpui::MouseButton::Left) {
+                                        this.extend_selection(event.position, cx);
+                                    }
+                                },
+                            ))
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    window.focus(&this.focus, cx);
+                                }),
                             )
-                            .into_any_element()
-                    } else {
-                        content.into_any_element()
-                    }),
+                            .on_mouse_up(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                                    this.extend_selection(event.position, cx);
+                                    this.dragging = false;
+                                }),
+                            )
+                            .on_scroll(cx.listener(|this, _, _, cx| {
+                                this.selected_page = None;
+                                this.sync_viewport(cx);
+                            }))
+                            .bg(cx.theme().muted)
+                            .p_4()
+                            .child(if self.path.is_none() || self.pages.is_empty() {
+                                let loading = self.status == "Loading document…";
+                                div()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        Empty::new()
+                                            .flex_none()
+                                            .max_w(gpui::rems(28.))
+                                            .border_1()
+                                            .border_color(cx.theme().border)
+                                            .bg(cx.theme().background)
+                                            .header(
+                                                EmptyHeader::new()
+                                                    .media(
+                                                        EmptyMedia::new()
+                                                            .with_variant(EmptyMediaVariant::Icon)
+                                                            .child(if loading {
+                                                                Spinner::new().into_any_element()
+                                                            } else {
+                                                                gpui_kit::component::Icon::new(
+                                                                    IconName::FileText,
+                                                                )
+                                                                .into_any_element()
+                                                            }),
+                                                    )
+                                                    .title(EmptyTitle::new().child(
+                                                        if self.path.is_none() {
+                                                            "Open a PDF to start reading"
+                                                        } else if loading {
+                                                            "Opening document…"
+                                                        } else {
+                                                            "Couldn’t open this PDF"
+                                                        },
+                                                    ))
+                                                    .description(EmptyDescription::new().child(
+                                                        if self.path.is_none() {
+                                                            "Choose a document to begin.".to_owned()
+                                                        } else {
+                                                            self.status.clone()
+                                                        },
+                                                    )),
+                                            )
+                                            .content(
+                                                EmptyContent::new().child(
+                                                    Button::new("open-pdf-center")
+                                                        .label(if self.path.is_none() {
+                                                            "Open PDF…"
+                                                        } else {
+                                                            "Choose another PDF…"
+                                                        })
+                                                        .on_click(|_, window, cx| {
+                                                            window.dispatch_action(
+                                                                Box::new(OpenPdf),
+                                                                cx,
+                                                            )
+                                                        }),
+                                                ),
+                                            ),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                content.into_any_element()
+                            }),
+                    ),
             )
             .child(
                 StatusBar::new()
@@ -1385,6 +1486,24 @@ impl Render for Preview {
                                             CommandItem::new()
                                                 .label("Open PDF…")
                                                 .action(Box::new(OpenPdf)),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Find")
+                                                .action(Box::new(ShowFind))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Contents")
+                                                .action(Box::new(ShowContents))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Close Sidebar")
+                                                .action(Box::new(CloseSidebar))
+                                                .disabled(self.sidebar_panel().is_none()),
                                         )
                                         .item(
                                             CommandItem::new()

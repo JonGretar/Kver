@@ -1348,6 +1348,18 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
     type_query(&mut cx, first, "nfpw=-")?;
     assert_eq!(cx.update(|app| first_reader.read(app).page_index()), 0);
     assert_eq!(cx.update(|app| first_reader.read(app).scale()), 1.);
+    press_key(&mut cx, first, "cmd-t")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Contents)
+    );
+    assert_eq!(
+        cx.update(|app| second_reader.read(app).sidebar_panel()),
+        None
+    );
+    press_key(&mut cx, first, "cmd-f")?;
+    cx.run_until_parked();
     cx.update_window(first.into(), |_, window, app| {
         window.render_frame(app);
         assert_eq!(window.find("find-query").value(), Some("nfpw=-"));
@@ -1404,6 +1416,14 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
     assert!(cx.update_window(first.into(), |_, window, _| focus.is_focused(window))?);
     press_key(&mut cx, first, "n")?;
     assert_eq!(cx.update(|app| first_reader.read(app).page_index()), 1);
+    press_key(&mut cx, first, "cmd-t")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        Some(SidebarPanel::Contents)
+    );
+    press_key(&mut cx, first, "escape")?;
+    cx.run_until_parked();
     press_key(&mut cx, first, "cmd-f")?;
     cx.run_until_parked();
     assert_eq!(

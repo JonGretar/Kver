@@ -100,11 +100,14 @@ equal-width `TabBar` tabs switch panels; the panel content owns the scroll
 region above them. The macOS title bar stays across the full window to
 preserve its native controls. `src/find_panel.rs` owns the Find query;
 `src/contents_panel.rs` owns Contents focus and GPUI Kit's virtualized
-outline tree. The tree preserves PDF hierarchy, supports collapse/expand with
-the arrow keys, and navigates when a usable row is clicked or confirmed.
-Only the chevron toggles disclosure by pointer; clicking the rest of a
-parent row navigates without folding it. Both panels supply content to the same host; search and
-outline state remain separate. The sidebar remains attached to the reader
+outline tree. Command-T dispatches `ShowContents` from the active reader window
+even when Find has focus; Command-F returns to Find. Kver's documents remain in
+independent windows, not document tabs. The tree preserves PDF hierarchy,
+supports collapse/expand with the arrow keys, and navigates when a usable row
+is clicked or confirmed. Only the chevron toggles disclosure by pointer;
+clicking the rest of a parent row navigates without folding it. Both panels
+supply content to the same host; search and outline state remain separate.
+The sidebar remains attached to the reader
 across document changes, while its outline state resets immediately and
 background extraction results carry the reader's document generation. The
 Find panel is still an interim surface, not a search result.

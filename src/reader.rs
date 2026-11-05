@@ -72,6 +72,7 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("cmd-f", ShowFind, None),
+        KeyBinding::new("cmd-t", ShowContents, None),
         KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
         KeyBinding::new("enter", ActivateOutline, Some("ContentsPanel")),
         KeyBinding::new("right", NextPage, Some("Reader")),

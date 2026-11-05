@@ -31,7 +31,7 @@ against `Cargo.toml` and the executable's `arm64` architecture, then extracts
 and checks `target/release/Kver-vX.Y.Z-macos-arm64.zip`, including strict
 signature verification before and after archiving. It does not upload
 or publish anything. The tag-only release job runs this same packaging path;
-routine macOS PR CI is paused while the repository is private.
+macOS PR CI also checks the ordinary local bundle without update credentials.
 
 ## Download an unsigned release
 
@@ -62,11 +62,102 @@ release commit has been reviewed. The job rejects any tag that does not
 match the package version and exactly one valid dated changelog heading
 before it builds or publishes. It then builds and inspects the archive
 with `scripts/package-macos-app.sh` and creates the GitHub Release with that
-version's changelog chapter in its notes.
+version's changelog chapter in its notes. It also requires the update signing
+configuration below and attaches a signed `appcast.xml`. The release is marked
+as GitHub's latest release so the stable feed URL advances with the download.
 This does not replace the real-Mac window and reading check in issue #18.
 No experimental Linux artifact is attached: the current Linux build depends
 on host GUI and software-rendering libraries, and portable packaging/runtime
 instructions have not been validated. Linux retains its separate delivery gate.
+
+## Configure updates (maintainers)
+
+Update-enabled macOS builds use [Sparkle](https://sparkle-project.org/).
+Kver → **Check for Updates…** checks the latest stable release; Sparkle offers
+optional background checks and asks before installation/relaunch. It handles
+update verification and quarantine during installation. The initial browser
+download still has the unsigned-app security prompts described above.
+Versions without Sparkle cannot acquire it automatically: readers must manually
+download the first update-enabled release once.
+
+### Signing-key setup
+
+Generate a production signing key on a trusted Mac:
+
+```sh
+sdk=$(sh scripts/fetch-sparkle.sh)
+"$sdk/bin/generate_keys" --account Kver
+```
+
+This stores the private key in your login Keychain and prints the public key.
+Set the public base64 value as the repository Actions **variable**
+`KVER_UPDATE_PUBLIC_KEY`. Set the matching private base64 value as the Actions
+**secret** `SPARKLE_PRIVATE_KEY`, using GitHub's secure secret-entry UI. Keychain
+Access can reveal the password of the Sparkle signing-key item for account
+`Kver`. Do not paste the private value into chat, command arguments, repository
+files, or logs. Back it up securely: unsigned-by-Apple apps cannot rely on
+Developer ID trust to recover from a lost Sparkle key. Keep the same key across
+releases unless following Sparkle's documented key-rotation procedure.
+
+The release job refuses to build/publish without this configuration. It passes
+the private key to `generate_appcast` over standard input, not a file or command
+argument, then independently verifies the archive and feed against the public
+key using macOS CryptoKit. Mismatched keys stop publication even though
+`generate_appcast` itself only warns about them.
+No Apple developer membership is required for Sparkle signatures;
+they do not provide Apple notarization.
+
+### Build an update-enabled app locally
+
+Set only the **public** key when building:
+
+```sh
+export KVER_UPDATE_PUBLIC_KEY='your-base64-public-key'
+sh scripts/package-macos-app.sh
+```
+
+The script fetches the pinned, checksum-verified Sparkle SDK into ignored
+`target/sparkle/`, bundles its framework/helpers, and includes the public key and
+feed URL in the sealed app. A normal build without the variable omits Sparkle
+and disables **Check for Updates…**. Never distribute an archive built with
+a throwaway test key as a production release.
+
+The default public feed is:
+
+```text
+https://github.com/JonGretar/Kver/releases/latest/download/appcast.xml
+```
+
+Local builds can override it with `KVER_UPDATE_FEED_URL`, an HTTPS URL without
+credentials. This does not change the production workflow's feed.
+GitHub hosts both the feed and versioned ZIPs; neither requires authentication
+now that the repository is public. The feed will return 404 until the first
+update-enabled release is published. Keep prereleases and experimental
+platform builds out of this stable release path.
+
+### Check an upgrade before shipping
+
+Use two disposable app bundles with increasing `CFBundleVersion` values and
+the same public key. Sign their completed archives and the test feed with
+Sparkle's `generate_appcast`, using a separate test key/feed rather than
+publishing an unauthorized release.
+
+Check that:
+
+1. A real reader window opens a PDF while update checking/downloading runs.
+2. **Check for Updates…** offers the newer version, while an equal version
+   reports that the app is up to date.
+3. Installing and relaunching replaces the intended app and launches the
+   new version without another quarantine workaround.
+4. A modified signed feed, corrupted archive, offline server, and cancelled
+   update leave the installed version usable.
+5. `codesign --verify --deep --strict` succeeds on the installed app.
+
+Kver does not yet restore open PDFs or reading positions after restarting.
+Finish reading or note your position before accepting a relaunch.
+Before shipping, also check the production HTTPS feed/download URLs and an
+upgrade from the first update-enabled release. A local feed test cannot prove
+GitHub publication or the behavior of another Mac.
 
 ## Open and check it
 
@@ -126,8 +217,8 @@ codesign --verify --deep --strict --verbose=2 target/release/Kver.app
 ```
 
 The [tag-only release job](../.github/workflows/release.yml) builds the same
-archive and checks its plist, executable architecture, and icon; routine macOS
-PR CI is paused while the repository is private. On a local Apple silicon Mac,
+archive and checks its plist, executable architecture, and icon. Routine macOS
+PR CI checks the non-updating local bundle. On a local Apple silicon Mac,
 an earlier bundle build completed, `open` launched the bundled executable with
 the sample PDF, and macOS reported an on-screen window. The local user
 confirmed the app worked and the icon appeared. The v0.1.0 local-candidate

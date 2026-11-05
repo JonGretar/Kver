@@ -22,6 +22,12 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$contents/Info.plis
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = kver
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$contents/Info.plist")" = kver.icns
 test -s "$contents/Resources/kver.icns"
+if [ -n "${KVER_UPDATE_PUBLIC_KEY:-}" ]; then
+    test "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$contents/Info.plist")" = "$KVER_UPDATE_PUBLIC_KEY"
+    test -x "$contents/Frameworks/Sparkle.framework/Sparkle"
+    test -s "$contents/Resources/Sparkle-LICENSE"
+    codesign --verify --deep --strict --verbose=2 "$contents/Frameworks/Sparkle.framework"
+fi
 codesign --verify --deep --strict --verbose=2 "$app"
 
 # Stage a single app at the archive root. Do not reuse an archive from an earlier build.
@@ -36,5 +42,6 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$stage/K
 test -s "$stage/Kver.app/Contents/Resources/kver.icns"
 cmp "$contents/MacOS/kver" "$stage/Kver.app/Contents/MacOS/kver"
 cmp "$contents/Resources/kver.icns" "$stage/Kver.app/Contents/Resources/kver.icns"
+cmp "$contents/Info.plist" "$stage/Kver.app/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$stage/Kver.app"
 echo "Verified ad-hoc-signed app archive (not notarized): $archive"

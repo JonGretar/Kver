@@ -24,6 +24,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Keep selection and copied text aligned with the visible crop on rotated PDFs; image-only pages offer no text to select or copy.
+- Sign the completed macOS app bundle to fix the invalid signature behind the original download's “Kver is damaged” error; downloads still require approval because the app is not Developer ID signed or notarized.
 
 ## [0.1.0] - 2026-11-01
 

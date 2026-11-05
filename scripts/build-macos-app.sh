@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build a local, unsigned macOS bundle. Run from any directory on a Mac.
+# Build a local, ad-hoc-signed macOS bundle. Run from any directory on a Mac.
 set -eu
 
 if [ "$(uname -s)" != "Darwin" ]; then
@@ -65,7 +65,11 @@ cat > "$stage/Contents/Info.plist" <<EOF
 EOF
 
 plutil -lint "$stage/Contents/Info.plist"
+# Replace the linker's executable-only signature after all bundle files exist.
+# Ad-hoc signing seals the bundle; it does not provide Developer ID trust.
+codesign --force --sign - "$stage"
+codesign --verify --deep --strict --verbose=2 "$stage"
 rm -rf "$bundle"
 mv "$stage" "$bundle"
 trap - EXIT HUP INT TERM
-echo "Built unsigned bundle: $bundle"
+echo "Built ad-hoc-signed bundle (not notarized): $bundle"

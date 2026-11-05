@@ -4,7 +4,7 @@ This packages the **macOS MVP** locally. The first released download,
 v0.1.0, is for Apple silicon.
 The bundle contains the optimized `kver` binary and
 the existing macOS icon; it has no Developer ID signature or notarization
-(the macOS linker may apply an ad-hoc signature). Build on the Mac where you
+(the build script ad-hoc signs the completed bundle). Build on the Mac where you
 intend to run it (Apple silicon and Intel builds are architecture-specific).
 
 ## Build
@@ -28,7 +28,8 @@ It declares PDF viewer support so macOS can offer it in Finder's **Open With** m
 For a versioned Apple silicon archive, run `sh scripts/package-macos-app.sh`
 on an Apple silicon Mac. It builds the same app, checks the bundle version
 against `Cargo.toml` and the executable's `arm64` architecture, then extracts
-and checks `target/release/Kver-vX.Y.Z-macos-arm64.zip`. It does not upload
+and checks `target/release/Kver-vX.Y.Z-macos-arm64.zip`, including strict
+signature verification before and after archiving. It does not upload
 or publish anything. The tag-only release job runs this same packaging path;
 routine macOS PR CI is paused while the repository is private.
 
@@ -46,7 +47,7 @@ project's release page before overriding the warning. If you trust it,
 control-click `Kver.app` in Finder and choose **Open**, or, after a blocked
 launch, go to **System Settings → Privacy & Security → Open Anyway** and
 confirm. Do not disable Gatekeeper globally. The release workflow checks the
-archive's structure and architecture; it does not establish the identity of
+archive's structure, architecture, and ad-hoc signature; it does not establish the identity of
 a signed developer or guarantee that a document is safe.
 
 ## Release trigger (maintainers)
@@ -120,6 +121,7 @@ To inspect the package independently:
 plutil -lint target/release/Kver.app/Contents/Info.plist
 file target/release/Kver.app/Contents/MacOS/kver
 ls -l target/release/Kver.app/Contents/Resources/kver.icns
+codesign --verify --deep --strict --verbose=2 target/release/Kver.app
 ```
 
 The [tag-only release job](../.github/workflows/release.yml) builds the same
@@ -147,6 +149,12 @@ behavior on other Macs.
   version. Only if you trust the source, control-click `Kver.app` in Finder and
   choose **Open**, or use **System Settings → Privacy & Security → Open Anyway**
   after a blocked launch, then confirm the prompt. Do not disable Gatekeeper
-  globally. Neither signing nor notarization is part of this build.
+  globally. Ad-hoc signing protects bundle integrity but does not establish
+  developer identity; Developer ID signing and notarization are not part of this build.
+- The original v0.1.0 download has an incomplete bundle signature and can show
+  “Kver is damaged.” It contains only the linker's executable signature, not
+  a signature for the completed app. Rebuild with the corrected script rather
+  than disabling macOS security checks. Successful `codesign` verification
+  checks integrity, not Gatekeeper approval.
 - If the icon does not update after rebuilding, inspect `Info.plist` and
   `Contents/Resources/kver.icns` above; Finder/Dock may cache an older icon.

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build and inspect an unsigned, versioned Apple silicon app archive without publishing.
+# Build and inspect an ad-hoc-signed Apple silicon app archive without publishing.
 set -eu
 
 if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
@@ -22,6 +22,7 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$contents/Info.plis
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = kver
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$contents/Info.plist")" = kver.icns
 test -s "$contents/Resources/kver.icns"
+codesign --verify --deep --strict --verbose=2 "$app"
 
 # Stage a single app at the archive root. Do not reuse an archive from an earlier build.
 rm -f "$archive"
@@ -35,4 +36,5 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$stage/K
 test -s "$stage/Kver.app/Contents/Resources/kver.icns"
 cmp "$contents/MacOS/kver" "$stage/Kver.app/Contents/MacOS/kver"
 cmp "$contents/Resources/kver.icns" "$stage/Kver.app/Contents/Resources/kver.icns"
-echo "Verified unsigned app archive: $archive"
+codesign --verify --deep --strict --verbose=2 "$stage/Kver.app"
+echo "Verified ad-hoc-signed app archive (not notarized): $archive"

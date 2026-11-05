@@ -671,6 +671,25 @@ impl Preview {
         }
     }
 
+    pub(crate) fn resize_sidebar(
+        &mut self,
+        position: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(sidebar) = self.sidebar.as_mut() {
+            sidebar.resize(position, window);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn reset_sidebar_width(&mut self, cx: &mut Context<Self>) {
+        if let Some(sidebar) = self.sidebar.as_mut() {
+            sidebar.reset_width();
+            cx.notify();
+        }
+    }
+
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.sidebar_panel().is_some() {
             self.close_sidebar(window, cx);

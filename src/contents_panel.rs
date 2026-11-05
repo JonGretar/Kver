@@ -13,6 +13,7 @@ use gpui_kit::{
         ActiveTheme, IconName, Sizable as _,
         button::{Button, ButtonVariants},
         list::ListItem,
+        tooltip::Tooltip,
         tree::{TreeItem, TreeState, tree},
     },
 };
@@ -143,8 +144,9 @@ impl ContentsPanel {
             let owner = owner.clone();
             let selection = tree_state.clone();
             let disclosure = tree_state.clone();
+            let title = entry.item().label.clone();
             ListItem::new(("contents-entry", ix))
-                .accessibility_label(entry.item().label.clone())
+                .accessibility_label(title.clone())
                 .selected(selected)
                 .h_8()
                 .text_xs()
@@ -185,7 +187,19 @@ impl ContentsPanel {
                         } else {
                             div().w_5().flex_shrink_0().into_any_element()
                         })
-                        .child(div().min_w_0().text_xs().child(entry.item().label.clone())),
+                        .child(
+                            div()
+                                .id(("contents-title", ix))
+                                .test_support()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(title.clone()).build(window, cx)
+                                })
+                                .child(entry.item().label.clone()),
+                        ),
                 )
                 .on_click(move |_, window, cx| {
                     // Tree toggles the entire row by default. Keep its keyboard

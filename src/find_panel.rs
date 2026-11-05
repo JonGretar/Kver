@@ -22,6 +22,7 @@ pub(crate) struct FindPanel {
     _subscription: Subscription,
     pub(crate) results: Vec<FindMatch>,
     pub(crate) active: Option<usize>,
+    pub(crate) pending_next: bool,
     pub(crate) pulse: u64,
     pub(crate) scanned: usize,
     pub(crate) mapped_pages: usize,
@@ -34,16 +35,20 @@ pub(crate) struct FindPanel {
 impl FindPanel {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<crate::reader::Preview>) -> Self {
         let query = cx.new(|cx| InputState::new(window, cx).placeholder("Find in PDF"));
-        let subscription = cx.subscribe_in(&query, window, |reader, input, event, _, cx| {
-            if matches!(event, InputEvent::Change) {
-                reader.find_query_changed(input.read(cx).value().to_string(), cx);
-            }
-        });
+        let subscription =
+            cx.subscribe_in(&query, window, |reader, input, event, _, cx| match event {
+                InputEvent::Change => {
+                    reader.find_query_changed(input.read(cx).value().to_string(), cx);
+                }
+                InputEvent::PressEnter { .. } => reader.next_find_match(cx),
+                _ => {}
+            });
         Self {
             query,
             _subscription: subscription,
             results: Vec::new(),
             active: None,
+            pending_next: false,
             pulse: 0,
             scanned: 0,
             mapped_pages: 0,
@@ -62,6 +67,7 @@ impl FindPanel {
         self.revision += 1;
         self.results.clear();
         self.active = None;
+        self.pending_next = false;
         self.scanned = 0;
         self.mapped_pages = 0;
         self.failed_pages = 0;

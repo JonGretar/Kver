@@ -2494,6 +2494,26 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap()
                 .contains("matches")
         );
+    })?;
+    press_key(&mut cx, window, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| reader.read(app).active_find_match().map(|hit| hit.0)),
+        Some(0)
+    );
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").focused(), Some(true));
+    })?;
+    press_key(&mut cx, window, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| reader.read(app).active_find_match().map(|hit| hit.0)),
+        Some(1)
+    );
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        assert_eq!(frame.find("find-query").focused(), Some(true));
         frame.click(("find-result", 0usize), app);
     })?;
     let first_page = cx.update(|app| reader.read(app).page_index());
@@ -2549,8 +2569,16 @@ fn find_matches_in_reader() -> Result<(), Box<dyn std::error::Error>> {
         );
         assert!(frame.try_find("find-highlight").is_none());
     })?;
-    type_query(&mut cx, window, "visible")?;
+    cx.update_window(window.into(), |_, frame, app| {
+        frame.render_frame(app);
+        frame.input("visible", app);
+        frame.press("enter", app);
+    })?;
     cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| reader.read(app).active_find_match()),
+        Some((0, 0))
+    );
     cx.update_window(window.into(), |_, frame, app| {
         frame.render_frame(app);
         assert_eq!(frame.find("find-status").label(), Some("1 match"));

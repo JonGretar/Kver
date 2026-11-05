@@ -525,11 +525,18 @@ impl Preview {
                     }
                     find.results.extend(hits.into_iter().take(remaining));
                 }
+                let activate_first = find.pending_next && !find.results.is_empty();
+                if activate_first {
+                    find.pending_next = false;
+                }
                 if find.scanned >= this.pages.len() || find.results.len() >= MAX_MATCHES {
                     find.searching = false;
                     find.truncated |= find.scanned < this.pages.len();
                 } else {
                     this.search_next_batch(query, cx);
+                }
+                if activate_first {
+                    this.select_match(0, cx);
                 }
                 cx.notify();
             });
@@ -580,6 +587,14 @@ impl Preview {
             return;
         };
         if find.results.is_empty() {
+            // Enter before the first batch completes should still select the
+            // first result as soon as it is discovered.
+            if direction > 0
+                && find.searching
+                && let Some(sidebar) = self.sidebar.as_mut()
+            {
+                sidebar.find_mut().pending_next = true;
+            }
             return;
         }
         let next = match (find.active, direction) {
@@ -589,6 +604,10 @@ impl Preview {
             (None, _) => 0,
         };
         self.select_match(next, cx);
+    }
+
+    pub(crate) fn next_find_match(&mut self, cx: &mut Context<Self>) {
+        self.step_match(1, cx);
     }
 
     fn close_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -624,6 +643,13 @@ impl Preview {
 
     pub fn sidebar_panel(&self) -> Option<SidebarPanel> {
         self.sidebar.as_ref().and_then(ReaderSidebar::active)
+    }
+
+    #[cfg(feature = "screenshot")]
+    pub fn active_find_match(&self) -> Option<(usize, usize)> {
+        let find = self.sidebar.as_ref()?.find();
+        let index = find.active?;
+        Some((index, find.results.get(index)?.page))
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {

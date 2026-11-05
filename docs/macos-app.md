@@ -35,7 +35,7 @@ routine macOS PR CI is paused while the repository is private.
 
 ## Download an unsigned release
 
-Download `Kver-v0.1.0-macos-arm64.zip` from
+Download the current `Kver-vX.Y.Z-macos-arm64.zip` from
 the project's [GitHub Releases](https://github.com/JonGretar/Kver/releases).
 Use an Apple silicon Mac; this is not an Intel or supported Linux build.
 Extract the archive and move `Kver.app` to Applications, or run it directly

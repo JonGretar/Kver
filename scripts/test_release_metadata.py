@@ -36,6 +36,22 @@ class ReleaseMetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release_metadata.package_version('[dependencies]\nexample = "9.8.7"\n')
 
+    def test_release_notes_include_only_the_validated_changelog_chapter(self):
+        changelog = (
+            "## [Unreleased]\n\n"
+            "## [1.2.3] - 2026-02-28\n\n"
+            "### Added\n\n- Find matches with snippets.\n\n"
+            "## [1.2.2] - 2026-02-01\n\n"
+            "- Older changes.\n"
+        )
+        release_metadata.validate("v1.2.3", "1.2.3", changelog)
+        self.assertEqual(
+            release_metadata.changelog_chapter("1.2.3", changelog),
+            "## [1.2.3] - 2026-02-28\n\n### Added\n\n- Find matches with snippets.",
+        )
+        with self.assertRaises(ValueError):
+            release_metadata.changelog_chapter("1.2.4", changelog)
+
 
 if __name__ == "__main__":
     unittest.main()

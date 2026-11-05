@@ -161,6 +161,51 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn real_pdf_with_positioned_words_searches_and_displays_the_gap() {
+        // TJ spacing moves the next word without encoding a Unicode space.
+        let stream = b"BT /F1 16 Tf 40 100 Td [(incorrect) -400 (matches)] TJ ET";
+        let objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
+            format!("<< /Length {} >>\nstream\n", stream.len())
+                .into_bytes()
+                .into_iter()
+                .chain(stream.iter().copied())
+                .chain(b"\nendstream".iter().copied())
+                .collect(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+        ];
+        let mut data = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(data.len());
+            data.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            data.extend_from_slice(object);
+            data.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = data.len();
+        data.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+        for offset in offsets {
+            data.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        data.extend_from_slice(
+            format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        let path = std::env::temp_dir().join(format!("kver-56-gap-{}.pdf", std::process::id()));
+        std::fs::write(&path, data).unwrap();
+        let page = crate::pdf::page_text(&path, 0).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            page.glyphs.iter().all(|glyph| glyph.text != " "),
+            "fixture must represent a PDF without mapped spaces"
+        );
+        let matches = matches_on_page(&page, 0, "incorrect matches");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].snippet, "incorrect matches");
+    }
+
+    #[test]
     fn unmapped_word_gap_appears_in_find_snippet_and_matches_phrase() {
         let mut glyphs = Vec::new();
         let mut x = 20.;

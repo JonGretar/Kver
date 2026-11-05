@@ -7,7 +7,7 @@
 use gpui_kit as gpui;
 use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::platform as gpui_platform;
-use gpui_kit::test::TestWindowExt;
+use gpui_kit::test::{TestQueryExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, AppContext as _, AsKeystroke as _, HeadlessAppContext, InputEvent as _,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -111,6 +111,18 @@ fn click_control(
     })?;
     cx.run_until_parked();
     Ok(())
+}
+
+fn click_panel_tab(
+    cx: &mut HeadlessAppContext,
+    window: AnyWindowHandle,
+    label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let position = cx.update_window(window, |_, frame, app| {
+        frame.render_frame(app);
+        frame.find_by_label(label).bounds().center()
+    })?;
+    click(cx, window, position)
 }
 
 fn press_key(
@@ -1266,6 +1278,21 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         cx.update(|app| first_reader.read(app).sidebar_panel()),
         Some(SidebarPanel::Find)
     );
+    press_key(&mut cx, first, "cmd-shift-p")?;
+    cx.run_until_parked();
+    type_query(&mut cx, first, "toggle sidebar")?;
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).palette_matches(app)),
+        Some(1)
+    );
+    press_key(&mut cx, first, "enter")?;
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|app| first_reader.read(app).sidebar_panel()),
+        None
+    );
+    press_key(&mut cx, first, "cmd-f")?;
+    cx.run_until_parked();
     assert_eq!(
         cx.update(|app| second_reader.read(app).sidebar_panel()),
         None
@@ -1291,10 +1318,7 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         window.click("zoom-in", app);
     })?;
     assert_eq!(cx.update(|app| first_reader.read(app).scale()), 1.25);
-    cx.update_window(first.into(), |_, window, app| {
-        window.render_frame(app);
-        window.click("sidebar-contents", app);
-    })?;
+    click_panel_tab(&mut cx, first.into(), "Contents")?;
     cx.run_until_parked();
     assert_eq!(
         cx.update(|app| first_reader.read(app).sidebar_panel()),
@@ -1328,17 +1352,14 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         window.render_frame(app);
         assert_eq!(window.find("find-query").value(), Some("nfpw=-"));
         assert_eq!(window.find("find-query").focused(), Some(true));
-        window.click("sidebar-contents", app);
     })?;
-    cx.update_window(first.into(), |_, window, app| {
-        window.render_frame(app);
-        window.click("sidebar-find", app);
-    })?;
+    click_panel_tab(&mut cx, first.into(), "Contents")?;
+    click_panel_tab(&mut cx, first.into(), "Find")?;
     cx.update_window(first.into(), |_, window, app| {
         window.render_frame(app);
         assert_eq!(window.find("find-query").value(), Some("nfpw=-"));
-        window.click("sidebar-close", app);
     })?;
+    click_control(&mut cx, first.into(), "toggle-sidebar")?;
     cx.run_until_parked();
     assert_eq!(
         cx.update(|app| first_reader.read(app).sidebar_panel()),
@@ -1425,8 +1446,10 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         let sidebar = window.find("reader-sidebar").bounds();
         let page = window.find("page").bounds();
         assert!(page.size.width > sidebar.size.width);
-        assert!(window.find("sidebar-close").visible());
-        assert!(window.find("sidebar-contents").visible());
+        let tabs = window.find_by_label("Contents").bounds();
+        assert!(tabs.top() > page.top());
+        assert!(tabs.bottom() <= sidebar.bottom());
+        assert!(tabs.size.width > sidebar.size.width / 3.);
     })?;
     std::fs::create_dir_all("target/captures")?;
     cx.capture_screenshot(narrow.into())?
@@ -1440,7 +1463,7 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         window.render_frame(app);
         assert!(window.find("reader-sidebar").visible());
         assert!(window.find("find-query").visible());
-        window.click("sidebar-close", app);
+        window.click("toggle-sidebar", app);
     })?;
     Ok(())
 }
@@ -1650,6 +1673,7 @@ fn menu_actions_and_shortcuts() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(menus[3].name.as_ref(), "Window");
         assert_eq!(menus[4].name.as_ref(), "View");
         assert!(matches!(&menus[4].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<kver::reader::ShowContents>()));
+        assert!(matches!(&menus[4].items[2], OwnedMenuItem::Action { action, .. } if action.as_any().is::<kver::reader::ToggleSidebar>()));
         assert!(matches!(&menus[1].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NewWindow>()));
         assert!(matches!(&menus[3].items[0], OwnedMenuItem::Action { action, .. } if action.as_any().is::<NextWindow>()));
         assert!(matches!(&menus[3].items[1], OwnedMenuItem::Action { action, .. } if action.as_any().is::<PreviousWindow>()));

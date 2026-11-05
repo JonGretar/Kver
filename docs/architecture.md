@@ -93,9 +93,11 @@ PDF.
 The reader owns one `ReaderSidebar` per window in `src/reader_sidebar.rs`. It
 selects one panel, reserves a bounded side of the window's reading area
 (toolbar, document, and status bar), and transfers focus on open, switch, and
-close. The toolbar's leading control toggles the sidebar, reopening its last
-selected panel. The macOS title bar stays across the full window to preserve
-its native controls. `src/find_panel.rs` owns the Find query;
+close. The toolbar's leading control, View menu, and command palette dispatch
+the same `ToggleSidebar` Action, reopening the last-selected panel. Bottom,
+equal-width `TabBar` tabs switch panels; the panel content owns the scroll
+region above them. The macOS title bar stays across the full window to
+preserve its native controls. `src/find_panel.rs` owns the Find query;
 `src/contents_panel.rs` owns Contents focus. Both supply content to the same
 host through `new`, `focus`, and `render`; future search and outline actions
 belong to their respective panels, not to a shared query or outline model.

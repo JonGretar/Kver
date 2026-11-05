@@ -57,7 +57,6 @@ gpui::actions!(
         Copy,
         ShowFind,
         ShowContents,
-        CloseSidebar,
         ToggleSidebar
     ]
 );
@@ -72,7 +71,7 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
         KeyBinding::new("cmd-f", ShowFind, None),
-        KeyBinding::new("escape", CloseSidebar, Some("ReaderSidebar")),
+        KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
         KeyBinding::new("right", NextPage, Some("Reader")),
         KeyBinding::new("n", NextPage, Some("Reader")),
         KeyBinding::new("left", PreviousPage, Some("Reader")),
@@ -1120,9 +1119,6 @@ impl Render for Preview {
                     this.show_sidebar(SidebarPanel::Contents, window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &CloseSidebar, window, cx| {
-                this.close_sidebar(window, cx);
-            }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
                 this.toggle_sidebar(window, cx);
             }))
@@ -1539,9 +1535,9 @@ impl Render for Preview {
                                         )
                                         .item(
                                             CommandItem::new()
-                                                .label("Close Sidebar")
-                                                .action(Box::new(CloseSidebar))
-                                                .disabled(self.sidebar_panel().is_none()),
+                                                .label("Toggle Sidebar")
+                                                .action(Box::new(ToggleSidebar))
+                                                .disabled(!has_document),
                                         )
                                         .item(
                                             CommandItem::new()

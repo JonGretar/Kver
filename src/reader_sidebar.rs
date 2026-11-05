@@ -4,9 +4,9 @@ use gpui_kit::{Context, FocusHandle, IntoElement, Window, div, prelude::*};
 use gpui_kit::{
     base::TestSupportExt as _,
     component::{
-        ActiveTheme, Selectable, Sizable,
-        button::{Button, ButtonVariants},
+        ActiveTheme,
         scroll::ScrollableElement as _,
+        tab::{Tab, TabBar},
     },
 };
 
@@ -99,57 +99,6 @@ impl ReaderSidebar {
             .text_color(cx.theme().sidebar_foreground)
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .p_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .flex()
-                            .gap_1()
-                            .child(
-                                Button::new("sidebar-find")
-                                    .label("Find")
-                                    .ghost()
-                                    .small()
-                                    .selected(active == SidebarPanel::Find)
-                                    .on_click(|_, window, cx| {
-                                        window
-                                            .dispatch_action(Box::new(crate::reader::ShowFind), cx)
-                                    }),
-                            )
-                            .child(
-                                Button::new("sidebar-contents")
-                                    .label("Contents")
-                                    .ghost()
-                                    .small()
-                                    .selected(active == SidebarPanel::Contents)
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(crate::reader::ShowContents),
-                                            cx,
-                                        )
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div().flex().justify_end().child(
-                            Button::new("sidebar-close")
-                                .label("Close")
-                                .accessibility_label("Close sidebar")
-                                .ghost()
-                                .small()
-                                .on_click(|_, window, cx| {
-                                    window
-                                        .dispatch_action(Box::new(crate::reader::CloseSidebar), cx)
-                                }),
-                        ),
-                    ),
-            )
-            .child(
-                div()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scrollbar()
@@ -158,6 +107,27 @@ impl ReaderSidebar {
                         SidebarPanel::Find => self.find.render(cx).into_any_element(),
                         SidebarPanel::Contents => self.contents.render(cx).into_any_element(),
                     }),
+            )
+            .child(
+                div().border_t_1().border_color(cx.theme().border).child(
+                    TabBar::new("sidebar-panels")
+                        .w_full()
+                        .underline()
+                        .selected_index(match active {
+                            SidebarPanel::Find => 0,
+                            SidebarPanel::Contents => 1,
+                        })
+                        .last_empty_space(div().w_0())
+                        .child(Tab::new().label("Find").flex_1())
+                        .child(Tab::new().label("Contents").flex_1())
+                        .on_click(|ix, window, cx| {
+                            let action: Box<dyn gpui_kit::Action> = match ix {
+                                0 => Box::new(crate::reader::ShowFind),
+                                _ => Box::new(crate::reader::ShowContents),
+                            };
+                            window.dispatch_action(action, cx);
+                        }),
+                ),
             )
     }
 }

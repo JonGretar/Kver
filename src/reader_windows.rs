@@ -5,12 +5,16 @@ use std::path::PathBuf;
 use gpui_kit as gpui;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
-    App, AppContext as _, Bounds, Entity, Window, WindowBounds, WindowOptions, px, size,
+    App, AppContext as _, Bounds, Entity, KeyBinding, Window, WindowBounds, WindowOptions, px, size,
 };
 
 use crate::reader::Preview;
 
-gpui::actions!(kver, [NewWindow, NextWindow, PreviousWindow]);
+gpui::actions!(kver, [CloseWindow, NewWindow, NextWindow, PreviousWindow]);
+
+pub fn install(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("cmd-w", CloseWindow, None)]);
+}
 
 pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<Preview>, String> {
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);

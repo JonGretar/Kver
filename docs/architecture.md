@@ -63,18 +63,17 @@ complete, without waiting on the UI thread.
 and resolves config and local-data directories with `directories::ProjectDirs`.
 Configuration lives at `config_dir()/config.toml`; reading history lives in
 `data_local_dir()/reading.sqlite3`. Neither location depends on a PDF path or
-the working directory. Appearance is the `theme_mode` value in the shallow
-`[appearance]` table. A missing config file or appearance table means System
-and does not create anything until a choice is saved.
+the working directory. Appearance is `[appearance].theme_mode` (System by
+default); `[reading_history].remember` defaults to true. Missing configuration
+does not create a file until a choice is saved.
 
 `src/settings.rs` validates the entire known `AppSettings` value before applying
 external edits or panel changes; a `SettingsChange` updates one known field in
 the latest valid TOML document. New preferences explicitly join this model
 and the panel, rather than generating controls from arbitrary TOML keys.
 `src/settings_ui.rs` owns the shared app-wide settings state and one Settings
-window. Its sidebar organizes pages with chapter children (currently
-Appearance → Theme); the selected setting is a labeled dropdown in that
-chapter, with a reset control only when its value differs from System.
+window. Its Preferences view groups theme and reading-history choices; the
+appearance dropdown has a reset control only when it differs from System.
 Loading, periodic file checks, and saving TOML run off the UI thread. Valid
 external changes update the shared model, theme, and open Settings controls;
 invalid or partially written edits leave the last valid choice active and
@@ -87,19 +86,29 @@ errors leave the window usable and appear beside the setting.
 
 `src/recent.rs` owns local PDF identity and the SQLite schema. A successful
 page load records the canonical local path; failed and cancelled opens do not.
-The `documents` table is the parent for future per-PDF records: child tables
+The `documents` table is the ownership boundary for future per-PDF records: child tables
 must reference its path with `ON DELETE CASCADE`, so removing a document
 removes its saved reading data, not the PDF itself. The schema uses
 `user_version` migrations and refuses newer versions rather than overwriting
-them. A shared background worker processes SQLite requests in the order reader
-windows enqueue them, so forgetting a PDF cannot be undone by an earlier,
-still-pending recording; neither operation blocks reader input. Open Recent queries
-the database on every search, including records beyond the first 100 shown.
+them. The shared background worker serializes disk requests from all reader
+windows. Its in-memory session index keeps new opens available across windows
+when recording is off; saved records remain readable. Re-enabling recording
+flushes current session paths. Removing one path or clearing all deletes the
+SQLite parent rows and invalidates the matching session index. A generation
+token captured when loading begins prevents an older in-flight open from
+resurrecting data after an explicit deletion; a new open may record it again.
+Later position, mode, and mark slices must use this same per-path session
+owner and recording gate (rather than writing their own SQLite connections
+from reader windows), and store child rows with cascading foreign keys.
+No SQLite or config I/O runs on the UI thread. Open Recent searches both the
+session index and database, including stored records beyond the first 100 shown.
 It excludes the active reader's normalized PDF path before limiting results,
 without removing that record for other windows or future opens. It does not
 scan for missing PDFs on startup. Each recent row has a separate, accessible
 Forget button; it confirms which PDF's saved data will be removed before
-deleting the database record. The PDF file remains untouched. The recent-file
+deleting the database record. Settings offers a separate confirmed clear-all
+command; neither action deletes PDFs or changes TOML preferences. Open Recent
+panels in other windows refresh after deletion. The recent-file
 `Command` lives inside GPUI Kit's `Dialog`, so its modal backdrop, Escape
 behavior, pointer hit testing, and focus restoration come from the window
 overlay layer rather than a second hand-built reader overlay.

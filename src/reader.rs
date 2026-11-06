@@ -512,6 +512,15 @@ fn recent_content(
 
 impl Preview {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
+        if let Some(revision) = recent::revision(cx) {
+            cx.observe(&revision, |reader, _, cx| {
+                if let Some(panel) = reader.recent.as_ref() {
+                    let query = panel.command.read(cx).query(cx).to_string();
+                    reader.search_recent(query, cx);
+                }
+            })
+            .detach();
+        }
         let mut reader = Self {
             path,
             record_path: None,
@@ -785,8 +794,7 @@ impl Preview {
                         Ok(_) => {
                             panel.files.retain(|file| file.path != path);
                             panel.error = None;
-                            // No per-PDF cache exists yet. Future cached state must
-                            // invalidate here with the cascading disk delete.
+                            recent::notify_changed(cx);
                         }
                         Err(error) => {
                             panel.error = Some(format!("Cannot remove saved data: {error}"))
@@ -1028,6 +1036,8 @@ impl Preview {
             return;
         };
         let generation = self.generation;
+        let history = recent::history(cx);
+        let history_epoch = history.as_ref().map(|history| history.epoch());
         let work = cx.background_executor().spawn(async move {
             let pages = pdf::document_pages(&path);
             let normalized = if matches!(&pages, Ok(pages) if !pages.is_empty()) {
@@ -1050,8 +1060,8 @@ impl Preview {
                         match normalized {
                             Some(Ok(path)) => {
                                 this.record_path = Some(path.clone());
-                                if let Some(history) = recent::history(cx) {
-                                    let work = history.record(path);
+                                if let Some(history) = history {
+                                    let work = history.record_at(path, history_epoch.unwrap_or(0));
                                     cx.spawn(async move |this, cx| {
                                         if let Err(error) = work.await {
                                             let _ = this.update(cx, |this, cx| {
@@ -3058,6 +3068,180 @@ mod tests {
                 assert_eq!(reader.scale(), 1.0);
             })
             .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn fresh_private_session_never_creates_reading_database(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+        });
+        let (first, _) = recent_test_window(cx, Some(pdf.clone()));
+        let (second, second_reader) = recent_test_window(cx, None);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(second, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(ShowRecent), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        second_reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.recent.as_ref().unwrap().files[0].path, pdf)
+        });
+        assert!(!paths.local_data().join("reading.sqlite3").exists());
+        cx.update(|cx| {
+            cx.update_window(first, |_, window, _| window.remove_window())
+                .unwrap()
+        });
+    }
+
+    #[gpui_kit::test]
+    fn history_off_is_session_only_across_reader_windows_and_reenable_saves_it(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let store = RecentStore::new(&paths);
+        let missing = root.path().join("offline-drive.pdf");
+        store.record(&missing).unwrap();
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_first, first_reader) = recent_test_window(cx, Some(pdf.clone()));
+        let (second, second_reader) = recent_test_window(cx, None);
+        cx.run_until_parked();
+        assert!(!store.contains(&pdf).unwrap(), "off wrote to SQLite");
+        assert!(store.contains(&missing).unwrap(), "off erased old data");
+        cx.update(|cx| {
+            cx.update_window(second, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(ShowRecent), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        second_reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.recent.as_ref().unwrap().files[0].path, pdf);
+            assert_eq!(reader.recent.as_ref().unwrap().files[1].path, missing);
+        });
+        // Restart while recording is off: only the previously saved missing
+        // path survives; a session-only open is never written implicitly.
+        cx.update(|cx| recent::install(cx, Some(paths.clone())));
+        cx.run_until_parked();
+        assert_eq!(store.search("").unwrap().len(), 1);
+        assert_eq!(store.search("").unwrap()[0].path, missing);
+        // Reopen the PDF in this session before re-enabling recording.
+        first_reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        cx.update(|cx| cx.dispatch_action(&ShowSettings));
+        cx.run_until_parked();
+        let settings_window = cx.update(|cx| *cx.windows().last().unwrap());
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("remember-reading-history", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            crate::settings::load(paths.config())
+                .unwrap()
+                .remember_reading_history()
+        );
+        assert!(
+            store.contains(&pdf).unwrap(),
+            "re-enabling did not flush the session"
+        );
+        first_reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.path(), Some(pdf.as_path()))
+        });
+        second_reader.read_with(cx, |reader, _| assert_eq!(reader.path(), None));
+
+        // Reinitializing the service against the same locations represents a
+        // new process; only the saved state should be visible on disk.
+        cx.update(|cx| recent::install(cx, Some(paths.clone())));
+        cx.run_until_parked();
+        assert_eq!(store.search("").unwrap()[0].path, pdf);
+    }
+
+    #[gpui_kit::test]
+    fn forgetting_one_pdf_invalidates_open_recent_in_other_windows_and_does_not_resurrect(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let store = RecentStore::new(&paths);
+        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
+        let missing = root.path().join("offline.pdf");
+        store.record(&pdf).unwrap();
+        store.record(&missing).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+        });
+        let (first, first_reader) = recent_test_window(cx, None);
+        let (second, second_reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        for window in [first, second] {
+            cx.update(|cx| {
+                cx.update_window(window, |_, frame, cx| {
+                    frame.render_frame(cx);
+                    frame.dispatch_action(Box::new(ShowRecent), cx);
+                })
+                .unwrap();
+            });
+        }
+        cx.run_until_parked();
+        first_reader.update(cx, |reader, cx| reader.remove_recent(missing.clone(), cx));
+        cx.run_until_parked();
+        assert!(!store.contains(&missing).unwrap());
+        assert!(store.contains(&pdf).unwrap());
+        second_reader.read_with(cx, |reader, _| {
+            assert!(
+                !reader
+                    .recent
+                    .as_ref()
+                    .unwrap()
+                    .files
+                    .iter()
+                    .any(|file| file.path == missing)
+            );
+            assert_eq!(reader.path(), Some(pdf.as_path()));
+        });
+        cx.update(|cx| recent::install(cx, Some(paths.clone())));
+        cx.run_until_parked();
+        assert!(!store.contains(&missing).unwrap());
     }
 
     #[gpui_kit::test]

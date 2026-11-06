@@ -1026,6 +1026,19 @@ mod tests {
         assert!(page.png.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
+    #[test]
+    fn illustrated_field_guide_has_pages_and_outline() {
+        let sample = include_bytes!("../examples/field-guide.pdf").to_vec();
+        let outline = outline_bytes(sample.clone()).unwrap();
+        assert_eq!(outline[0].title, "1 Landscape");
+        assert_eq!(outline[0].destination.unwrap().page, 2);
+        assert!(outline.iter().any(|entry| entry.title == "3 Measurements"));
+
+        let page = render_bytes(sample, 2, 1.0).unwrap();
+        assert_eq!(page.page_count, 24);
+        assert_eq!((page.width, page.height), (612.0, 792.0));
+    }
+
     #[cfg(feature = "gui")]
     #[test]
     fn renders_display_pixels_without_png_round_trip() {

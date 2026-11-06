@@ -1,4 +1,4 @@
 # Local macOS Corgi build configuration. Cargo and Linux CI do not read this file.
 # Corgi sandboxes compile-time reads outside Rust source files.
 [extra-inputs]
-kver = ["examples/readme-sample.pdf", "assets/icons/png/128.png"]
+kver = ["examples/readme-sample.pdf", "examples/field-guide.pdf", "assets/icons/png/128.png"]

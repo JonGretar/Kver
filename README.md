@@ -59,13 +59,15 @@ component. Install [Corgi](https://github.com/ConradIrwin/corgi) with
 `cargo install corgi-build`. From a checkout of this repository, run:
 
 ```sh
-corgi run -- examples/readme-sample.pdf
+corgi run -- examples/field-guide.pdf
 ```
 
 Run `corgi run` without a path to choose a PDF from the window. Scroll
 with a wheel/trackpad or `j`/`k`; jump between pages with left/right or `p`/`n`.
 Use `=` and `-` or the toolbar buttons to zoom. The prototype renders visible
-pages in background work.
+pages in background work. The illustrated, 24-page field guide includes a
+contents page, bookmarks, images, tables, and a graph. The separate
+`examples/readme-sample.pdf` is a 100-page navigation and test fixture.
 
 For a local unsigned `.app`, see the [macOS build guide](docs/macos-app.md).
 For rendering evidence and known limitations, see the

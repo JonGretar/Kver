@@ -31,7 +31,8 @@ against `Cargo.toml` and the executable's `arm64` architecture, then extracts
 and checks `target/release/Kver-vX.Y.Z-macos-arm64.zip`, including strict
 signature verification before and after archiving. It does not upload
 or publish anything. The tag-only release job runs this same packaging path;
-macOS PR CI also checks the ordinary local bundle without update credentials.
+run it before tagging a release to catch packaging failures. Ordinary macOS PR
+CI builds the GUI binary but does not assemble or inspect an app archive.
 
 ## Download an unsigned release
 

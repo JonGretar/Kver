@@ -55,25 +55,11 @@ jobs:
       - name: Check formatting
         run: cargo +stable fmt --all -- --check
 
-      - name: Test all targets including headless visuals
-        run: cargo +stable test --locked --all-targets --features screenshot
+      - name: Test all targets
+        run: cargo +stable test --locked --all-targets
 
       - name: Lint all targets
-        run: cargo +stable clippy --locked --all-targets --features screenshot -- -D warnings
+        run: cargo +stable clippy --locked --all-targets -- -D warnings
 
       - name: Build normal GUI binary
         run: cargo +stable build --locked --bin kver
-
-      - name: Build and inspect unsigned macOS app
-        if: runner.os == 'macOS'
-        run: |
-          sh scripts/package-macos-app.sh
-
-      - name: Upload captures for visual review
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: kver-captures-${{ matrix.os }}
-          path: target/captures/*.png
-          if-no-files-found: ignore
-          retention-days: 7

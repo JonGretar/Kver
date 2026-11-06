@@ -36,12 +36,14 @@ is absent from the repository tree. Do not assume Zed requires visual
 regression tests in CI.
 
 Kver now uses a
-[main-thread Cargo integration test](../../tests/visual.rs) rather than a
-scenario language. It opens the same
-[reader](../../src/reader.rs) as the GUI, waits for asynchronous PDF rendering,
-asserts its zoom state and a changed frame, and saves PNGs for agent inspection.
-The [CI workflow](../../.github/workflows/ci.yml) requires this check on
-Linux and macOS. It tests the zoom command but not button
-hit-testing or keyboard shortcuts; those need explicitly dispatched input
-tests. Avoid cross-platform pixel baselines unless the rendering environment
-and fonts are pinned separately for each platform.
+[main-thread opt-in capture tool](../../tests/visual.rs) rather than a
+scenario language. Its baseline opens the same
+[reader](../../src/reader.rs) as the GUI, waits for the first rendered page,
+and saves a PNG for agent inspection. Agents can temporarily add interactions
+and captures for the feature under development.
+The [CI workflow](../../.github/workflows/ci.yml) no longer runs this
+exploratory capture target; permanent loading, replacement, and navigation
+regressions belong in ordinary Rust or GPUI Kit context tests. Retain the
+capture target as an opt-in tool for inspecting real pixels, and restore its
+baseline after each investigation. Avoid cross-platform pixel baselines unless
+the rendering environment and fonts are pinned separately for each platform.

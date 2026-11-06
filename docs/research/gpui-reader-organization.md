@@ -54,9 +54,10 @@ compiled integration again before changing dependencies.
   closes. Future New Window/Next Window behavior needs one app-level owner
   for window creation and focus switching, while each reader window keeps
   its own document, scroll, rendering, and selection state.
-- [`tests/visual.rs`](../../tests/visual.rs) already drives real GPUI events
-  in headless windows. Preserve those behavior-level tests while adding
-  two-entry-point Action tests and actual pointer/clipboard tests. As the
+- At the time of this research, [`tests/visual.rs`](../../tests/visual.rs)
+  drove real GPUI events in headless windows. Its lasting behavior checks now
+  belong in `src/reader.rs` GPUI Kit tests; the visual target is an opt-in
+  capture tool. As the
   [spec](https://github.com/JonGretar/Kver/issues/33) states, native menu,
   focus switching, and drag/copy still require real-Mac checks.
 

@@ -33,17 +33,21 @@ Download these public documents into ignored `target/validation-pdfs/`:
 | Rotated and offset-cropped | [py-pdf `cropped-rotated-scaled.pdf`](https://raw.githubusercontent.com/py-pdf/sample-files/main/027-cropped-rotated-scaled/cropped-rotated-scaled.pdf), 4 pages; `cc195eac510b81123de4f55ac9f8185f2120975a7b75a106460b98615737aacd` | **Before the local fix:** failed last-page jump at 125%: expected page 4/4, got 3/4 with bitmap 3 current. **After the local fix:** the full headless reader flow passed, including navigation to 4/4, keyboard zoom and fit modes; sampled bitmap use peaked at 7,392,000 bytes. Annotation/form appearance has the separate accepted [Phase 0 limitation](rendering-validation.md#release-mode-scan-and-rotatedcropped-follow-up-linux-cloud-runner). Native page 1–2 fit-page scrolling was qualitatively rechecked; the rest of the manual checklist remains. |
 | One image-only page | [CC0 scan-style specimen](https://filedone.ai/sample-files/sample-scanned-page.pdf), `sample-scanned.pdf`; `79f6bf12b046ac134a11fd35758d72d39715b4ff97a2153216233413aed4b0e3` | Backend-only Hayro render at 1×/2×/3×: 595×842, 1190×1684, 1786×2526 pixels; 45/147/402 ms read + parse + raster + PNG encode in release mode. **Not** a reader navigation or native-window check; synthetic scan style, no OCR layer. |
 
-Reproduce the behavior test for each multi-page file (replace `rfc9110` with
-the other filename stem). The checked-in test leaves PNG captures under
-ignored `target/captures/`, including first, middle, last, scrolled and error
-views. The last-page assertion on the four-page specimen was red before the
-local #31 change and is now green:
+These are historical results from a fuller exploratory capture probe, not
+the current default capture flow. The last-page assertion on the four-page
+specimen was red before the local #31 change and green afterward. The current
+`tests/visual.rs` captures only the first page by default; to inspect another
+document on macOS with Corgi installed, run:
 
 ```sh
 KVER_TEST_PDF=target/validation-pdfs/rfc9110.pdf \
 KVER_CAPTURE_DIR=target/captures/issue-17-rfc9110 \
-  cargo +stable test --locked --release --features screenshot --test visual
+  corgi test --features screenshot --test visual
 ```
+
+For middle/last-page, scrolling, or error captures, temporarily add those
+interactions to the probe and restore its baseline when finished. On Linux,
+use `cargo +stable test --locked --features screenshot --test visual` instead.
 
 Downscaled headless captures of the RFC last page, `tracemonkey` middle page
 and `vicksburg` middle page showed the expected page numbers, text, and
@@ -52,12 +56,12 @@ oriented page regions with detached annotation shapes. This was a visual
 spot-check of captures, not a pixel-level comparison against another renderer
 or a native-window inspection.
 
-The #31 regression also uses a generated three-page PDF with a short final
-page and different page widths. It verifies both fit modes: scrolling to
+The #31 exploratory regression also used a generated three-page PDF with a short final
+page and different page widths. It verified both fit modes: scrolling to
 the end selects the last page even with a sliver of the preceding page in
 view; an explicit previous/next turn returns to the final page; and repeated
 headless captures while scrolling back and forth do not change the fit scale
-or current page without another scroll input. This constrains the feedback
+or current page without another scroll input. This constrained the feedback
 loop but cannot establish that a visible window never flickers.
 
 A second generated three-page case approximates the cropped document's page
@@ -90,7 +94,7 @@ OCR scan took 17.3–19.4 ms and 21.0–24.1 ms respectively (eight turns each,
 100% zoom, 2× density). Headless capture timing does not measure native
 key-to-present latency or human-perceived responsiveness.
 
-The headless test also checked the empty reader, a cancelled headless picker,
+The historical headless test also checked the empty reader, a cancelled headless picker,
 opening/replacing a PDF by path, recovery after a missing or invalid PDF,
 and that replacement clears the old bitmap. A native file chooser is **not**
 exercised by this test. On this Mac `sh scripts/build-macos-app.sh` built

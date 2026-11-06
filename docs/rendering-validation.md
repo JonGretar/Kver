@@ -105,15 +105,16 @@ accepts input promptly during a slow render.
 
 ## Page-turn latency: debug versus release
 
-The opt-in main-thread GPUI probe in `tests/visual.rs` opens a PDF, renders its
-middle page, then alternates eight times between that page and the next. It
+The historical opt-in main-thread GPUI probe opened a PDF, rendered its
+middle page, then alternated eight times between that page and the next. It
 times from the `next_page`/`previous_page` call to acceptance of the new image
 and to a headless Metal screenshot. The probe checks that successive captured
 page regions differ. It exercises a **2× display density** at 100% zoom; set
 `KVER_BENCH_ZOOM_IN=1` for 125% zoom (2.5× raster scale). These are warm,
 repeated renders of two pages; Kver does not yet cache or prefetch them. The
-probe does not measure native key dispatch, onscreen frame presentation, cold
-start, or Skim/Sioyek on the same machine.
+probe did not measure native key dispatch, onscreen frame presentation, cold
+start, or Skim/Sioyek on the same machine. The current `tests/visual.rs` is
+a first-page capture baseline; it no longer includes this timing probe.
 
 On this macOS machine (10 logical CPUs, 24 GB RAM), at 920×800 logical
 pixels, elapsed time per turn was:
@@ -130,23 +131,13 @@ Timings vary by PDF content and machine. The **build profile dominated this
 check**: do not use `cargo run` without `--release` to decide whether prefetch
 is required.
 
-To repeat with the public pdf.js corpus file at revision
+The public pdf.js corpus file used for this measurement was at revision
 `c85e80cb42e365ae1e9cd6c10253b9ae0d6dbf71` (SHA-256
-`3662ff519e485810520552bf301d8c3b2b917fd2f83303f4965d7abed367e113`):
-
-```sh
-mkdir -p target/perf-pages
-curl --fail --location --show-error \
-  https://raw.githubusercontent.com/mozilla/pdf.js/c85e80cb42e365ae1e9cd6c10253b9ae0d6dbf71/test/pdfs/tracemonkey.pdf \
-  --output target/perf-pages/tracemonkey.pdf
-KVER_BENCH=1 KVER_BENCH_PDF=target/perf-pages/tracemonkey.pdf \
-  cargo +stable test --locked --release --features screenshot --test visual
-```
-
-Omit `--release` for the debug comparison; omit `KVER_BENCH_PDF` for the
-bundled sample. On macOS the Metal Toolchain must be installed. Compare the
-same PDF, window, density, zoom, and build profile before inferring a backend
-speed difference.
+`3662ff519e485810520552bf301d8c3b2b917fd2f83303f4965d7abed367e113`).
+To repeat the measurement, implement the page-turn timing experiment in the
+opt-in capture tool and restore the baseline afterward. Compare the same PDF,
+window, density, zoom, and build profile before inferring a backend speed
+difference.
 
 ### Long-document and loading-error check
 
@@ -160,17 +151,11 @@ showed different, legible content. Eight release-mode turns between pages
 This does **not** prove native-window responsiveness under sustained input.
 The file remains under ignored `target/perf-pages/`, not in the repository.
 
-```sh
-mkdir -p target/perf-pages
-curl --fail --location --show-error \
-  https://www.rfc-editor.org/rfc/rfc9110.pdf \
-  --output target/perf-pages/rfc9110.pdf
-KVER_TEST_PDF=target/perf-pages/rfc9110.pdf \
-KVER_CAPTURE_DIR=target/captures/rfc9110 \
-  cargo +stable test --locked --release --features screenshot --test visual
-```
+The current capture baseline accepts `KVER_TEST_PDF` and `KVER_CAPTURE_DIR`
+but captures only its first page; these historical middle/last-page and
+error scenarios require temporary probe changes.
 
-The same visual test opens a missing path and a deliberately invalid `.pdf`
+The historical visual test also opened a missing path and a deliberately invalid `.pdf`
 under ignored `target/captures/`. The UI shows `Cannot read ...` for the
 missing file and `Cannot open PDF: invalid or unsupported PDF file` for the
 invalid one. `target/captures/invalid-pdf.png` captures the latter. Hayro's
@@ -218,8 +203,8 @@ mappings**; that fixture has since been replaced by the
 font and text-mapping evidence. Its space characters had positions but no
 outline bounds. This has an automated example test.
 
-This demonstrates *access to glyph-level positions*, not a complete search,
-selection, or visual-ruler text model. The probe does not group lines, measure
+This demonstrates *access to glyph-level positions*, not a complete search
+or selection text model. The probe does not group lines, measure
 space advances, compute bounds for Type 3 fonts, or resolve missing Unicode.
 It now reports both document-space and rendered-page coordinates, and
 separates glyphs whose outline boxes intersect the visible crop from those
@@ -395,8 +380,8 @@ document (150,582), page (18,30); p2's first visible `t` is at
 corner labels. This checks the backend's crop/rotation transform for selected
 glyphs, **not** screen-space placement after scrolling/zoom or accurate
 visibility behind arbitrary clips/annotations. The 16 unmapped glyphs on each
-complex specimen page and the real presentation's unmapped text mean a search
-or visual ruler cannot assume Unicode is always available.
+complex specimen page and the real presentation's unmapped text mean text-based
+features cannot assume Unicode is always available.
 
 **Phase 0 backend decision:** Hayro 0.8.0 is the chosen initial backend.
 This pass found it viable for ordinary text, these scan-style pages, and base rotated

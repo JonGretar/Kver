@@ -80,10 +80,8 @@ Prefer straightforward implementations over premature abstractions.
 Do not introduce:
 
 - Plugin systems before they are needed
-- Large framework hierarchies
 - Complex dependency injection
 - Unnecessary asynchronous layers
-- Academic-specific features into the initial MVP
 
 ## Rust Conventions
 
@@ -127,21 +125,6 @@ Design for:
 
 Avoid loading or rasterizing entire large documents eagerly.
 
-## Visual Ruler
-
-The visual ruler is a desired feature, not an MVP release gate. Validate
-positioned text and document coordinates early so it remains feasible.
-
-It should:
-
-- Be controlled through keyboard commands
-- Move between text lines when text geometry is available
-- Support a coordinate-based fallback for scanned PDFs
-- Be rendered independently from PDF page rasterization
-- Remain correctly positioned through zoom and scrolling
-
-Keep ruler logic separate from PDF engine implementations.
-
 ## Testing
 
 Prioritize testing of:
@@ -149,11 +132,14 @@ Prioritize testing of:
 - Coordinate transformations
 - Navigation history and marks
 - Keyboard command parsing
-- Text-line navigation
 - Page caching and invalidation
 - PDF loading errors
 
 Use representative real-world PDFs during development.
+
+For visible UI changes that need review or approval, capture and show the
+result in the Delta thread with the opt-in `tests/visual.rs` tool. See
+`docs/agents/workflow.md` for the capture and cleanup workflow.
 
 ## Documentation
 
@@ -202,7 +188,5 @@ default.
 Do not implement features outside the current milestone without a clear reason.
 
 The first objective is to validate the stack, then ship a buildable,
-downloadable macOS PDF reader with smooth navigation and zooming. The ruler
-and full keyboard customization are later goals, not MVP blockers.
-
-See `docs/roadmap.md`.
+downloadable macOS PDF reader with smooth navigation and zooming. See
+`docs/features.md` and `docs/roadmap.md` for later goals.

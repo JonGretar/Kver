@@ -3083,7 +3083,7 @@ mod tests {
         let (second, second_reader) = recent_test_window(cx, None);
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(first.into(), |_, frame, cx| {
+            cx.update_window(first, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.dispatch_action(Box::new(ShowRecent), cx);
             })
@@ -3098,7 +3098,7 @@ mod tests {
             );
         });
         cx.update(|cx| {
-            cx.update_window(first.into(), |_, frame, cx| {
+            cx.update_window(first, |_, frame, cx| {
                 frame.input("readme-sample", cx);
             })
             .unwrap();
@@ -3109,7 +3109,7 @@ mod tests {
         });
         assert!(store.contains(&active).unwrap());
         cx.update(|cx| {
-            cx.update_window(second.into(), |_, frame, cx| {
+            cx.update_window(second, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.dispatch_action(Box::new(ShowRecent), cx);
             })
@@ -3135,7 +3135,7 @@ mod tests {
         });
         let (window, reader) = recent_test_window(cx, None);
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
+            cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.dispatch_action(Box::new(ShowCommandPalette), cx);
             })
@@ -3143,7 +3143,7 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
+            cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.input("Open Recent", cx);
             })
@@ -3156,7 +3156,7 @@ mod tests {
             assert!(palette.selected_index().is_some());
         });
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.press("enter", cx))
+            cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
                 .unwrap();
         });
         cx.run_until_parked();
@@ -3165,7 +3165,7 @@ mod tests {
             assert!(reader.recent.is_some());
         });
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
+            cx.update_window(window, |_, frame, cx| {
                 assert_eq!(frame.find("recent-panel").label(), Some("Open Recent"));
                 frame.input("book", cx);
             })
@@ -3204,7 +3204,7 @@ mod tests {
         assert!(store.contains(&normalized).unwrap());
         second_reader.read_with(cx, |reader, _| assert!(reader.path.is_none()));
         cx.update(|cx| {
-            cx.update_window(second.into(), |_, window, cx| {
+            cx.update_window(second, |_, window, cx| {
                 window.render_frame(cx);
                 window.dispatch_action(Box::new(ShowRecent), cx);
             })
@@ -3212,7 +3212,7 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(second.into(), |_, window, cx| window.press("enter", cx))
+            cx.update_window(second, |_, window, cx| window.press("enter", cx))
                 .unwrap();
         });
         cx.run_until_parked();
@@ -3304,7 +3304,7 @@ mod tests {
             .unwrap()
         });
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.dispatch_action(Box::new(ShowRecent), cx);
             })
@@ -3312,7 +3312,7 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.click("input-state", cx);
                 let focus = reader
                     .read(cx)
@@ -3339,7 +3339,7 @@ mod tests {
                 .selected_index()
         });
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.click("recent-header", cx);
                 frame.press("down", cx);
             })
@@ -3359,7 +3359,7 @@ mod tests {
             );
         });
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| frame.input("read", cx))
+            cx.update_window(handle, |_, frame, cx| frame.input("read", cx))
                 .unwrap();
         });
         reader.read_with(cx, |reader, cx| {
@@ -3370,7 +3370,7 @@ mod tests {
             );
         });
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 let outside = point(px(20.), px(200.));
                 frame.pointer_down(outside, gpui::MouseButton::Left, cx);
                 frame.pointer_up(outside, gpui::MouseButton::Left, cx);
@@ -3384,7 +3384,7 @@ mod tests {
             );
         });
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 assert!(
                     reader.read(cx).focus.is_focused(frame),
                     "outside click should return focus to the reader"
@@ -3395,7 +3395,7 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.press("escape", cx);
             })
@@ -3428,7 +3428,7 @@ mod tests {
             .unwrap()
         });
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.dispatch_action(Box::new(ShowRecent), cx);
             })
@@ -3437,7 +3437,7 @@ mod tests {
         cx.run_until_parked();
         let forget_id = format!("forget-pdf:{}", pdf.display());
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 assert_eq!(
                     frame.find(forget_id.clone()).label(),
                     Some("Forget readme-sample.pdf")
@@ -3456,7 +3456,7 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.render_frame(cx);
                 assert_eq!(frame.find("ok").label(), Some("Forget PDF"));
             })
@@ -3470,7 +3470,7 @@ mod tests {
             "X alone must not delete data"
         );
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| frame.click("cancel", cx))
+            cx.update_window(handle, |_, frame, cx| frame.click("cancel", cx))
                 .unwrap();
         });
         cx.run_until_parked();
@@ -3479,7 +3479,7 @@ mod tests {
             "Cancel must preserve the record"
         );
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.simulate_next_frame(cx);
                 let focus = reader
                     .read(cx)
@@ -3512,21 +3512,19 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
-                frame.click(forget_id.clone(), cx)
-            })
-            .unwrap();
+            cx.update_window(handle, |_, frame, cx| frame.click(forget_id.clone(), cx))
+                .unwrap();
         });
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| frame.click("ok", cx))
+            cx.update_window(handle, |_, frame, cx| frame.click("ok", cx))
                 .unwrap();
         });
         cx.run_until_parked();
         assert!(!store.contains(&pdf).unwrap());
         assert!(pdf.exists(), "forgetting must not delete the PDF");
         cx.update(|cx| {
-            cx.update_window(handle.into(), |_, frame, cx| {
+            cx.update_window(handle, |_, frame, cx| {
                 frame.simulate_next_frame(cx);
                 let focus = reader
                     .read(cx)
@@ -3573,7 +3571,7 @@ mod tests {
         let (first, first_reader) = recent_test_window(cx, None);
         let (_second, second_reader) = recent_test_window(cx, None);
         cx.update(|cx| {
-            cx.update_window(first.into(), |_, window, cx| {
+            cx.update_window(first, |_, window, cx| {
                 window.render_frame(cx);
                 window.dispatch_action(Box::new(ShowRecent), cx);
             })
@@ -3591,7 +3589,7 @@ mod tests {
         });
 
         cx.update(|cx| {
-            cx.update_window(first.into(), |_, frame, cx| {
+            cx.update_window(first, |_, frame, cx| {
                 frame.render_frame(cx);
                 assert_eq!(frame.find("recent-panel").label(), Some("Open Recent"));
                 frame.input("missing-older", cx);
@@ -3603,7 +3601,7 @@ mod tests {
             assert_eq!(reader.recent.as_ref().unwrap().files[0].path, missing);
         });
         cx.update(|cx| {
-            cx.update_window(first.into(), |_, frame, cx| {
+            cx.update_window(first, |_, frame, cx| {
                 frame.press("enter", cx);
             })
             .unwrap();

@@ -3,13 +3,19 @@
 use std::cell::Cell;
 
 use gpui_kit as gpui;
-use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding, Menu, MenuItem};
+use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding};
+#[cfg(target_os = "macos")]
+use gpui_kit::{Menu, MenuItem};
 
+use crate::reader::OpenPdf;
+#[cfg(target_os = "macos")]
 use crate::reader::{
-    Continuous, Copy, NextPage, OpenPdf, PreviousPage, ShowContents, ShowFind, ShowRecent,
-    SinglePage, ToggleSidebar,
+    Continuous, Copy, NextPage, PreviousPage, ShowContents, ShowFind, ShowRecent, SinglePage,
+    ToggleSidebar,
 };
+#[cfg(target_os = "macos")]
 use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
+#[cfg(target_os = "macos")]
 use crate::settings_ui::ShowSettings;
 
 gpui::actions!(kver, [AboutKver, CheckForUpdates, Quit]);
@@ -18,8 +24,6 @@ pub fn install(cx: &mut App) {
     crate::about::bind_keys(cx);
     #[cfg(target_os = "macos")]
     let updates_available = crate::updater::install(cx);
-    #[cfg(not(target_os = "macos"))]
-    let updates_available = false;
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.on_action(move |_: &AboutKver, cx| {
@@ -37,6 +41,15 @@ pub fn install(cx: &mut App) {
         }
     });
     cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &OpenPdf, cx| {
+        if cx.windows().is_empty() {
+            match crate::reader_windows::open(cx, None) {
+                Ok(reader) => reader.update(cx, |reader, cx| reader.open_dialog(cx)),
+                Err(error) => eprintln!("Cannot open window: {error}"),
+            }
+        }
+    });
+    #[cfg(target_os = "macos")]
     cx.set_menus([
         Menu::new("Kver").items([
             MenuItem::action("About Kver", AboutKver),
@@ -76,6 +89,7 @@ pub fn install(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reader_windows::CloseWindow;
     use gpui_kit::{
         InputEvent as _, KeyUpEvent, Keystroke, TestAppContext, test::TestWindowExt as _,
     };

@@ -11,7 +11,8 @@ use gpui_kit as gpui;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
     Animation, AnimationExt, App, BoxShadow, ClipboardItem, Context, Entity, FocusHandle,
-    KeyBinding, RenderImage, ScrollHandle, Window, div, img, point, prelude::*, px, rgb,
+    KeyBinding, RenderImage, ScrollHandle, Subscription, Window, div, img, point, prelude::*, px,
+    rgb,
 };
 use gpui_kit::{
     base::{Disableable, FocusTrapElement, TestSupportExt as _},
@@ -40,6 +41,7 @@ use crate::{
     reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
     recent::{self, RecentFile, RecentStore},
+    settings::InitialZoom,
     settings_ui::{self, ShowSettings},
 };
 
@@ -321,6 +323,7 @@ pub struct Preview {
     record_path: Option<PathBuf>,
     scale: f32,
     zoom_mode: ZoomMode,
+    settings_wait: Option<Subscription>,
     reading_mode: ReadingMode,
     display_scale: f32,
     pages: Vec<(f32, f32)>,
@@ -526,6 +529,7 @@ impl Preview {
             record_path: None,
             scale: 1.0,
             zoom_mode: ZoomMode::Fixed,
+            settings_wait: None,
             reading_mode: ReadingMode::Continuous,
             display_scale,
             pages: Vec::new(),
@@ -1032,6 +1036,28 @@ impl Preview {
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
+        let settings = settings_ui::state(cx);
+        if !settings.read(cx).ready() {
+            if self.settings_wait.is_none() {
+                self.settings_wait = Some(cx.observe(&settings, |reader, settings, cx| {
+                    if settings.read(cx).ready() {
+                        reader.settings_wait = None;
+                        reader.load(cx);
+                    }
+                }));
+            }
+            return;
+        }
+        self.settings_wait = None;
+        // Capture the app default once per open; subsequent edits never refit
+        // an existing reader. All entry points (new window, picker, Recent, OS)
+        // converge on this load path.
+        self.scale = 1.0;
+        self.zoom_mode = match settings.read(cx).initial_zoom() {
+            InitialZoom::ActualSize => ZoomMode::Fixed,
+            InitialZoom::FitWidth => ZoomMode::FitWidth,
+            InitialZoom::FitPage => ZoomMode::FitPage,
+        };
         let Some(path) = self.path.clone() else {
             return;
         };
@@ -1928,11 +1954,6 @@ impl Render for Preview {
             )
             .on_action(cx.listener(Self::on_open_pdf))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
-            .on_action(cx.listener(|_, _: &NewWindow, _, cx| {
-                if let Err(error) = reader_windows::open(cx, None) {
-                    eprintln!("Cannot open window: {error}");
-                }
-            }))
             .on_action(cx.listener(|_, _: &NextWindow, window, cx| {
                 reader_windows::cycle(window, cx, 1);
             }))
@@ -3846,6 +3867,165 @@ mod tests {
                 assert!((reader.scale() - after * 1.25).abs() < 0.01);
             })
             .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn opening_zoom_uses_settings_per_document_without_refitting_other_windows(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let pdf = root.path().join("pages.pdf");
+        std::fs::write(&pdf, three_page_pdf([(400, 1200), (400, 800), (400, 1200)])).unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "[reader]\ninitial_zoom = 'fit_width'\n").unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            crate::settings_ui::install_with_paths(
+                cx,
+                Some(crate::settings::AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+        });
+        let first =
+            cx.add_window(|frame, cx| Preview::new(Some(pdf.clone()), frame.scale_factor(), cx));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(first.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        first
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
+                assert_eq!(reader.page_count(), Some(3));
+                assert!(reader.scale() > 1.0);
+            })
+            .unwrap();
+        let first_scale = first.read_with(cx, |reader, _| reader.scale()).unwrap();
+
+        // A live preference edit changes only subsequent document opens.
+        std::fs::write(&config, "[reader]\ninitial_zoom = 'fit_page'\n").unwrap();
+        cx.background_executor
+            .advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        first
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
+                assert_eq!(reader.scale(), first_scale);
+            })
+            .unwrap();
+        let second =
+            cx.add_window(|frame, cx| Preview::new(Some(pdf.clone()), frame.scale_factor(), cx));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(second.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::FitPage);
+                assert!(reader.scale() < first_scale);
+            })
+            .unwrap();
+        let second_scale = second.read_with(cx, |reader, _| reader.scale()).unwrap();
+        cx.simulate_window_resize(second.into(), size(px(600.), px(500.)));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(second.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::FitPage);
+                assert!(reader.scale() < second_scale);
+            })
+            .unwrap();
+
+        // The reader's actual keyboard Actions still change its local mode
+        // without changing the preference or another reader.
+        second
+            .update(cx, |reader, _, cx| reader.scroll_by(80.0, cx))
+            .unwrap();
+        let position = second
+            .read_with(cx, |reader, _| reader.reading_position())
+            .unwrap();
+        cx.simulate_keystrokes(second.into(), "w");
+        cx.run_until_parked();
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
+                let after = reader.reading_position();
+                assert_eq!(after.0, position.0);
+                assert!((after.1 - position.1).abs() < 2.0);
+            })
+            .unwrap();
+        cx.simulate_keystrokes(second.into(), "=");
+        cx.run_until_parked();
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
+                let after = reader.reading_position();
+                assert_eq!(after.0, position.0);
+                assert!((after.1 - position.1).abs() < 2.0);
+            })
+            .unwrap();
+        first
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
+                assert_eq!(reader.scale(), first_scale);
+            })
+            .unwrap();
+
+        // Replacing a PDF through the same path as picker/Recent takes the new
+        // default, while selecting 100% later resets only future opens.
+        std::fs::write(&config, "[reader]\ninitial_zoom = '100_percent'\n").unwrap();
+        cx.background_executor
+            .advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        second
+            .update(cx, |reader, _, cx| reader.open_path(pdf, cx))
+            .unwrap();
+        cx.run_until_parked();
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
+                assert!((reader.scale() - 1.0).abs() < 0.001);
+            })
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn missing_config_finishes_startup_before_loading_at_100_percent(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("missing/config.toml");
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::settings_ui::install_with_paths(
+                cx,
+                Some(crate::settings::AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+        });
+        let reader = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        reader
+            .read_with(cx, |reader, _| {
+                assert!(reader.page_count().is_some());
+                assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
+                assert_eq!(reader.scale(), 1.0);
+            })
+            .unwrap();
+        assert!(!config.exists());
     }
 
     #[gpui_kit::test]

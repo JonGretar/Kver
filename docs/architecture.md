@@ -16,8 +16,8 @@ depend on the PDF engine or physical keybindings.
 `src/main.rs` initializes GPUI Kit, keybindings, and the initial reader window.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
-`src/reader_windows.rs` creates empty reader windows and cycles focus between
-open windows; it does not share document or viewport state between readers.
+`src/reader_windows.rs` creates empty reader windows, cycles focus, and owns
+the last-window policy; it does not share document or viewport state between readers.
 Each window mounts its reader inside GPUI Kit's `Root`, which owns component
 overlays and applies the theme's interface scale. The window uses Kit's
 `TitleBar` options so its native controls and dragging agree with the document
@@ -56,6 +56,11 @@ continuous layout. Fit modes recompute from the current page and measured
 scroll viewport on navigation or resize; manual zoom returns to fixed mode.
 Scale changes invalidate obsolete bitmaps before new background renders
 complete, without waiting on the UI thread.
+The app's initial zoom preference is captured for each document open (including
+the first launch, file picker, Open Recent, and OS file-open); readers wait for
+the initial asynchronous config load before loading their first PDF. Fit Width
+and Fit Page use the same measured-viewport fitting as reader Actions. Later
+preference edits do not refit open readers or replace their manual zoom.
 
 ### Settings and platform storage
 
@@ -63,17 +68,20 @@ complete, without waiting on the UI thread.
 and resolves config and local-data directories with `directories::ProjectDirs`.
 Configuration lives at `config_dir()/config.toml`; reading history lives in
 `data_local_dir()/reading.sqlite3`. Neither location depends on a PDF path or
-the working directory. Appearance is `[appearance].theme_mode` (System by
-default); `[reading_history].remember` defaults to true. Missing configuration
-does not create a file until a choice is saved.
+the working directory. Appearance is `[appearance].theme_mode` (default System);
+initial zoom is `[reader].initial_zoom` (`100_percent`, `fit_width`, or `fit_page`,
+default 100%); `[windows].quit_when_last_window_closes` and
+`[reading_history].remember` default to true.
+Missing values use those defaults without writing a file until a choice is saved.
 
 `src/settings.rs` validates the entire known `AppSettings` value before applying
 external edits or panel changes; a `SettingsChange` updates one known field in
 the latest valid TOML document. New preferences explicitly join this model
 and the panel, rather than generating controls from arbitrary TOML keys.
 `src/settings_ui.rs` owns the shared app-wide settings state and one Settings
-window. Its Preferences view groups theme and reading-history choices; the
-appearance dropdown has a reset control only when it differs from System.
+window. Its General page contains labeled appearance and initial zoom dropdowns,
+an appearance reset control when its value differs from System, and the
+last-window and reading-history switches, plus a confirmed clear-all action.
 Loading, periodic file checks, and saving TOML run off the UI thread. Valid
 external changes update the shared model, theme, and open Settings controls;
 invalid or partially written edits leave the last valid choice active and
@@ -189,13 +197,16 @@ through its existing page/zoom/scroll model.
 
 On macOS, `src/app_menu.rs` installs native Kver, File, Edit, Window, and View menus
 at startup.
-File → Open PDF dispatches the same window-local `OpenPdf` Action; the
-application-wide `Quit` Action shuts down GPUI rather than just closing one
-reader window. File → New Window creates an independent empty reader; Window →
-Next Window and Previous Window cycle focus in either direction. These commands
-use the same reader Actions as shortcuts and the palette; only the focused
-window handles a window command. Closing a window does not quit while other
-readers remain open. macOS menu setup stays separate from reader operations.
+File → Open PDF dispatches the reader's `OpenPdf` Action when a reader exists;
+with no windows the global fallback first opens a reader. The app-wide
+`NewWindow` Action opens a reader even with no focused window, while Window →
+Next Window and Previous Window cycle focus. The app-wide `Quit` Action exits
+regardless of the last-window choice. Closing a non-last window never quits.
+On macOS, with the preference off, the app stays available via its menu and
+GPUI's Dock reopen callback; a Finder file-open request opens a reader if
+the launch window has closed. On Linux and Windows the last close always quits
+until an equivalent windowless activation path exists, preventing an inaccessible
+process. Menu setup stays separate from reader operations.
 
 ### macOS updates
 

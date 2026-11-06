@@ -29,6 +29,7 @@ fn main() {
             }
         }
     });
+    application.on_reopen(reader_windows::reopen);
     application.run(move |cx: &mut App| {
         gpui_kit::init(cx);
         gpui_kit::component::theme::Theme::sync_system_appearance(None, cx);
@@ -36,14 +37,7 @@ fn main() {
         reader_windows::install(cx);
         kver::settings_ui::install(cx);
         kver::recent::install(cx, kver::settings::AppPaths::resolve());
-        #[cfg(target_os = "macos")]
         kver::app_menu::install(cx);
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
 
         let initial = match reader_windows::open(cx, path) {
             Ok(reader) => reader.downgrade(),
@@ -56,15 +50,7 @@ fn main() {
         cx.spawn(async move |cx| {
             while let Ok(path) = incoming.recv().await {
                 cx.update(|cx| {
-                    // Reuse the launch window only while it is still empty.
-                    if let Some(reader) = initial.upgrade()
-                        && reader.read(cx).path().is_none()
-                    {
-                        reader.update(cx, |reader, cx| reader.open_path(path, cx));
-                    } else if let Err(error) = reader_windows::open(cx, Some(path)) {
-                        eprintln!("Cannot open window: {error}");
-                    }
-                    cx.activate(true);
+                    reader_windows::open_requested_path(cx, &initial, path);
                 });
             }
         })

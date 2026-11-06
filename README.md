@@ -34,6 +34,24 @@ Windows and Linux releases will follow when someone joins me to work on
 packaging and testing those platforms. If you would like to help, please
 [open an issue](https://github.com/JonGretar/Kver/issues).
 
+## Appearance
+
+Open **Kver → Settings…** (Command-,), use the Settings button in the reader,
+or search for Settings in the command palette. Choose **System**, **Light**,
+or **Dark**; the reader changes immediately and remembers your choice.
+
+You can also edit `~/Library/Application Support/com.JonGretar.Kver/config.toml`
+on macOS. For example:
+
+```toml
+[appearance]
+theme_mode = "dark"
+```
+
+Valid `theme_mode` values are `"system"`, `"light"`, and `"dark"`. No file is
+needed for the default System choice. Changes made directly to the file take
+effect after restarting Kver; live external-edit support is planned separately.
+
 ## Goals
 
 - Fast and responsive PDF viewing

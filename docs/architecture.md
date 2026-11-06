@@ -21,8 +21,9 @@ open windows; it does not share document or viewport state between readers.
 Each window mounts its reader inside GPUI Kit's `Root`, which owns component
 overlays and applies the theme's interface scale. The window uses Kit's
 `TitleBar` options so its native controls and dragging agree with the document
-title. Kver follows the system's light/dark appearance for the reader chrome;
-the PDF page itself retains its document colors.
+title. Kver follows the system's light/dark appearance for reader chrome
+unless the app-wide preference selects Light or Dark; PDF pages retain their
+document colors.
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
@@ -50,6 +51,29 @@ continuous layout. Fit modes recompute from the current page and measured
 scroll viewport on navigation or resize; manual zoom returns to fixed mode.
 Scale changes invalidate obsolete bitmaps before new background renders
 complete, without waiting on the UI thread.
+
+### Settings and platform storage
+
+`src/settings.rs` owns the stable `com` / `JonGretar` / `Kver` identity
+and resolves config and local-data directories with `directories::ProjectDirs`.
+Configuration lives at `config_dir()/config.toml`; future per-document
+storage uses `data_local_dir()`. Neither location depends on a PDF path or
+the working directory. Appearance is the `theme_mode` value in the shallow
+`[appearance]` table. A missing config file or appearance table means System
+and does not create anything until a choice is saved.
+
+`src/settings_ui.rs` owns the app-wide appearance model and one Settings
+window. Its sidebar organizes pages with chapter children (currently
+Appearance → Theme); the selected setting is a labeled dropdown in that
+chapter, with a reset control only when its value differs from System.
+Loading and saving TOML run on background workers; the reader chrome
+changes immediately on selection. Saves are serialized and write a temporary
+file in the config directory before replacement. The writer re-reads the
+current file and retains unrelated TOML entries and comments; malformed
+config is never overwritten by a panel choice. Unavailable paths and
+read/write errors leave the window usable and appear beside the setting.
+External edits are not watched yet; live application of edits is separate
+work in #69.
 
 ### Actions, palette, and menu
 

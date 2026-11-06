@@ -23,10 +23,9 @@ use gpui_kit::{
             Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
             EmptyTitle,
         },
-        menu::{DropdownMenu, PopupMenuItem},
         spinner::Spinner,
         status_bar::StatusBar,
-        theme::{Theme, ThemeMode},
+        theme::Theme,
         toolbar::{Toolbar, ToolbarGroup},
         tooltip::Tooltip,
     },
@@ -39,49 +38,13 @@ use crate::{
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
+    settings_ui::{self, ShowSettings},
 };
 
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
 const PAGE_PADDING: f32 = 16.0;
 const FIT_LABEL_MIN_REMS: f32 = 35.0;
-
-/// App-wide session preference, distinct from the resolved light/dark theme.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum ThemePreference {
-    Light,
-    Dark,
-    #[default]
-    System,
-}
-
-impl gpui::Global for ThemePreference {}
-
-impl ThemePreference {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-            Self::System => "System",
-        }
-    }
-
-    fn icon(self) -> IconName {
-        match self {
-            Self::Light => IconName::Sun,
-            Self::Dark => IconName::Moon,
-            Self::System => IconName::SunMoon,
-        }
-    }
-
-    fn apply(self, window: &mut Window, cx: &mut App) {
-        match self {
-            Self::Light => Theme::change(ThemeMode::Light, Some(window), cx),
-            Self::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
-            Self::System => Theme::sync_system_appearance(Some(window), cx),
-        }
-    }
-}
 
 gpui::actions!(
     kver,
@@ -374,9 +337,6 @@ pub struct Preview {
 
 impl Preview {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
-        if !cx.has_global::<ThemePreference>() {
-            cx.set_global(ThemePreference::default());
-        }
         let mut reader = Self {
             path,
             scale: 1.0,
@@ -1252,8 +1212,10 @@ impl Render for Preview {
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
             cx.observe_window_appearance(window, |_, window, cx| {
-                if *cx.global::<ThemePreference>() == ThemePreference::System {
-                    ThemePreference::System.apply(window, cx);
+                if settings_ui::state(cx).read(cx).appearance()
+                    == crate::settings::Appearance::System
+                {
+                    Theme::sync_system_appearance(Some(window), cx);
                 }
                 cx.notify();
             })
@@ -1266,7 +1228,6 @@ impl Render for Preview {
             .detach();
             self.focus_initialized = true;
         }
-        let preference = *cx.global::<ThemePreference>();
         let density = window.scale_factor();
         if self.display_scale != density {
             self.display_scale = density;
@@ -1704,36 +1665,15 @@ impl Render for Preview {
                                     )
                                     .content(div().flex_1())
                                     .content(
-                                        Button::new("theme-menu")
-                                            .small()
-                                            .icon(preference.icon())
-                                            .accessibility_label(format!(
-                                                "Theme: {}",
-                                                preference.label()
-                                            ))
-                                            .tooltip("Choose theme")
-                                            .ghost()
-                                            .dropdown_menu_with_anchor(
-                                                gpui::Anchor::TopRight,
-                                                |mut menu, _, cx| {
-                                                    let current = *cx.global::<ThemePreference>();
-                                                    for choice in [
-                                                        ThemePreference::Light,
-                                                        ThemePreference::Dark,
-                                                        ThemePreference::System,
-                                                    ] {
-                                                        menu = menu.item(
-                                                            PopupMenuItem::new(choice.label())
-                                                                .checked(choice == current)
-                                                                .on_click(move |_, window, cx| {
-                                                                    cx.set_global(choice);
-                                                                    choice.apply(window, cx);
-                                                                }),
-                                                        );
-                                                    }
-                                                    menu
-                                                },
-                                            ),
+                                        reader_button(
+                                            "settings-button",
+                                            "Settings…",
+                                            Some(IconName::Settings),
+                                            Box::new(ShowSettings),
+                                            true,
+                                            false,
+                                        )
+                                        .small(),
                                     ),
                             )
                             .child(
@@ -1913,6 +1853,11 @@ impl Render for Preview {
                                             CommandItem::new()
                                                 .label("Open PDF…")
                                                 .action(Box::new(OpenPdf)),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Settings…")
+                                                .action(Box::new(ShowSettings)),
                                         )
                                         .item(
                                             CommandItem::new()

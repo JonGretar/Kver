@@ -1,4 +1,4 @@
-//! Continuous reader: geometry drives layout; only the viewport owns bitmaps.
+//! Reader geometry drives layout; only the viewport owns bitmaps.
 
 use std::{
     collections::HashMap,
@@ -60,6 +60,8 @@ gpui::actions!(
         ZoomOut,
         FitWidth,
         FitPage,
+        SinglePage,
+        Continuous,
         Copy,
         ShowFind,
         NextMatch,
@@ -96,6 +98,8 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("-", ZoomOut, Some("Reader")),
         KeyBinding::new("w", FitWidth, Some("Reader")),
         KeyBinding::new("f", FitPage, Some("Reader")),
+        KeyBinding::new("s", SinglePage, Some("Reader")),
+        KeyBinding::new("c", Continuous, Some("Reader")),
         // These modified bindings stay active while the palette has focus,
         // so Kit can show real shortcuts without hijacking search text.
         KeyBinding::new("cmd-alt-right", NextPage, None),
@@ -113,6 +117,13 @@ pub enum ZoomMode {
     Fixed,
     FitWidth,
     FitPage,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReadingMode {
+    #[default]
+    Continuous,
+    SinglePage,
 }
 
 fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32)) -> Option<f32> {
@@ -310,6 +321,7 @@ pub struct Preview {
     record_path: Option<PathBuf>,
     scale: f32,
     zoom_mode: ZoomMode,
+    reading_mode: ReadingMode,
     display_scale: f32,
     pages: Vec<(f32, f32)>,
     images: HashMap<usize, Bitmap>,
@@ -505,6 +517,7 @@ impl Preview {
             record_path: None,
             scale: 1.0,
             zoom_mode: ZoomMode::Fixed,
+            reading_mode: ReadingMode::Continuous,
             display_scale,
             pages: Vec::new(),
             images: HashMap::new(),
@@ -904,8 +917,7 @@ impl Preview {
             return;
         };
         let (_, width, height) = self.viewport();
-        self.page_index = hit.page;
-        self.selected_page = Some(hit.page);
+        self.focus_page(hit.page);
         self.apply_fit(
             hit.page,
             Position {
@@ -916,13 +928,10 @@ impl Preview {
             0.,
         );
         let y = find_search::page_rect(&hit, self.pages[hit.page]).1;
-        self.scroll.set_offset(point(
-            self.scroll.offset().x,
-            px(
-                -(page_top(&self.pages, self.scale, hit.page) + y * self.scale - height * 0.25)
-                    .max(0.),
-            ),
-        ));
+        self.scroll_to(
+            -f32::from(self.scroll.offset().x),
+            self.page_top(hit.page) + y * self.scale - height * 0.25,
+        );
         if let Some(sidebar) = self.sidebar.as_mut() {
             let find = sidebar.find_mut();
             find.active = Some(index);
@@ -1153,13 +1162,20 @@ impl Preview {
     pub fn zoom_mode(&self) -> ZoomMode {
         self.zoom_mode
     }
+    pub fn reading_mode(&self) -> ReadingMode {
+        self.reading_mode
+    }
     pub fn scale(&self) -> f32 {
         self.scale
     }
     /// Page and PDF-point offset at the top of the viewport.
     pub fn reading_position(&self) -> (usize, f32) {
         let (top, _, _) = self.viewport();
-        let position = position_at(&self.pages, self.scale, top);
+        let position = if self.pages.is_empty() {
+            Position { page: 0, y: 0.0 }
+        } else {
+            self.position_at(top)
+        };
         (position.page, position.y)
     }
     pub fn page_count(&self) -> Option<usize> {
@@ -1185,6 +1201,95 @@ impl Preview {
             .and_then(|page| selected_text(selection, page))
     }
 
+    fn page_top(&self, index: usize) -> f32 {
+        match self.reading_mode {
+            ReadingMode::Continuous => page_top(&self.pages, self.scale, index),
+            ReadingMode::SinglePage => 0.0,
+        }
+    }
+
+    fn position_at(&self, top: f32) -> Position {
+        match self.reading_mode {
+            ReadingMode::Continuous => position_at(&self.pages, self.scale, top),
+            ReadingMode::SinglePage => Position {
+                page: self.page_index,
+                y: (top / self.scale).clamp(0.0, self.pages[self.page_index].1),
+            },
+        }
+    }
+
+    fn visible_pages(&self, top: f32, height: f32) -> std::ops::Range<usize> {
+        match self.reading_mode {
+            ReadingMode::Continuous => visible_range(&self.pages, self.scale, top, height),
+            ReadingMode::SinglePage => self.page_index..self.page_index + 1,
+        }
+    }
+
+    fn maximum_scroll(&self, height: f32) -> f32 {
+        match self.reading_mode {
+            ReadingMode::Continuous => {
+                (page_top(&self.pages, self.scale, self.pages.len()) - height).max(0.0)
+            }
+            ReadingMode::SinglePage => {
+                (self.pages[self.page_index].1 * self.scale + GAP + PAGE_PADDING * 2.0 - height)
+                    .max(0.0)
+            }
+        }
+    }
+
+    fn scroll_to(&mut self, x: f32, top: f32) {
+        let maximum = self.maximum_scroll(self.viewport().2);
+        self.scroll
+            .set_offset(point(px(-x.max(0.0)), px(-top.clamp(0.0, maximum))));
+    }
+
+    fn focus_page(&mut self, page: usize) {
+        if self.reading_mode == ReadingMode::SinglePage && page != self.page_index {
+            self.selection = None;
+            self.dragging = false;
+        }
+        self.page_index = page;
+        self.selected_page = Some(page);
+    }
+
+    pub fn set_reading_mode(&mut self, mode: ReadingMode, cx: &mut Context<Self>) {
+        if self.reading_mode == mode {
+            return;
+        }
+        if self.pages.is_empty() {
+            self.reading_mode = mode;
+            cx.notify();
+            return;
+        }
+        let (top, _, height) = self.viewport();
+        let position = self.position_at(top);
+        let page = if mode == ReadingMode::SinglePage && self.selected_page.is_none() {
+            current_page_at(&self.pages, self.scale, top, height)
+        } else {
+            self.page_index
+        };
+        self.reading_mode = mode;
+        if mode == ReadingMode::SinglePage
+            && self
+                .selection
+                .is_some_and(|selection| selection.start.page != page)
+        {
+            self.selection = None;
+            self.dragging = false;
+        }
+        self.focus_page(page);
+        let y = if position.page == page {
+            position.y
+        } else {
+            0.0
+        };
+        self.scroll_to(
+            -f32::from(self.scroll.offset().x),
+            self.page_top(page) + y * self.scale,
+        );
+        self.sync_viewport(cx);
+    }
+
     /// Measured scroll bounds and centered page layout define the window origin.
     fn page_viewport(&self, index: usize) -> Option<PageViewport> {
         let text = self.text.get(&index)?;
@@ -1197,7 +1302,7 @@ impl Preview {
                 + ((inner_width - width).max(0.0) / 2.0) as f64,
             y: f32::from(bounds.origin.y) as f64
                 + PAGE_PADDING as f64
-                + page_top(&self.pages, self.scale, index) as f64,
+                + self.page_top(index) as f64,
         };
         PageViewport::new(
             text.transform,
@@ -1269,7 +1374,7 @@ impl Preview {
             return;
         }
         let (top, _, height) = self.viewport();
-        let mut visible = visible_range(&self.pages, self.scale, top, height);
+        let mut visible = self.visible_pages(top, height);
         self.text.retain(|index, _| {
             visible.contains(index)
                 || self
@@ -1324,16 +1429,23 @@ impl Preview {
             return;
         }
         let (top, width, height) = self.viewport();
-        let visible = visible_range(&self.pages, self.scale, top, height);
+        if self.reading_mode == ReadingMode::SinglePage {
+            self.scroll_to(-f32::from(self.scroll.offset().x), top);
+        }
+        let (top, _, _) = self.viewport();
+        let visible = self.visible_pages(top, height);
         if self
             .selected_page
             .is_some_and(|page| !visible.contains(&page))
         {
             self.selected_page = None;
         }
-        let target = self
-            .selected_page
-            .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height));
+        let target = if self.reading_mode == ReadingMode::SinglePage {
+            self.page_index
+        } else {
+            self.selected_page
+                .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height))
+        };
         // When a scroll changes the fit target, keep the point at the
         // viewport center stable. Anchoring the top instead can move the
         // center back across the boundary and refit the previous page.
@@ -1343,7 +1455,7 @@ impl Preview {
             0.0
         };
         self.page_index = target;
-        let position = position_at(&self.pages, self.scale, top + anchor);
+        let position = self.position_at(top + anchor);
         self.apply_fit(self.page_index, position, (width, height), anchor);
         self.last_viewport = self.viewport();
         self.schedule(cx);
@@ -1366,10 +1478,10 @@ impl Preview {
         self.images.clear();
         self.in_flight = None;
         self.failed = None;
-        self.scroll.set_offset(point(
-            self.scroll.offset().x,
-            px(-(page_top(&self.pages, next, position.page) + position.y * next - anchor).max(0.0)),
-        ));
+        self.scroll_to(
+            -f32::from(self.scroll.offset().x),
+            self.page_top(position.page) + position.y * next - anchor,
+        );
     }
 
     pub fn next_page(&mut self, cx: &mut Context<Self>) {
@@ -1384,26 +1496,23 @@ impl Preview {
         if index >= self.pages.len() {
             return;
         }
-        self.page_index = index;
-        self.selected_page = Some(index);
+        let y = if self.reading_mode == ReadingMode::SinglePage {
+            self.reading_position().1
+        } else {
+            0.0
+        };
+        self.focus_page(index);
         if self.failed != Some(index) {
             self.failed = None;
         }
         let (_, width, height) = self.viewport();
-        self.apply_fit(
-            index,
-            Position {
-                page: index,
-                y: 0.0,
-            },
-            (width, height),
-            0.0,
+        self.apply_fit(index, Position { page: index, y }, (width, height), 0.0);
+        self.scroll_to(
+            -f32::from(self.scroll.offset().x),
+            self.page_top(index) + y * self.scale,
         );
-        self.scroll.set_offset(point(
-            self.scroll.offset().x,
-            px(-page_top(&self.pages, self.scale, index)),
-        ));
         self.schedule(cx);
+        self.schedule_text(cx);
         cx.notify();
     }
     pub(crate) fn select_outline(
@@ -1426,8 +1535,7 @@ impl Preview {
         if page >= self.pages.len() {
             return;
         }
-        self.page_index = page;
-        self.selected_page = Some(page);
+        self.focus_page(page);
         if let Some(zoom) = destination.zoom() {
             self.zoom_mode = ZoomMode::Fixed;
             self.set_scale(zoom, Position { page, y: 0.0 }, 0.0);
@@ -1444,11 +1552,9 @@ impl Preview {
         } else {
             0.0
         };
-        self.scroll.set_offset(point(
-            px(-x),
-            px(-(page_top(&self.pages, self.scale, page) + y * self.scale)),
-        ));
+        self.scroll_to(x, self.page_top(page) + y * self.scale);
         self.schedule(cx);
+        self.schedule_text(cx);
         cx.notify();
     }
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
@@ -1467,10 +1573,13 @@ impl Preview {
         self.zoom_mode = mode;
         if !self.pages.is_empty() {
             let (top, width, height) = self.viewport();
-            self.page_index = self
-                .selected_page
-                .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height));
-            let position = position_at(&self.pages, self.scale, top);
+            self.page_index = if self.reading_mode == ReadingMode::SinglePage {
+                self.page_index
+            } else {
+                self.selected_page
+                    .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height))
+            };
+            let position = self.position_at(top);
             self.apply_fit(self.page_index, position, (width, height), 0.0);
             self.schedule(cx);
         }
@@ -1482,7 +1591,7 @@ impl Preview {
             return;
         }
         let (top, _, _) = self.viewport();
-        let position = position_at(&self.pages, self.scale, top);
+        let position = self.position_at(top);
         self.zoom_mode = ZoomMode::Fixed;
         self.set_scale(next, position, 0.0);
         self.schedule(cx);
@@ -1494,7 +1603,7 @@ impl Preview {
             return;
         }
         let (top, _, height) = self.viewport();
-        let range = visible_range(&self.pages, self.scale, top, height);
+        let range = self.visible_pages(top, height);
         if self.failed.is_some_and(|index| !range.contains(&index)) {
             self.failed = None;
         }
@@ -1506,7 +1615,7 @@ impl Preview {
         let used = self.retained_bitmap_bytes();
         let index = range
             .filter(|index| !self.images.contains_key(index) && self.failed != Some(*index))
-            .min_by_key(|index| (page_top(&self.pages, self.scale, *index) - top).abs() as i64);
+            .min_by_key(|index| (self.page_top(*index) - top).abs() as i64);
         let Some(index) = index else {
             if self.failed.is_none() {
                 self.status = self.ready_status();
@@ -1542,7 +1651,7 @@ impl Preview {
                 }
                 this.in_flight = None;
                 let (top, _, height) = this.viewport();
-                if visible_range(&this.pages, this.scale, top, height).contains(&index) {
+                if this.visible_pages(top, height).contains(&index) {
                     match result {
                         Ok(rendered) => {
                             let bytes = rendered.bgra.len();
@@ -1621,7 +1730,11 @@ impl Render for Preview {
             self.sync_viewport(cx);
         }
         let (top, _, height) = self.viewport();
-        let range = visible_range(&self.pages, self.scale, top, height);
+        let range = if !self.pages.is_empty() {
+            self.visible_pages(top, height)
+        } else {
+            0..0
+        };
         let has_document = !self.pages.is_empty();
         let show_fit_labels = f32::from(window.bounds().size.width)
             >= FIT_LABEL_MIN_REMS * f32::from(window.rem_size());
@@ -1630,9 +1743,17 @@ impl Render for Preview {
             .as_deref()
             .map(document_name)
             .map(gpui::SharedString::from);
-        let top_space = page_top(&self.pages, self.scale, range.start);
-        let end_space = page_top(&self.pages, self.scale, self.pages.len())
-            - page_top(&self.pages, self.scale, range.end);
+        let top_space = if self.reading_mode == ReadingMode::SinglePage {
+            0.0
+        } else {
+            page_top(&self.pages, self.scale, range.start)
+        };
+        let end_space = if self.reading_mode == ReadingMode::SinglePage {
+            0.0
+        } else {
+            page_top(&self.pages, self.scale, self.pages.len())
+                - page_top(&self.pages, self.scale, range.end)
+        };
         let mut content = div()
             .w_full()
             .flex()
@@ -1871,6 +1992,16 @@ impl Render for Preview {
                     this.fit_page(cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &SinglePage, _, cx| {
+                if !this.pages.is_empty() {
+                    this.set_reading_mode(ReadingMode::SinglePage, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &Continuous, _, cx| {
+                if !this.pages.is_empty() {
+                    this.set_reading_mode(ReadingMode::Continuous, cx);
+                }
+            }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 if this.palette.is_some() || this.recent.is_some() || !this.reading_allowed(window)
                 {
@@ -1996,6 +2127,41 @@ impl Render for Preview {
                                                     && self.page_index + 1 < self.pages.len(),
                                                 false,
                                             )),
+                                    )
+                                    .content(
+                                        gpui_kit::component::separator::Separator::vertical().h_5(),
+                                    )
+                                    .content(
+                                        reader_button(
+                                            "reading-mode",
+                                            if self.reading_mode == ReadingMode::SinglePage {
+                                                "Single page · switch to continuous"
+                                            } else {
+                                                "Continuous · switch to single page"
+                                            },
+                                            Some(IconName::FileText),
+                                            if self.reading_mode == ReadingMode::SinglePage {
+                                                Box::new(Continuous)
+                                            } else {
+                                                Box::new(SinglePage)
+                                            },
+                                            has_document,
+                                            self.reading_mode == ReadingMode::SinglePage,
+                                        )
+                                        .small()
+                                        .when(
+                                            show_fit_labels,
+                                            |button| {
+                                                button.label(
+                                                    if self.reading_mode == ReadingMode::SinglePage
+                                                    {
+                                                        "Single page"
+                                                    } else {
+                                                        "Continuous"
+                                                    },
+                                                )
+                                            },
+                                        ),
                                     )
                                     .content(
                                         gpui_kit::component::separator::Separator::vertical().h_5(),
@@ -2321,6 +2487,26 @@ impl Render for Preview {
                                         )
                                         .item(
                                             CommandItem::new()
+                                                .label("Single page")
+                                                .action(Box::new(SinglePage))
+                                                .disabled(
+                                                    !has_document
+                                                        || self.reading_mode
+                                                            == ReadingMode::SinglePage,
+                                                ),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Continuous")
+                                                .action(Box::new(Continuous))
+                                                .disabled(
+                                                    !has_document
+                                                        || self.reading_mode
+                                                            == ReadingMode::Continuous,
+                                                ),
+                                        )
+                                        .item(
+                                            CommandItem::new()
                                                 .label("Zoom In")
                                                 .action(Box::new(ZoomIn))
                                                 .disabled(!has_document),
@@ -2376,10 +2562,10 @@ impl Preview {
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
         self.selected_page = None;
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
-        let maximum =
-            (page_top(&self.pages, self.scale, self.pages.len()) - self.viewport().2).max(0.0);
-        self.scroll
-            .set_offset(point(self.scroll.offset().x, px(-top.min(maximum))));
+        if self.pages.is_empty() {
+            return;
+        }
+        self.scroll_to(-f32::from(self.scroll.offset().x), top);
         self.sync_viewport(cx);
     }
 }
@@ -2405,21 +2591,25 @@ mod tests {
     }
 
     fn three_page_pdf(sizes: [(u32, u32); 3]) -> Vec<u8> {
+        three_page_pdf_with_boxes(sizes, ["", "", ""])
+    }
+
+    fn three_page_pdf_with_boxes(sizes: [(u32, u32); 3], boxes: [&str; 3]) -> Vec<u8> {
         let mut pdf = b"%PDF-1.4\n".to_vec();
         let objects = [
             "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
             "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>".to_owned(),
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] >>",
-                sizes[0].0, sizes[0].1
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
+                sizes[0].0, sizes[0].1, boxes[0]
             ),
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] >>",
-                sizes[1].0, sizes[1].1
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
+                sizes[1].0, sizes[1].1, boxes[1]
             ),
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] >>",
-                sizes[2].0, sizes[2].1
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
+                sizes[2].0, sizes[2].1, boxes[2]
             ),
         ];
         let mut offsets = Vec::new();
@@ -2436,6 +2626,254 @@ mod tests {
             format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
         );
         pdf
+    }
+
+    #[gpui_kit::test]
+    fn single_page_bounds_wheel_and_explicit_turns_on_real_page_geometry(cx: &mut TestAppContext) {
+        let path = PathBuf::from("target/test-fixtures/single-page-geometry.pdf");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            three_page_pdf_with_boxes(
+                [(360, 300), (600, 1600), (600, 1000)],
+                [
+                    "",
+                    "/CropBox [20 40 580 1540] /Rotate 180",
+                    "/CropBox [50 30 550 970] /Rotate 90",
+                ],
+            ),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+        });
+        let window = cx.add_window(|frame, cx| Preview::new(Some(path), frame.scale_factor(), cx));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(
+                    reader.pages,
+                    vec![(360.0, 300.0), (560.0, 1500.0), (940.0, 500.0)]
+                );
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "s");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+                assert_eq!(reader.visible_pages(0.0, 700.0), 0..1);
+            })
+            .unwrap();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                for _ in 0..4 {
+                    frame.scroll(
+                        "page",
+                        gpui::ScrollDelta::Pixels(point(px(0.0), px(-5000.0))),
+                        cx,
+                    );
+                }
+            })
+            .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 0);
+                assert_eq!(reader.reading_position(), (0, 0.0));
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "right");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert_eq!(reader.reading_position().0, 1);
+            })
+            .unwrap();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.scroll(
+                    "page",
+                    gpui::ScrollDelta::Pixels(point(px(0.0), px(-200.0))),
+                    cx,
+                );
+            })
+            .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert!(reader.reading_position().1 > 0.0);
+            })
+            .unwrap();
+        window
+            .update(cx, |reader, _, cx| reader.scroll_by(10000.0, cx))
+            .unwrap();
+        let bottom = window
+            .read_with(cx, |reader, _| reader.reading_position().1)
+            .unwrap();
+        assert!(bottom > 500.0);
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                for _ in 0..4 {
+                    frame.scroll(
+                        "page",
+                        gpui::ScrollDelta::Pixels(point(px(0.0), px(-5000.0))),
+                        cx,
+                    );
+                }
+            })
+            .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert!((reader.reading_position().1 - bottom).abs() < 1.0);
+                assert_eq!(reader.visible_pages(0.0, 700.0), 1..2);
+            })
+            .unwrap();
+        window
+            .update(cx, |reader, _, cx| reader.zoom_in(cx))
+            .unwrap();
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert!((reader.reading_position().1 - bottom).abs() < 1.0);
+            })
+            .unwrap();
+        window
+            .update(cx, |reader, _, cx| reader.fit_width(cx))
+            .unwrap();
+        let before_resize = window.read_with(cx, |reader, _| reader.scale()).unwrap();
+        cx.simulate_window_resize(window.into(), size(px(600.0), px(700.0)));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert!(reader.scale() < before_resize);
+                assert!(reader.reading_position().1 <= reader.pages[1].1);
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "right");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 2);
+                assert_eq!(reader.reading_position().0, 2);
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "right");
+        assert_eq!(
+            window
+                .read_with(cx, |reader, _| reader.page_index())
+                .unwrap(),
+            2
+        );
+        cx.simulate_keystrokes(window.into(), "left c");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
+                assert_eq!(reader.reading_position().0, 1);
+            })
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn single_page_find_jump_and_window_modes_are_local(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let first = cx.add_window(|frame, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                frame.scale_factor(),
+                cx,
+            )
+        });
+        let second = cx.add_window(|frame, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                frame.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(first.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        first
+            .update(cx, |reader, frame, cx| {
+                reader.set_reading_mode(ReadingMode::SinglePage, cx);
+                reader.show_sidebar(SidebarPanel::Find, frame, cx);
+                reader.find_query_changed("This is page 3 of 100".into(), cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        first
+            .update(cx, |reader, _, cx| {
+                let index = reader
+                    .sidebar
+                    .as_ref()
+                    .unwrap()
+                    .find()
+                    .results
+                    .iter()
+                    .position(|hit| hit.page == 2)
+                    .expect("page 3 has a find result");
+                reader.select_match(index, cx);
+            })
+            .unwrap();
+        first
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 2);
+                assert_eq!(reader.reading_position().0, 2);
+                assert_eq!(reader.visible_pages(0.0, 700.0), 2..3);
+                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            })
+            .unwrap();
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 0);
+                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
+            })
+            .unwrap();
+        first
+            .update(cx, |reader, _, cx| {
+                reader.open_path(PathBuf::from("examples/field-guide.pdf"), cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let destination = pdf::document_outline(Path::new("examples/field-guide.pdf")).unwrap()[0]
+            .destination()
+            .unwrap();
+        first
+            .update(cx, |reader, _, cx| reader.navigate_outline(destination, cx))
+            .unwrap();
+        first
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 2);
+                assert_eq!(reader.reading_position().0, 2);
+                assert_eq!(reader.visible_pages(0.0, 700.0), 2..3);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        first
+            .read_with(cx, |reader, _| {
+                assert!(reader.images.keys().all(|page| *page == 2));
+                assert!(reader.retained_bitmap_bytes() <= BITMAP_BUDGET);
+            })
+            .unwrap();
     }
 
     #[gpui_kit::test]
@@ -3328,6 +3766,32 @@ mod tests {
             cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
             Some("KVER ".into())
         );
+        window
+            .update(cx, |reader, _, cx| {
+                reader.set_reading_mode(ReadingMode::SinglePage, cx)
+            })
+            .unwrap();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.drag(start, end, cx);
+            })
+            .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.selected_text().as_deref(), Some("KVER "));
+            })
+            .unwrap();
+        window
+            .update(cx, |reader, _, cx| reader.next_page(cx))
+            .unwrap();
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+                assert_eq!(reader.selected_text(), None);
+            })
+            .unwrap();
     }
 
     #[gpui_kit::test]

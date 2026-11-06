@@ -5,7 +5,10 @@ use std::cell::Cell;
 use gpui_kit as gpui;
 use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding, Menu, MenuItem};
 
-use crate::reader::{Copy, OpenPdf, ShowContents, ShowFind, ShowRecent, ToggleSidebar};
+use crate::reader::{
+    Continuous, Copy, NextPage, OpenPdf, PreviousPage, ShowContents, ShowFind, ShowRecent,
+    SinglePage, ToggleSidebar,
+};
 use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 use crate::settings_ui::ShowSettings;
 
@@ -61,6 +64,11 @@ pub fn install(cx: &mut App) {
             MenuItem::action("Find", ShowFind),
             MenuItem::action("Contents", ShowContents),
             MenuItem::action("Toggle Sidebar", ToggleSidebar),
+            MenuItem::separator(),
+            MenuItem::action("Single Page", SinglePage),
+            MenuItem::action("Continuous", Continuous),
+            MenuItem::action("Next Page", NextPage),
+            MenuItem::action("Previous Page", PreviousPage),
         ]),
     ]);
 }

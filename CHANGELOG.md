@@ -10,11 +10,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Find previously opened PDFs with Open Recent from the command palette, File menu, or Command-Shift-O; search older entries and forget one PDF's saved record without deleting the PDF.
+- Read one PDF page at a time in Single Page mode; scroll within that page without turning it, and switch modes or turn pages with reader controls, shortcuts, menus, or the command palette.
 - Open Settings from the reader, command palette, or macOS Kver menu; choose System, Light, or Dark appearance and keep that choice after restarting.
 - Close the active window with Command-W or the Window menu on macOS.
 
 ### Changed
 
+- Apply valid edits to the settings file while Kver is open; keep the last working appearance and show an error during incomplete or invalid edits without overwriting the file.
 - Show Contents before Find in the sidebar and open Contents by default the first time the sidebar is shown.
 
 ## [0.3.1] - 2026-11-06

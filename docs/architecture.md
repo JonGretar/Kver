@@ -37,13 +37,18 @@ and accepted limitations.
 
 ### Rendering and navigation
 
-The reader loads page dimensions in background work, then lays out the full
-document with spacers around visible pages. It selects one raster job at a
-time from the current viewport rather than queueing work that a scroll or
-zoom might make obsolete. Old-document, old-scale, and offscreen results are
-discarded. Only visible bitmaps are retained, within a 128 MiB budget;
-offscreen pages remain placeholders. Rasterization accounts for display
-density and passes pixels directly to GPUI without a PNG round trip.
+The reader loads page dimensions in background work. Continuous mode lays out
+the document with spacers around visible pages; Single Page mode lays out only
+the selected page and bounds the scroll region to that page. Each reader window
+owns its mode; this slice does not persist a mode or set a configurable default.
+Wheel and trackpad input never turn pages in Single Page mode; page turns are
+explicit Actions. Page-local PDF-point positions anchor mode switches, zoom,
+and jumps, clamped to the destination page's viewport. The reader selects one
+raster job at a time from the current viewport rather than queueing work that
+a scroll or zoom might make obsolete. Old-document, old-scale, and offscreen
+results are discarded. Only visible bitmaps are retained, within a 128 MiB
+budget; offscreen pages remain placeholders. Rasterization accounts for
+display density and passes pixels directly to GPUI without a PNG round trip.
 
 The reader preserves a page-local position in PDF points across zoom and
 viewport changes. Fixed zoom, fit width, and fit page use one scale for
@@ -62,18 +67,23 @@ the working directory. Appearance is the `theme_mode` value in the shallow
 `[appearance]` table. A missing config file or appearance table means System
 and does not create anything until a choice is saved.
 
-`src/settings_ui.rs` owns the app-wide appearance model and one Settings
+`src/settings.rs` validates the entire known `AppSettings` value before applying
+external edits or panel changes; a `SettingsChange` updates one known field in
+the latest valid TOML document. New preferences explicitly join this model
+and the panel, rather than generating controls from arbitrary TOML keys.
+`src/settings_ui.rs` owns the shared app-wide settings state and one Settings
 window. Its sidebar organizes pages with chapter children (currently
 Appearance → Theme); the selected setting is a labeled dropdown in that
 chapter, with a reset control only when its value differs from System.
-Loading and saving TOML run on background workers; the reader chrome
-changes immediately on selection. Saves are serialized and write a temporary
-file in the config directory before replacement. The writer re-reads the
-current file and retains unrelated TOML entries and comments; malformed
-config is never overwritten by a panel choice. Unavailable paths and
-read/write errors leave the window usable and appear beside the setting.
-External edits are not watched yet; live application of edits is separate
-work in #69.
+Loading, periodic file checks, and saving TOML run off the UI thread. Valid
+external changes update the shared model, theme, and open Settings controls;
+invalid or partially written edits leave the last valid choice active and
+show an error until correction. Panel choices commit only after the writer
+re-reads a valid file, and saves are serialized through a temporary file in
+the config directory. The writer retains unrelated TOML entries and comments
+and refuses a file that changed while the replacement was prepared. A panel
+choice cannot replace malformed config. Unavailable paths and read/write
+errors leave the window usable and appear beside the setting.
 
 `src/recent.rs` owns local PDF identity and the SQLite schema. A successful
 page load records the canonical local path; failed and cancelled opens do not.
@@ -96,9 +106,9 @@ overlay layer rather than a second hand-built reader overlay.
 
 ### Actions, palette, and menu
 
-Open PDF, page turns, zoom, and fit modes are GPUI Actions handled by the
-active reader window. Toolbar controls, keybindings, and GPUI Kit's command
-palette dispatch those same Actions; reader methods own the underlying
+Open PDF, page turns, reading mode, zoom, and fit modes are GPUI Actions
+handled by the active reader window. Toolbar controls, keybindings, and GPUI
+Kit's command palette dispatch those same Actions; reader methods own the underlying
 navigation and loading behavior. The reader owns the file picker and ignores
 obsolete asynchronous load results, so entry points share error handling.
 The native picker uses `rfd` for its PDF extension filter because GPUI's
@@ -117,7 +127,8 @@ packaging work.
 Document-dependent Actions are unavailable in an empty, loading, or error
 window; each reader checks its own document state.
 Kit's `TitleBar` holds the truncating filename and persistent Open PDF button;
-the grouped `Toolbar` holds navigation, zoom, fit, and selection commands.
+the grouped `Toolbar` holds navigation, current reading mode, zoom, fit, and
+selection commands.
 `StatusBar` shows page position and zoom without taking space from the PDF.
 `Empty` shows the open, loading, or recoverable error state in the document
 area. Control presentation uses Kit's semantic theme colors and component

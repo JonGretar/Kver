@@ -78,6 +78,56 @@ impl Appearance {
     }
 }
 
+/// The complete set of preferences understood by this version of Kver.
+/// Unknown TOML entries remain in the file, but are not applied as settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AppSettings {
+    appearance: Appearance,
+}
+
+impl AppSettings {
+    pub fn appearance(self) -> Appearance {
+        self.appearance
+    }
+
+    pub fn with_appearance(mut self, appearance: Appearance) -> Self {
+        self.appearance = appearance;
+        self
+    }
+
+    fn from_document(document: &DocumentMut) -> Result<Self, String> {
+        Ok(Self {
+            appearance: appearance_in(document)?,
+        })
+    }
+}
+
+/// An intentional edit to one known preference, not a replacement of the file.
+#[derive(Clone, Copy, Debug)]
+pub enum SettingsChange {
+    Appearance(Appearance),
+}
+
+impl SettingsChange {
+    fn apply(self, document: &mut DocumentMut) {
+        match self {
+            Self::Appearance(appearance) => {
+                if document.get("appearance").is_none() {
+                    document["appearance"] = Item::Table(Table::new());
+                }
+                if let Some(existing) = document["appearance"]["theme_mode"].as_value_mut() {
+                    // Replacing an Item loses its inline comment; keep its decor.
+                    let decor = existing.decor().clone();
+                    *existing = appearance.key().into();
+                    *existing.decor_mut() = decor;
+                } else {
+                    document["appearance"]["theme_mode"] = value(appearance.key());
+                }
+            }
+        }
+    }
+}
+
 fn read_content(path: &Path) -> Result<Option<String>, String> {
     match fs::read_to_string(path) {
         Ok(content) => Ok(Some(content)),
@@ -119,28 +169,18 @@ fn appearance_in(document: &DocumentMut) -> Result<Appearance, String> {
     }
 }
 
-pub fn load(path: &Path) -> Result<Appearance, String> {
-    appearance_in(&read_document(path)?)
+pub fn load(path: &Path) -> Result<AppSettings, String> {
+    AppSettings::from_document(&read_document(path)?)
 }
 
 /// Re-read before writing so unrelated hand-edited TOML remains intact.
 /// Refuse invalid input rather than replacing a file the user needs to repair.
-pub fn save(path: &Path, appearance: Appearance) -> Result<(), String> {
+pub fn save(path: &Path, change: SettingsChange) -> Result<AppSettings, String> {
     let original = read_content(path)?;
     let mut document = parse_document(path, original.as_deref())?;
-    // Reject invalid or incompatible shapes rather than overwriting hand edits.
-    appearance_in(&document)?;
-    if document.get("appearance").is_none() {
-        document["appearance"] = Item::Table(Table::new());
-    }
-    if let Some(existing) = document["appearance"]["theme_mode"].as_value_mut() {
-        // Replacing an Item loses its inline comment; changing the value keeps its decor.
-        let decor = existing.decor().clone();
-        *existing = appearance.key().into();
-        *existing.decor_mut() = decor;
-    } else {
-        document["appearance"]["theme_mode"] = value(appearance.key());
-    }
+    AppSettings::from_document(&document)?;
+    change.apply(&mut document);
+    let updated = AppSettings::from_document(&document)?;
     let parent = path
         .parent()
         .ok_or("Settings path has no parent directory")?;
@@ -172,12 +212,20 @@ pub fn save(path: &Path, appearance: Appearance) -> Result<(), String> {
             error.error
         )
     })?;
-    Ok(())
+    Ok(updated)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn save(path: &Path, appearance: Appearance) -> Result<AppSettings, String> {
+        super::save(path, SettingsChange::Appearance(appearance))
+    }
+
+    fn load(path: &Path) -> Result<Appearance, String> {
+        super::load(path).map(AppSettings::appearance)
+    }
 
     #[test]
     fn missing_file_defaults_without_creating_directories() {

@@ -67,7 +67,11 @@ the working directory. Appearance is the `theme_mode` value in the shallow
 `[appearance]` table. A missing config file or appearance table means System
 and does not create anything until a choice is saved.
 
-`src/settings_ui.rs` owns the app-wide appearance model and one Settings
+`src/settings.rs` validates the entire known `AppSettings` value before applying
+external edits or panel changes; a `SettingsChange` updates one known field in
+the latest valid TOML document. New preferences explicitly join this model
+and the panel, rather than generating controls from arbitrary TOML keys.
+`src/settings_ui.rs` owns the shared app-wide settings state and one Settings
 window. Its sidebar organizes pages with chapter children (currently
 Appearance → Theme); the selected setting is a labeled dropdown in that
 chapter, with a reset control only when its value differs from System.

@@ -19,24 +19,24 @@ use gpui_kit::{
 
 use crate::{
     reader_windows::CloseWindow,
-    settings::{self, AppPaths, Appearance},
+    settings::{self, AppPaths, AppSettings, Appearance, SettingsChange},
 };
 
 gpui::actions!(kver, [ShowSettings, CloseSettings]);
 
 pub struct SettingsState {
-    appearance: Appearance,
+    settings: AppSettings,
     paths: Option<AppPaths>,
     error: Option<String>,
     revision: u64,
     saving: bool,
-    pending: Option<Appearance>,
+    pending: Option<SettingsChange>,
 }
 
 impl SettingsState {
     fn new(paths: Option<AppPaths>) -> Self {
         Self {
-            appearance: Appearance::System,
+            settings: AppSettings::default(),
             paths,
             error: None,
             revision: 0,
@@ -46,7 +46,7 @@ impl SettingsState {
     }
 
     pub fn appearance(&self) -> Appearance {
-        self.appearance
+        self.settings.appearance()
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -54,20 +54,27 @@ impl SettingsState {
     }
 
     fn choose(&mut self, choice: Appearance, cx: &mut Context<Self>) {
-        if self.appearance == choice && self.pending.is_none() {
+        if self.appearance() == choice && self.pending.is_none() {
             return;
         }
         self.revision += 1;
         if self.paths.is_none() {
-            self.appearance = choice;
-            choice.apply(cx);
+            self.apply_settings(self.settings.with_appearance(choice), cx);
             self.error = Some(
                 "Settings cannot be saved: no user configuration directory is available.".into(),
             );
         } else {
-            self.pending = Some(choice);
+            self.pending = Some(SettingsChange::Appearance(choice));
             self.start_save(cx);
         }
+        cx.notify();
+    }
+
+    fn apply_settings(&mut self, updated: AppSettings, cx: &mut Context<Self>) {
+        if self.settings.appearance() != updated.appearance() {
+            updated.appearance().apply(cx);
+        }
+        self.settings = updated;
         cx.notify();
     }
 
@@ -82,14 +89,14 @@ impl SettingsState {
         else {
             return;
         };
-        self.saving = true;
-        let revision = self.revision;
-        let Some(choice) = self.pending.take() else {
+        let Some(change) = self.pending.take() else {
             return;
         };
+        self.saving = true;
+        let revision = self.revision;
         let work = cx
             .background_executor()
-            .spawn(async move { settings::save(&path, choice) });
+            .spawn(async move { settings::save(&path, change) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -98,9 +105,8 @@ impl SettingsState {
                     this.start_save(cx);
                 } else {
                     match result {
-                        Ok(()) => {
-                            this.appearance = choice;
-                            choice.apply(cx);
+                        Ok(updated) => {
+                            this.apply_settings(updated, cx);
                             this.error = None;
                         }
                         Err(error) => {
@@ -115,19 +121,16 @@ impl SettingsState {
         .detach();
     }
 
-    fn accept_file(&mut self, result: Result<Appearance, String>, cx: &mut Context<Self>) {
+    fn accept_file(&mut self, result: Result<AppSettings, String>, cx: &mut Context<Self>) {
         if self.saving || self.pending.is_some() {
             return;
         }
         match result {
-            Ok(appearance) => {
-                let changed = self.appearance != appearance || self.error.is_some();
-                if self.appearance != appearance {
-                    self.appearance = appearance;
-                    appearance.apply(cx);
+            Ok(updated) => {
+                if self.settings != updated {
+                    self.apply_settings(updated, cx);
                 }
-                self.error = None;
-                if changed {
+                if self.error.take().is_some() {
                     cx.notify();
                 }
             }
@@ -270,7 +273,7 @@ struct SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.settings.read(cx);
-        let selected = settings.appearance;
+        let selected = settings.appearance();
         let error = settings.error.clone();
         let state = self.settings.clone();
         let choice_focus = self.choice_focus.clone();
@@ -547,7 +550,10 @@ mod tests {
         )
         .unwrap();
         choose(cx, window, 2);
-        assert_eq!(settings::load(&config).unwrap(), Appearance::Dark);
+        assert_eq!(
+            settings::load(&config).unwrap().appearance(),
+            Appearance::Dark
+        );
         let content = std::fs::read_to_string(&config).unwrap();
         assert!(content.contains("# newest edit"));
         assert!(content.contains("key = 'newest'"));
@@ -652,18 +658,27 @@ mod tests {
             })
             .unwrap();
         });
-        assert_eq!(settings::load(&config).unwrap(), Appearance::System);
+        assert_eq!(
+            settings::load(&config).unwrap().appearance(),
+            Appearance::System
+        );
         choose(cx, window, 2);
         cx.update(|cx| assert_eq!(state(cx).read(cx).appearance(), Appearance::Dark));
         cx.run_until_parked();
-        assert_eq!(settings::load(&config).unwrap(), Appearance::Dark);
+        assert_eq!(
+            settings::load(&config).unwrap().appearance(),
+            Appearance::Dark
+        );
         cx.simulate_keystrokes(window, "escape");
         cx.run_until_parked();
         assert!(cx.update(|cx| cx.windows().is_empty()));
 
         // Loading the same isolated location on a second app instance is the
         // startup/restart contract; it must not depend on a real home directory.
-        assert_eq!(settings::load(&config).unwrap(), Appearance::Dark);
+        assert_eq!(
+            settings::load(&config).unwrap().appearance(),
+            Appearance::Dark
+        );
     }
 
     #[gpui_kit::test]
@@ -779,7 +794,9 @@ mod tests {
         cx.update(|cx| assert!(cx.global::<Theme>().is_dark()));
         cx.run_until_parked();
         assert_eq!(
-            settings::load(&root.path().join("config.toml")).unwrap(),
+            settings::load(&root.path().join("config.toml"))
+                .unwrap()
+                .appearance(),
             Appearance::Dark
         );
     }

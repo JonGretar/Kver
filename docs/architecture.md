@@ -71,14 +71,15 @@ and does not create anything until a choice is saved.
 window. Its sidebar organizes pages with chapter children (currently
 Appearance → Theme); the selected setting is a labeled dropdown in that
 chapter, with a reset control only when its value differs from System.
-Loading and saving TOML run on background workers; the reader chrome
-changes immediately on selection. Saves are serialized and write a temporary
-file in the config directory before replacement. The writer re-reads the
-current file and retains unrelated TOML entries and comments; malformed
-config is never overwritten by a panel choice. Unavailable paths and
-read/write errors leave the window usable and appear beside the setting.
-External edits are not watched yet; live application of edits is separate
-work in #69.
+Loading, periodic file checks, and saving TOML run off the UI thread. Valid
+external changes update the shared model, theme, and open Settings controls;
+invalid or partially written edits leave the last valid choice active and
+show an error until correction. Panel choices commit only after the writer
+re-reads a valid file, and saves are serialized through a temporary file in
+the config directory. The writer retains unrelated TOML entries and comments
+and refuses a file that changed while the replacement was prepared. A panel
+choice cannot replace malformed config. Unavailable paths and read/write
+errors leave the window usable and appear beside the setting.
 
 ### Actions, palette, and menu
 

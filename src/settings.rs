@@ -78,12 +78,51 @@ impl Appearance {
     }
 }
 
+/// Default view for a newly opened document, not a live reader command.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InitialZoom {
+    #[default]
+    ActualSize,
+    FitWidth,
+    FitPage,
+}
+
+impl InitialZoom {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ActualSize => "100%",
+            Self::FitWidth => "Fit Width",
+            Self::FitPage => "Fit Page",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::ActualSize => "100_percent",
+            Self::FitWidth => "fit_width",
+            Self::FitPage => "fit_page",
+        }
+    }
+
+    fn parse(key: &str) -> Result<Self, String> {
+        match key {
+            "100_percent" => Ok(Self::ActualSize),
+            "fit_width" => Ok(Self::FitWidth),
+            "fit_page" => Ok(Self::FitPage),
+            _ => Err(format!(
+                "Unknown initial zoom {key:?}; use 100_percent, fit_width, or fit_page"
+            )),
+        }
+    }
+}
+
 /// The complete set of preferences understood by this version of Kver.
 /// Unknown TOML entries remain in the file, but are not applied as settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     appearance: Appearance,
     quit_when_last_window_closes: bool,
+    initial_zoom: InitialZoom,
 }
 
 impl AppSettings {
@@ -105,10 +144,20 @@ impl AppSettings {
         self
     }
 
+    pub fn initial_zoom(self) -> InitialZoom {
+        self.initial_zoom
+    }
+
+    pub fn with_initial_zoom(mut self, initial_zoom: InitialZoom) -> Self {
+        self.initial_zoom = initial_zoom;
+        self
+    }
+
     fn from_document(document: &DocumentMut) -> Result<Self, String> {
         Ok(Self {
             appearance: appearance_in(document)?,
             quit_when_last_window_closes: quit_when_last_window_closes_in(document)?,
+            initial_zoom: initial_zoom_in(document)?,
         })
     }
 }
@@ -118,6 +167,7 @@ impl Default for AppSettings {
         Self {
             appearance: Appearance::default(),
             quit_when_last_window_closes: true,
+            initial_zoom: InitialZoom::default(),
         }
     }
 }
@@ -127,6 +177,7 @@ impl Default for AppSettings {
 pub enum SettingsChange {
     Appearance(Appearance),
     QuitWhenLastWindowCloses(bool),
+    InitialZoom(InitialZoom),
 }
 
 impl SettingsChange {
@@ -157,6 +208,18 @@ impl SettingsChange {
                     *existing.decor_mut() = decor;
                 } else {
                     document["windows"]["quit_when_last_window_closes"] = value(quit);
+                }
+            }
+            Self::InitialZoom(zoom) => {
+                if document.get("reader").is_none() {
+                    document["reader"] = Item::Table(Table::new());
+                }
+                if let Some(existing) = document["reader"]["initial_zoom"].as_value_mut() {
+                    let decor = existing.decor().clone();
+                    *existing = zoom.key().into();
+                    *existing.decor_mut() = decor;
+                } else {
+                    document["reader"]["initial_zoom"] = value(zoom.key());
                 }
             }
         }
@@ -216,6 +279,22 @@ fn quit_when_last_window_closes_in(document: &DocumentMut) -> Result<bool, Strin
         Some(quit) => quit.as_bool().ok_or_else(|| {
             "Settings [windows].quit_when_last_window_closes must be a boolean".to_owned()
         }),
+    }
+}
+
+fn initial_zoom_in(document: &DocumentMut) -> Result<InitialZoom, String> {
+    let Some(reader) = document.get("reader") else {
+        return Ok(InitialZoom::ActualSize);
+    };
+    let reader = reader
+        .as_table()
+        .ok_or("Settings [reader] must be a table")?;
+    match reader.get("initial_zoom") {
+        None => Ok(InitialZoom::ActualSize),
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| "Settings [reader].initial_zoom must be a string".to_owned())
+            .and_then(InitialZoom::parse),
     }
 }
 
@@ -400,6 +479,62 @@ mod tests {
             fs::write(&path, content).unwrap();
             assert!(super::load(&path).is_err());
             assert!(super::save(&path, SettingsChange::QuitWhenLastWindowCloses(false)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn initial_zoom_round_trips_without_disturbing_other_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert_eq!(
+            super::load(&path).unwrap().initial_zoom(),
+            InitialZoom::ActualSize
+        );
+        fs::write(
+            &path,
+            "# keep\n[appearance]\ntheme_mode = 'dark'\n[reader]\ninitial_zoom = 'fit_width' # keep inline\nother = 42\n",
+        )
+        .unwrap();
+        assert_eq!(
+            super::load(&path).unwrap().initial_zoom(),
+            InitialZoom::FitWidth
+        );
+        let updated =
+            super::save(&path, SettingsChange::InitialZoom(InitialZoom::FitPage)).unwrap();
+        assert_eq!(updated.initial_zoom(), InitialZoom::FitPage);
+        assert_eq!(updated.appearance(), Appearance::Dark);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# keep\n"));
+        assert!(content.contains(" # keep inline"));
+        assert!(content.contains("other = 42"));
+        assert_eq!(super::load(&path).unwrap(), updated);
+
+        fs::write(&path, "[appearance]\ntheme_mode = 'light'\n").unwrap();
+        super::save(&path, SettingsChange::InitialZoom(InitialZoom::ActualSize)).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("[reader]\ninitial_zoom = \"100_percent\"")
+        );
+        assert_eq!(super::load(&path).unwrap().appearance(), Appearance::Light);
+    }
+
+    #[test]
+    fn invalid_initial_zoom_keeps_the_file_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        for content in [
+            "[reader]\ninitial_zoom = 'other'\n",
+            "[reader]\ninitial_zoom = 10\n",
+            "reader = 'fit_width'\n",
+        ] {
+            fs::write(&path, content).unwrap();
+            assert!(super::load(&path).is_err());
+            assert!(super::save(&path, SettingsChange::Appearance(Appearance::Dark)).is_err());
+            assert!(
+                super::save(&path, SettingsChange::InitialZoom(InitialZoom::FitWidth)).is_err()
+            );
             assert_eq!(fs::read_to_string(&path).unwrap(), content);
         }
     }

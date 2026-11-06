@@ -9,6 +9,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     menu::{DropdownMenu as _, PopupMenuItem},
     notification::Notification,
+    scroll::ScrollableElement as _,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
     switch::Switch,
     theme::{Theme, ThemeMode},
@@ -20,7 +21,7 @@ use gpui_kit::{
 
 use crate::{
     reader_windows::CloseWindow,
-    settings::{self, AppPaths, AppSettings, Appearance, SettingsChange},
+    settings::{self, AppPaths, AppSettings, Appearance, InitialZoom, SettingsChange},
 };
 
 gpui::actions!(kver, [ShowSettings, CloseSettings]);
@@ -29,6 +30,7 @@ pub struct SettingsState {
     settings: AppSettings,
     paths: Option<AppPaths>,
     error: Option<String>,
+    ready: bool,
     revision: u64,
     saving: bool,
     pending: Option<SettingsChange>,
@@ -38,6 +40,7 @@ impl SettingsState {
     fn new(paths: Option<AppPaths>) -> Self {
         Self {
             settings: AppSettings::default(),
+            ready: paths.is_none(),
             paths,
             error: None,
             revision: 0,
@@ -54,39 +57,37 @@ impl SettingsState {
         self.settings.quit_when_last_window_closes()
     }
 
+    pub fn initial_zoom(&self) -> InitialZoom {
+        self.settings.initial_zoom()
+    }
+
+    pub fn ready(&self) -> bool {
+        self.ready
+    }
+
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
 
-    fn choose(&mut self, choice: Appearance, cx: &mut Context<Self>) {
-        if self.appearance() == choice && self.pending.is_none() {
+    fn choose(&mut self, change: SettingsChange, cx: &mut Context<Self>) {
+        let updated = match change {
+            SettingsChange::Appearance(choice) => self.settings.with_appearance(choice),
+            SettingsChange::InitialZoom(choice) => self.settings.with_initial_zoom(choice),
+            SettingsChange::QuitWhenLastWindowCloses(quit) => {
+                self.settings.with_quit_when_last_window_closes(quit)
+            }
+        };
+        if self.settings == updated && self.pending.is_none() {
             return;
         }
         self.revision += 1;
         if self.paths.is_none() {
-            self.apply_settings(self.settings.with_appearance(choice), cx);
+            self.apply_settings(updated, cx);
             self.error = Some(
                 "Settings cannot be saved: no user configuration directory is available.".into(),
             );
         } else {
-            self.pending = Some(SettingsChange::Appearance(choice));
-            self.start_save(cx);
-        }
-        cx.notify();
-    }
-
-    fn choose_last_close(&mut self, quit: bool, cx: &mut Context<Self>) {
-        if self.quit_when_last_window_closes() == quit && self.pending.is_none() {
-            return;
-        }
-        self.revision += 1;
-        if self.paths.is_none() {
-            self.apply_settings(self.settings.with_quit_when_last_window_closes(quit), cx);
-            self.error = Some(
-                "Settings cannot be saved: no user configuration directory is available.".into(),
-            );
-        } else {
-            self.pending = Some(SettingsChange::QuitWhenLastWindowCloses(quit));
+            self.pending = Some(change);
             self.start_save(cx);
         }
         cx.notify();
@@ -123,6 +124,7 @@ impl SettingsState {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
                 this.saving = false;
+                this.ready = true;
                 if revision != this.revision {
                     this.start_save(cx);
                 } else {
@@ -144,6 +146,11 @@ impl SettingsState {
     }
 
     fn accept_file(&mut self, result: Result<AppSettings, String>, cx: &mut Context<Self>) {
+        let became_ready = !self.ready;
+        self.ready = true;
+        if became_ready {
+            cx.notify();
+        }
         if self.saving || self.pending.is_some() {
             return;
         }
@@ -248,6 +255,7 @@ pub fn install_with_paths(cx: &mut App, paths: Option<AppPaths>) {
         .detach();
     } else {
         settings.update(cx, |settings, cx| {
+            settings.ready = true;
             settings.error = Some(
                 "Settings cannot be loaded or saved: no user configuration directory is available."
                     .into(),
@@ -259,7 +267,7 @@ pub fn install_with_paths(cx: &mut App, paths: Option<AppPaths>) {
 
 fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
     // Window bounds are platform pixels; controls and spacing use rem-based tiers.
-    let bounds = Bounds::centered(None, size(px(700.), px(360.)), cx);
+    let bounds = Bounds::centered(None, size(px(700.), px(540.)), cx);
     let (handle, _) = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -271,12 +279,14 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
             cx.new(|cx| {
                 let focus = cx.focus_handle().tab_stop(true);
                 let choice_focus = cx.focus_handle().tab_stop(true);
+                let zoom_focus = cx.focus_handle().tab_stop(true);
                 focus.focus(window, cx);
                 let settings = state(cx);
                 cx.observe(&settings, |_, _, cx| cx.notify()).detach();
                 SettingsView {
                     focus,
                     choice_focus,
+                    zoom_focus,
                     settings,
                 }
             })
@@ -289,6 +299,7 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
 struct SettingsView {
     focus: FocusHandle,
     choice_focus: FocusHandle,
+    zoom_focus: FocusHandle,
     settings: Entity<SettingsState>,
 }
 
@@ -297,10 +308,13 @@ impl Render for SettingsView {
         let settings = self.settings.read(cx);
         let selected = settings.appearance();
         let quit_on_close = settings.quit_when_last_window_closes();
+        let initial_zoom = settings.initial_zoom();
         let error = settings.error.clone();
         let state = self.settings.clone();
         let close_state = self.settings.clone();
+        let zoom_state = self.settings.clone();
         let choice_focus = self.choice_focus.clone();
+        let zoom_focus = self.zoom_focus.clone();
         let reset_state = self.settings.clone();
         let reset_focus = self.choice_focus.clone();
         div()
@@ -334,10 +348,16 @@ impl Render for SettingsView {
                                             let focus = choice_focus.clone();
                                             move |_, window, cx| window.focus(&focus, cx)
                                         })
-                                        .children([SidebarMenuItem::new("Theme").on_click({
-                                            let focus = choice_focus.clone();
-                                            move |_, window, cx| window.focus(&focus, cx)
-                                        })]),
+                                        .children([
+                                            SidebarMenuItem::new("Appearance").on_click({
+                                                let focus = choice_focus.clone();
+                                                move |_, window, cx| window.focus(&focus, cx)
+                                            }),
+                                            SidebarMenuItem::new("Initial Zoom").on_click({
+                                                let focus = zoom_focus.clone();
+                                                move |_, window, cx| window.focus(&focus, cx)
+                                            }),
+                                        ]),
                                 ),
                             ),
                     )
@@ -345,6 +365,8 @@ impl Render for SettingsView {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scrollbar()
                             .flex()
                             .flex_col()
                             .child(
@@ -400,7 +422,7 @@ impl Render for SettingsView {
                                                                 .accessibility_label("Reset appearance to System")
                                                                 .tooltip("Reset appearance to System")
                                                                 .on_click(move |_, window, cx| {
-                                                                    reset_state.update(cx, |settings, cx| settings.choose(Appearance::System, cx));
+                                                                    reset_state.update(cx, |settings, cx| settings.choose(SettingsChange::Appearance(Appearance::System), cx));
                                                                     window.focus(&reset_focus, cx);
                                                                 }),
                                                         )
@@ -429,13 +451,62 @@ impl Render for SettingsView {
                                                                             PopupMenuItem::new(choice.label())
                                                                                 .checked(choice == selected)
                                                                                 .on_click(move |_, _, cx| {
-                                                                                    state.update(cx, |settings, cx| settings.choose(choice, cx));
+                                                                                    state.update(cx, |settings, cx| settings.choose(SettingsChange::Appearance(choice), cx));
                                                                                 }),
                                                                         );
                                                                     }
                                                                     menu
                                                                 },
                                                             ),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .pt_2()
+                                            .border_t_1()
+                                            .border_color(cx.theme().border)
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap_4()
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .flex_1()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_1()
+                                                    .child(div().text_sm().font_medium().child("Initial Zoom"))
+                                                    .child(div().text_sm().text_color(cx.theme().muted_foreground).child("Set how newly opened PDFs fit the window. Open readers keep their zoom.")),
+                                            )
+                                            .child(
+                                                Button::new("initial-zoom-choice")
+                                                    .small()
+                                                    .outline()
+                                                    .label(initial_zoom.label())
+                                                    .accessibility_label(format!("Initial Zoom: {}", initial_zoom.label()))
+                                                    .dropdown_caret(true)
+                                                    .track_focus(&self.zoom_focus)
+                                                    .dropdown_menu_with_anchor(
+                                                        gpui::Anchor::TopRight,
+                                                        move |mut menu, _, _| {
+                                                            for choice in [
+                                                                InitialZoom::ActualSize,
+                                                                InitialZoom::FitWidth,
+                                                                InitialZoom::FitPage,
+                                                            ] {
+                                                                let state = zoom_state.clone();
+                                                                menu = menu.item(
+                                                                    PopupMenuItem::new(choice.label())
+                                                                        .checked(choice == initial_zoom)
+                                                                        .on_click(move |_, _, cx| {
+                                                                            state.update(cx, |settings, cx| settings.choose(SettingsChange::InitialZoom(choice), cx));
+                                                                        }),
+                                                                );
+                                                            }
+                                                            menu
+                                                        },
                                                     ),
                                             ),
                                     ),
@@ -472,7 +543,7 @@ impl Render for SettingsView {
                                             .accessibility_label("Quit When Last Window Closes")
                                             .checked(quit_on_close)
                                             .on_change(move |quit, _, cx| {
-                                                close_state.update(cx, |settings, cx| settings.choose_last_close(*quit, cx));
+                                                close_state.update(cx, |settings, cx| settings.choose(SettingsChange::QuitWhenLastWindowCloses(*quit), cx));
                                             }),
                                     ),
                             )
@@ -948,6 +1019,78 @@ mod tests {
             .unwrap();
             assert_eq!(state(cx).read(cx).appearance(), Appearance::Dark);
             assert!(cx.global::<Theme>().is_dark());
+        });
+    }
+
+    #[gpui_kit::test]
+    fn initial_zoom_control_is_keyboard_operable_and_tracks_file_edits(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "[reader]\ninitial_zoom = 'fit_width'\n").unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(
+                cx,
+                Some(AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(
+                    frame.find("initial-zoom-choice").label(),
+                    Some("Initial Zoom: Fit Width")
+                );
+                frame.within("settings-sidebar").click("0-0-1", cx);
+                assert_eq!(frame.find("initial-zoom-choice").focused(), Some(true));
+                frame.press("enter", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.press("down", cx);
+                frame.press("down", cx);
+                frame.press("down", cx);
+                frame.press("enter", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(
+                    frame.find("initial-zoom-choice").label(),
+                    Some("Initial Zoom: Fit Page")
+                );
+                assert_eq!(frame.find("initial-zoom-choice").focused(), Some(true));
+            })
+            .unwrap();
+            assert_eq!(state(cx).read(cx).initial_zoom(), InitialZoom::FitPage);
+        });
+        assert_eq!(
+            settings::load(&config).unwrap().initial_zoom(),
+            InitialZoom::FitPage
+        );
+        std::fs::write(&config, "[reader]\ninitial_zoom = '100_percent'\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(
+                    frame.find("initial-zoom-choice").label(),
+                    Some("Initial Zoom: 100%")
+                );
+            })
+            .unwrap();
         });
     }
 }

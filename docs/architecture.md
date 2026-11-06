@@ -56,6 +56,11 @@ continuous layout. Fit modes recompute from the current page and measured
 scroll viewport on navigation or resize; manual zoom returns to fixed mode.
 Scale changes invalidate obsolete bitmaps before new background renders
 complete, without waiting on the UI thread.
+The app's initial zoom preference is captured for each document open (including
+the first launch, file picker, Open Recent, and OS file-open); readers wait for
+the initial asynchronous config load before loading their first PDF. Fit Width
+and Fit Page use the same measured-viewport fitting as reader Actions. Later
+preference edits do not refit open readers or replace their manual zoom.
 
 ### Settings and platform storage
 
@@ -63,17 +68,19 @@ complete, without waiting on the UI thread.
 and resolves config and local-data directories with `directories::ProjectDirs`.
 Configuration lives at `config_dir()/config.toml`; reading history lives in
 `data_local_dir()/reading.sqlite3`. Neither location depends on a PDF path or
-the working directory. Appearance is `theme_mode` in `[appearance]` (default
-System); `quit_when_last_window_closes` in `[windows]` defaults to true. A missing
-file or table uses those defaults without writing a file until a choice is saved.
+the working directory. Appearance is `[appearance].theme_mode` (default System);
+initial zoom is `[reader].initial_zoom` (`100_percent`, `fit_width`, or `fit_page`,
+default 100%); `[windows].quit_when_last_window_closes` defaults to true.
+Missing values use those defaults without writing a file until a choice is saved.
 
 `src/settings.rs` validates the entire known `AppSettings` value before applying
 external edits or panel changes; a `SettingsChange` updates one known field in
 the latest valid TOML document. New preferences explicitly join this model
 and the panel, rather than generating controls from arbitrary TOML keys.
 `src/settings_ui.rs` owns the shared app-wide settings state and one Settings
-window. Its General page contains a labeled appearance dropdown, a reset
-control when appearance differs from System, and the last-window switch.
+window. Its General page contains labeled appearance and initial zoom dropdowns,
+an appearance reset control when its value differs from System, and the
+last-window switch.
 Loading, periodic file checks, and saving TOML run off the UI thread. Valid
 external changes update the shared model, theme, and open Settings controls;
 invalid or partially written edits leave the last valid choice active and

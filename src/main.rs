@@ -34,6 +34,7 @@ fn main() {
         gpui_kit::component::theme::Theme::sync_system_appearance(None, cx);
         bind_reader_keys(cx);
         reader_windows::install(cx);
+        kver::settings_ui::install(cx);
         #[cfg(target_os = "macos")]
         kver::app_menu::install(cx);
         cx.on_window_closed(|cx, _| {

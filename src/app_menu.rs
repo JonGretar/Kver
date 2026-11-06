@@ -7,6 +7,7 @@ use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding, Menu, MenuItem
 
 use crate::reader::{Copy, OpenPdf, ShowContents, ShowFind, ToggleSidebar};
 use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
+use crate::settings_ui::ShowSettings;
 
 gpui::actions!(kver, [AboutKver, CheckForUpdates, Quit]);
 
@@ -37,6 +38,8 @@ pub fn install(cx: &mut App) {
         Menu::new("Kver").items([
             MenuItem::action("About Kver", AboutKver),
             MenuItem::action("Check for Updates…", CheckForUpdates).disabled(!updates_available),
+            MenuItem::separator(),
+            MenuItem::action("Settings…", ShowSettings),
             MenuItem::separator(),
             MenuItem::action("Quit Kver", Quit),
         ]),

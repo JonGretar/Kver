@@ -17,5 +17,8 @@ pub mod reader;
 pub mod reader_sidebar;
 #[cfg(feature = "gui")]
 pub mod reader_windows;
+pub mod settings;
+#[cfg(feature = "gui")]
+pub mod settings_ui;
 #[cfg(all(feature = "gui", target_os = "macos"))]
 mod updater;

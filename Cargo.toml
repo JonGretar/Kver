@@ -26,6 +26,9 @@ required-features = ["screenshot"]
 # Revisit when Corgi resolves metadata using the requested features.
 gpui-kit = { version = "=0.8.1", features = ["test-support"], optional = true }
 hayro = "0.8.0"
+directories = "6"
+toml_edit = "0.22"
+tempfile = "3"
 image = { version = "0.25", default-features = false, optional = true }
 rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }

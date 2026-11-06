@@ -32,10 +32,9 @@ jobs:
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
 
-      # Cache compiled dependencies on repeat Linux builds, not Kver's own
-      # artifacts. Revisit if cache storage or save time outweighs the benefit.
-      - name: Cache Linux Rust dependencies
-        if: runner.os == 'Linux'
+      # Cache compiled dependencies, not Kver's own artifacts, on both runners.
+      # The action keys them by toolchain and OS, so macOS and Linux do not mix.
+      - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install Linux GUI and software rendering libraries

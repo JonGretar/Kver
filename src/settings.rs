@@ -78,17 +78,79 @@ impl Appearance {
     }
 }
 
-fn read_document(path: &Path) -> Result<DocumentMut, String> {
+/// The complete set of preferences understood by this version of Kver.
+/// Unknown TOML entries remain in the file, but are not applied as settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AppSettings {
+    appearance: Appearance,
+}
+
+impl AppSettings {
+    pub fn appearance(self) -> Appearance {
+        self.appearance
+    }
+
+    pub fn with_appearance(mut self, appearance: Appearance) -> Self {
+        self.appearance = appearance;
+        self
+    }
+
+    fn from_document(document: &DocumentMut) -> Result<Self, String> {
+        Ok(Self {
+            appearance: appearance_in(document)?,
+        })
+    }
+}
+
+/// An intentional edit to one known preference, not a replacement of the file.
+#[derive(Clone, Copy, Debug)]
+pub enum SettingsChange {
+    Appearance(Appearance),
+}
+
+impl SettingsChange {
+    fn apply(self, document: &mut DocumentMut) {
+        match self {
+            Self::Appearance(appearance) => {
+                if document.get("appearance").is_none() {
+                    document["appearance"] = Item::Table(Table::new());
+                }
+                if let Some(existing) = document["appearance"]["theme_mode"].as_value_mut() {
+                    // Replacing an Item loses its inline comment; keep its decor.
+                    let decor = existing.decor().clone();
+                    *existing = appearance.key().into();
+                    *existing.decor_mut() = decor;
+                } else {
+                    document["appearance"]["theme_mode"] = value(appearance.key());
+                }
+            }
+        }
+    }
+}
+
+fn read_content(path: &Path) -> Result<Option<String>, String> {
     match fs::read_to_string(path) {
-        Ok(content) => content
-            .parse()
-            .map_err(|error| format!("Cannot read settings at {}: {error}", path.display())),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(DocumentMut::new()),
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(format!(
             "Cannot read settings at {}: {error}",
             path.display()
         )),
     }
+}
+
+fn parse_document(path: &Path, content: Option<&str>) -> Result<DocumentMut, String> {
+    content
+        .map(|content| {
+            content
+                .parse()
+                .map_err(|error| format!("Cannot read settings at {}: {error}", path.display()))
+        })
+        .unwrap_or_else(|| Ok(DocumentMut::new()))
+}
+
+fn read_document(path: &Path) -> Result<DocumentMut, String> {
+    parse_document(path, read_content(path)?.as_deref())
 }
 
 fn appearance_in(document: &DocumentMut) -> Result<Appearance, String> {
@@ -107,20 +169,18 @@ fn appearance_in(document: &DocumentMut) -> Result<Appearance, String> {
     }
 }
 
-pub fn load(path: &Path) -> Result<Appearance, String> {
-    appearance_in(&read_document(path)?)
+pub fn load(path: &Path) -> Result<AppSettings, String> {
+    AppSettings::from_document(&read_document(path)?)
 }
 
 /// Re-read before writing so unrelated hand-edited TOML remains intact.
 /// Refuse invalid input rather than replacing a file the user needs to repair.
-pub fn save(path: &Path, appearance: Appearance) -> Result<(), String> {
-    let mut document = read_document(path)?;
-    // Reject invalid or incompatible shapes rather than overwriting hand edits.
-    appearance_in(&document)?;
-    if document.get("appearance").is_none() {
-        document["appearance"] = Item::Table(Table::new());
-    }
-    document["appearance"]["theme_mode"] = value(appearance.key());
+pub fn save(path: &Path, change: SettingsChange) -> Result<AppSettings, String> {
+    let original = read_content(path)?;
+    let mut document = parse_document(path, original.as_deref())?;
+    AppSettings::from_document(&document)?;
+    change.apply(&mut document);
+    let updated = AppSettings::from_document(&document)?;
     let parent = path
         .parent()
         .ok_or("Settings path has no parent directory")?;
@@ -137,6 +197,14 @@ pub fn save(path: &Path, appearance: Appearance) -> Result<(), String> {
         .write_all(document.to_string().as_bytes())
         .and_then(|()| temporary.flush())
         .map_err(|error| format!("Cannot save settings at {}: {error}", path.display()))?;
+    // An editor may replace the file while the panel is preparing its write.
+    // Never knowingly replace a newer version; the next choice can retry.
+    if read_content(path)? != original {
+        return Err(format!(
+            "Settings changed at {} while saving; try the choice again",
+            path.display()
+        ));
+    }
     temporary.persist(path).map_err(|error| {
         format!(
             "Cannot save settings at {}: {}",
@@ -144,12 +212,20 @@ pub fn save(path: &Path, appearance: Appearance) -> Result<(), String> {
             error.error
         )
     })?;
-    Ok(())
+    Ok(updated)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn save(path: &Path, appearance: Appearance) -> Result<AppSettings, String> {
+        super::save(path, SettingsChange::Appearance(appearance))
+    }
+
+    fn load(path: &Path) -> Result<Appearance, String> {
+        super::load(path).map(AppSettings::appearance)
+    }
 
     #[test]
     fn missing_file_defaults_without_creating_directories() {
@@ -165,13 +241,14 @@ mod tests {
         let path = root.path().join("config.toml");
         fs::write(
             &path,
-            "# keep this\nfuture_setting = 7\n\n[appearance]\ntheme_mode = 'system'\naccent = 'violet'\n\n[future]\nsetting = 9\n",
+            "# keep this\nfuture_setting = 7\n\n[appearance]\ntheme_mode = 'system' # keep inline\naccent = 'violet'\n\n[future]\nsetting = 9\n",
         )
         .unwrap();
         save(&path, Appearance::Dark).unwrap();
         assert_eq!(load(&path).unwrap(), Appearance::Dark);
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("# keep this"));
+        assert!(content.contains(" # keep inline"));
         assert!(content.contains("future_setting = 7"));
         assert!(content.contains("accent = 'violet'"));
         assert!(content.contains("[future]\nsetting = 9"));
@@ -219,6 +296,25 @@ mod tests {
         let directory = root.path().join("blocked");
         fs::create_dir(&directory).unwrap();
         assert!(save(&directory, Appearance::Dark).is_err());
+    }
+
+    #[test]
+    fn panel_save_reads_atomically_replaced_file_and_preserves_new_comments() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[appearance]\ntheme_mode = 'light'\n").unwrap();
+        let replacement = root.path().join("editor.tmp");
+        fs::write(
+            &replacement,
+            "# replaced by editor\n[appearance]\ntheme_mode = 'dark'\n\n[other]\nvalue = 42 # keep\n",
+        )
+        .unwrap();
+        fs::rename(replacement, &path).unwrap();
+        save(&path, Appearance::System).unwrap();
+        assert_eq!(load(&path).unwrap(), Appearance::System);
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("# replaced by editor"));
+        assert!(content.contains("value = 42 # keep"));
     }
 
     #[test]

@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Find previously opened PDFs with Open Recent from the command palette, File menu, or Command-Shift-O; search older entries and forget one PDF's saved record without deleting the PDF.
 - Open Settings from the reader, command palette, or macOS Kver menu; choose System, Light, or Dark appearance and keep that choice after restarting.
 - Close the active window with Command-W or the Window menu on macOS.
 

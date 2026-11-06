@@ -56,8 +56,8 @@ complete, without waiting on the UI thread.
 
 `src/settings.rs` owns the stable `com` / `JonGretar` / `Kver` identity
 and resolves config and local-data directories with `directories::ProjectDirs`.
-Configuration lives at `config_dir()/config.toml`; future per-document
-storage uses `data_local_dir()`. Neither location depends on a PDF path or
+Configuration lives at `config_dir()/config.toml`; reading history lives in
+`data_local_dir()/reading.sqlite3`. Neither location depends on a PDF path or
 the working directory. Appearance is the `theme_mode` value in the shallow
 `[appearance]` table. A missing config file or appearance table means System
 and does not create anything until a choice is saved.
@@ -74,6 +74,25 @@ config is never overwritten by a panel choice. Unavailable paths and
 read/write errors leave the window usable and appear beside the setting.
 External edits are not watched yet; live application of edits is separate
 work in #69.
+
+`src/recent.rs` owns local PDF identity and the SQLite schema. A successful
+page load records the canonical local path; failed and cancelled opens do not.
+The `documents` table is the parent for future per-PDF records: child tables
+must reference its path with `ON DELETE CASCADE`, so removing a document
+removes its saved reading data, not the PDF itself. The schema uses
+`user_version` migrations and refuses newer versions rather than overwriting
+them. A shared background worker processes SQLite requests in the order reader
+windows enqueue them, so forgetting a PDF cannot be undone by an earlier,
+still-pending recording; neither operation blocks reader input. Open Recent queries
+the database on every search, including records beyond the first 100 shown.
+It excludes the active reader's normalized PDF path before limiting results,
+without removing that record for other windows or future opens. It does not
+scan for missing PDFs on startup. Each recent row has a separate, accessible
+Forget button; it confirms which PDF's saved data will be removed before
+deleting the database record. The PDF file remains untouched. The recent-file
+`Command` lives inside GPUI Kit's `Dialog`, so its modal backdrop, Escape
+behavior, pointer hit testing, and focus restoration come from the window
+overlay layer rather than a second hand-built reader overlay.
 
 ### Actions, palette, and menu
 
@@ -104,7 +123,7 @@ the grouped `Toolbar` holds navigation, zoom, fit, and selection commands.
 area. Control presentation uses Kit's semantic theme colors and component
 states rather than a reader-specific palette.
 
-The palette is an inline overlay owned by the reader. This keeps the reader
+The command palette is an inline overlay owned by the reader. This keeps the reader
 in its Action dispatch path rather than relying on a global handler that
 could affect another window. Kit's `Command` owns search and selection;
 `Root` handles the overlay's focus trap through Kit's `FocusTrapElement`.
@@ -200,8 +219,8 @@ follow-ups.
 
 ## Future state
 
-The reader currently has no persistence layer. SQLite is planned for
-reading state and TOML for user-editable configuration, but neither has a
-schema or implementation yet. Platform-specific menus, dialogs, and
-packaging belong at the application boundary; the PDF and navigation
-behavior should remain portable.
+Reading history and appearance settings persist. Positions, marks, and
+per-document view overrides are separate future work; the SQLite document
+record is their shared deletion boundary. Platform-specific menus, dialogs,
+and packaging belong at the application boundary; PDF and navigation behavior
+should remain portable.

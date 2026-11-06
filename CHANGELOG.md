@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Close the active window with Command-W or the Window menu on macOS.
+
 ### Changed
 
 - Show Contents before Find in the sidebar and open Contents by default the first time the sidebar is shown.

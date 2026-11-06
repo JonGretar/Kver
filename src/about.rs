@@ -9,16 +9,15 @@ use gpui_kit::{
     Window, WindowBounds, WindowOptions, div, img, px, size,
 };
 
+use crate::reader_windows::CloseWindow;
+
 const PROJECT_URL: &str = "https://github.com/JonGretar/Kver";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 gpui::actions!(kver, [CloseAbout]);
 
 pub(crate) fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("escape", CloseAbout, Some("AboutKver")),
-        KeyBinding::new("cmd-w", CloseAbout, Some("AboutKver")),
-    ]);
+    cx.bind_keys([KeyBinding::new("escape", CloseAbout, Some("AboutKver"))]);
 }
 
 pub(crate) fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
@@ -59,6 +58,7 @@ impl Render for AboutView {
             .tab_group()
             .key_context("AboutKver")
             .on_action(|_: &CloseAbout, window, _| window.remove_window())
+            .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .child(TitleBar::new())
             .child(
                 div()

@@ -6,7 +6,7 @@ use gpui_kit as gpui;
 use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding, Menu, MenuItem};
 
 use crate::reader::{Copy, OpenPdf, ShowContents, ShowFind, ToggleSidebar};
-use crate::reader_windows::{NewWindow, NextWindow, PreviousWindow};
+use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 
 gpui::actions!(kver, [AboutKver, CheckForUpdates, Quit]);
 
@@ -49,6 +49,7 @@ pub fn install(cx: &mut App) {
             MenuItem::action("Find", ShowFind),
         ]),
         Menu::new("Window").items([
+            MenuItem::action("Close Window", CloseWindow),
             MenuItem::action("Next Window", NextWindow),
             MenuItem::action("Previous Window", PreviousWindow),
         ]),
@@ -63,12 +64,15 @@ pub fn install(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui_kit::{InputEvent as _, KeyUpEvent, Keystroke, TestAppContext};
+    use gpui_kit::{
+        InputEvent as _, KeyUpEvent, Keystroke, TestAppContext, test::TestWindowExt as _,
+    };
 
     #[gpui_kit::test]
     fn about_kver_opens_one_window_and_can_reopen_after_dismissal(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
+            crate::reader_windows::install(cx);
             install(cx);
             cx.dispatch_action(&AboutKver);
         });
@@ -115,5 +119,65 @@ mod tests {
         cx.update(|cx| cx.dispatch_action(&AboutKver));
         cx.run_until_parked();
         assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+    }
+
+    #[gpui_kit::test]
+    fn cmd_w_and_close_window_action_close_only_the_active_window(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::reader_windows::install(cx);
+            install(cx);
+        });
+        let reader = cx
+            .add_window(|window, cx| crate::reader::Preview::new(None, window.scale_factor(), cx));
+        cx.update(|cx| cx.dispatch_action(&AboutKver));
+        let about = cx.update(|cx| {
+            assert_eq!(cx.windows().len(), 2);
+            *cx.windows()
+                .iter()
+                .find(|&&handle| handle != reader.into())
+                .unwrap()
+        });
+
+        cx.update(|cx| {
+            cx.update_window(about, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            assert_eq!(cx.active_window(), Some(about));
+        });
+        cx.simulate_keystrokes(about, "cmd-w");
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| cx.windows()), vec![reader.into()]);
+
+        cx.update(|cx| {
+            cx.update_window(reader.into(), |_, window, _| window.activate_window())
+                .unwrap();
+            cx.dispatch_action(&AboutKver);
+        });
+        let about = cx.update(|cx| {
+            *cx.windows()
+                .iter()
+                .find(|&&handle| handle != reader.into())
+                .unwrap()
+        });
+        cx.update(|cx| {
+            cx.update_window(about, |_, window, cx| {
+                window.render_frame(cx);
+                window.dispatch_action(Box::new(CloseWindow), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| cx.windows()), vec![reader.into()]);
+
+        cx.update(|cx| {
+            cx.update_window(reader.into(), |_, window, cx| {
+                window.activate_window();
+                window.render_frame(cx);
+            })
+            .unwrap();
+        });
+        cx.simulate_keystrokes(reader.into(), "cmd-w");
+        cx.run_until_parked();
+        assert!(cx.update(|cx| cx.windows().is_empty()));
     }
 }

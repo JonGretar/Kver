@@ -38,7 +38,7 @@ use crate::{
     find_panel::MAX_MATCHES,
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
-    reader_windows::{self, NewWindow, NextWindow, PreviousWindow},
+    reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
 };
 
 const GAP: f32 = 16.0;
@@ -1454,6 +1454,7 @@ impl Render for Preview {
                 |reader| reader.key_context("Reader"),
             )
             .on_action(cx.listener(Self::on_open_pdf))
+            .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(cx.listener(|_, _: &NewWindow, _, cx| {
                 if let Err(error) = reader_windows::open(cx, None) {
                     eprintln!("Cannot open window: {error}");

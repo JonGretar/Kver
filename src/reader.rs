@@ -1918,11 +1918,6 @@ impl Render for Preview {
             )
             .on_action(cx.listener(Self::on_open_pdf))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
-            .on_action(cx.listener(|_, _: &NewWindow, _, cx| {
-                if let Err(error) = reader_windows::open(cx, None) {
-                    eprintln!("Cannot open window: {error}");
-                }
-            }))
             .on_action(cx.listener(|_, _: &NextWindow, window, cx| {
                 reader_windows::cycle(window, cx, 1);
             }))

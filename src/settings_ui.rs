@@ -10,6 +10,7 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenuItem},
     notification::Notification,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    switch::Switch,
     theme::{Theme, ThemeMode},
 };
 use gpui_kit::{
@@ -49,6 +50,10 @@ impl SettingsState {
         self.settings.appearance()
     }
 
+    pub fn quit_when_last_window_closes(&self) -> bool {
+        self.settings.quit_when_last_window_closes()
+    }
+
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
@@ -65,6 +70,23 @@ impl SettingsState {
             );
         } else {
             self.pending = Some(SettingsChange::Appearance(choice));
+            self.start_save(cx);
+        }
+        cx.notify();
+    }
+
+    fn choose_last_close(&mut self, quit: bool, cx: &mut Context<Self>) {
+        if self.quit_when_last_window_closes() == quit && self.pending.is_none() {
+            return;
+        }
+        self.revision += 1;
+        if self.paths.is_none() {
+            self.apply_settings(self.settings.with_quit_when_last_window_closes(quit), cx);
+            self.error = Some(
+                "Settings cannot be saved: no user configuration directory is available.".into(),
+            );
+        } else {
+            self.pending = Some(SettingsChange::QuitWhenLastWindowCloses(quit));
             self.start_save(cx);
         }
         cx.notify();
@@ -274,8 +296,10 @@ impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = self.settings.read(cx);
         let selected = settings.appearance();
+        let quit_on_close = settings.quit_when_last_window_closes();
         let error = settings.error.clone();
         let state = self.settings.clone();
+        let close_state = self.settings.clone();
         let choice_focus = self.choice_focus.clone();
         let reset_state = self.settings.clone();
         let reset_focus = self.choice_focus.clone();
@@ -302,7 +326,7 @@ impl Render for SettingsView {
                             .collapsed(false)
                             .child(
                                 SidebarMenu::new().child(
-                                    SidebarMenuItem::new("Appearance")
+                                    SidebarMenuItem::new("General")
                                         .active(true)
                                         .default_open(true)
                                         .click_to_open(true)
@@ -329,7 +353,7 @@ impl Render for SettingsView {
                                     .border_b_1()
                                     .border_color(cx.theme().border)
                                     .font_medium()
-                                    .child("Appearance"),
+                                    .child("Settings"),
                             )
                             .child(
                                 div()
@@ -416,6 +440,42 @@ impl Render for SettingsView {
                                             ),
                                     ),
                             )
+                            .child(
+                                div()
+                                    .mx_4()
+                                    .pb_2()
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Windows"),
+                            )
+                            .child(
+                                div()
+                                    .p_4()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_4()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(div().text_sm().font_medium().child("Quit When Last Window Closes"))
+                                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("When off, Kver stays open without a window on macOS. Use New Window or open a PDF to continue.")),
+                                    )
+                                    .child(
+                                        Switch::new("quit-on-last-close")
+                                            .accessibility_label("Quit When Last Window Closes")
+                                            .checked(quit_on_close)
+                                            .on_change(move |quit, _, cx| {
+                                                close_state.update(cx, |settings, cx| settings.choose_last_close(*quit, cx));
+                                            }),
+                                    ),
+                            )
                             .when_some(error, |view, message| {
                                 view.child(
                                     div()
@@ -462,6 +522,57 @@ mod tests {
         cx.background_executor
             .advance_clock(Duration::from_millis(400));
         cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn last_close_switch_persists_and_follows_live_toml(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(
+                cx,
+                Some(AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            assert!(state(cx).read(cx).quit_when_last_window_closes());
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("quit-on-last-close", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(!cx.update(|cx| state(cx).read(cx).quit_when_last_window_closes()));
+        assert!(
+            !settings::load(&config)
+                .unwrap()
+                .quit_when_last_window_closes()
+        );
+
+        std::fs::write(&config, "[windows]\nquit_when_last_window_closes = true\n").unwrap();
+        poll(cx);
+        assert!(cx.update(|cx| state(cx).read(cx).quit_when_last_window_closes()));
+
+        std::fs::write(&config, "[windows]\nquit_when_last_window_closes = 'bad'\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            assert!(state(cx).read(cx).quit_when_last_window_closes());
+            assert!(state(cx).read(cx).error().is_some());
+        });
+        std::fs::write(&config, "[windows]\nquit_when_last_window_closes = false\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            assert!(!state(cx).read(cx).quit_when_last_window_closes());
+            assert!(state(cx).read(cx).error().is_none());
+        });
     }
 
     #[gpui_kit::test]

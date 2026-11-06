@@ -16,8 +16,8 @@ depend on the PDF engine or physical keybindings.
 `src/main.rs` initializes GPUI Kit, keybindings, and the initial reader window.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
-`src/reader_windows.rs` creates empty reader windows and cycles focus between
-open windows; it does not share document or viewport state between readers.
+`src/reader_windows.rs` creates empty reader windows, cycles focus, and owns
+the last-window policy; it does not share document or viewport state between readers.
 Each window mounts its reader inside GPUI Kit's `Root`, which owns component
 overlays and applies the theme's interface scale. The window uses Kit's
 `TitleBar` options so its native controls and dragging agree with the document
@@ -63,18 +63,17 @@ complete, without waiting on the UI thread.
 and resolves config and local-data directories with `directories::ProjectDirs`.
 Configuration lives at `config_dir()/config.toml`; reading history lives in
 `data_local_dir()/reading.sqlite3`. Neither location depends on a PDF path or
-the working directory. Appearance is the `theme_mode` value in the shallow
-`[appearance]` table. A missing config file or appearance table means System
-and does not create anything until a choice is saved.
+the working directory. Appearance is `theme_mode` in `[appearance]` (default
+System); `quit_when_last_window_closes` in `[windows]` defaults to true. A missing
+file or table uses those defaults without writing a file until a choice is saved.
 
 `src/settings.rs` validates the entire known `AppSettings` value before applying
 external edits or panel changes; a `SettingsChange` updates one known field in
 the latest valid TOML document. New preferences explicitly join this model
 and the panel, rather than generating controls from arbitrary TOML keys.
 `src/settings_ui.rs` owns the shared app-wide settings state and one Settings
-window. Its sidebar organizes pages with chapter children (currently
-Appearance → Theme); the selected setting is a labeled dropdown in that
-chapter, with a reset control only when its value differs from System.
+window. Its General page contains a labeled appearance dropdown, a reset
+control when appearance differs from System, and the last-window switch.
 Loading, periodic file checks, and saving TOML run off the UI thread. Valid
 external changes update the shared model, theme, and open Settings controls;
 invalid or partially written edits leave the last valid choice active and
@@ -180,13 +179,16 @@ through its existing page/zoom/scroll model.
 
 On macOS, `src/app_menu.rs` installs native Kver, File, Edit, Window, and View menus
 at startup.
-File → Open PDF dispatches the same window-local `OpenPdf` Action; the
-application-wide `Quit` Action shuts down GPUI rather than just closing one
-reader window. File → New Window creates an independent empty reader; Window →
-Next Window and Previous Window cycle focus in either direction. These commands
-use the same reader Actions as shortcuts and the palette; only the focused
-window handles a window command. Closing a window does not quit while other
-readers remain open. macOS menu setup stays separate from reader operations.
+File → Open PDF dispatches the reader's `OpenPdf` Action when a reader exists;
+with no windows the global fallback first opens a reader. The app-wide
+`NewWindow` Action opens a reader even with no focused window, while Window →
+Next Window and Previous Window cycle focus. The app-wide `Quit` Action exits
+regardless of the last-window choice. Closing a non-last window never quits.
+On macOS, with the preference off, the app stays available via its menu and
+GPUI's Dock reopen callback; a Finder file-open request opens a reader if
+the launch window has closed. On Linux and Windows the last close always quits
+until an equivalent windowless activation path exists, preventing an inaccessible
+process. Menu setup stays separate from reader operations.
 
 ### macOS updates
 

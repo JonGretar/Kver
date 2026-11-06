@@ -80,9 +80,10 @@ impl Appearance {
 
 /// The complete set of preferences understood by this version of Kver.
 /// Unknown TOML entries remain in the file, but are not applied as settings.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     appearance: Appearance,
+    quit_when_last_window_closes: bool,
 }
 
 impl AppSettings {
@@ -95,10 +96,29 @@ impl AppSettings {
         self
     }
 
+    pub fn quit_when_last_window_closes(self) -> bool {
+        self.quit_when_last_window_closes
+    }
+
+    pub fn with_quit_when_last_window_closes(mut self, quit: bool) -> Self {
+        self.quit_when_last_window_closes = quit;
+        self
+    }
+
     fn from_document(document: &DocumentMut) -> Result<Self, String> {
         Ok(Self {
             appearance: appearance_in(document)?,
+            quit_when_last_window_closes: quit_when_last_window_closes_in(document)?,
         })
+    }
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            appearance: Appearance::default(),
+            quit_when_last_window_closes: true,
+        }
     }
 }
 
@@ -106,6 +126,7 @@ impl AppSettings {
 #[derive(Clone, Copy, Debug)]
 pub enum SettingsChange {
     Appearance(Appearance),
+    QuitWhenLastWindowCloses(bool),
 }
 
 impl SettingsChange {
@@ -122,6 +143,20 @@ impl SettingsChange {
                     *existing.decor_mut() = decor;
                 } else {
                     document["appearance"]["theme_mode"] = value(appearance.key());
+                }
+            }
+            Self::QuitWhenLastWindowCloses(quit) => {
+                if document.get("windows").is_none() {
+                    document["windows"] = Item::Table(Table::new());
+                }
+                if let Some(existing) =
+                    document["windows"]["quit_when_last_window_closes"].as_value_mut()
+                {
+                    let decor = existing.decor().clone();
+                    *existing = quit.into();
+                    *existing.decor_mut() = decor;
+                } else {
+                    document["windows"]["quit_when_last_window_closes"] = value(quit);
                 }
             }
         }
@@ -166,6 +201,21 @@ fn appearance_in(document: &DocumentMut) -> Result<Appearance, String> {
             .as_str()
             .ok_or_else(|| "Settings [appearance].theme_mode must be a string".to_owned())
             .and_then(Appearance::parse),
+    }
+}
+
+fn quit_when_last_window_closes_in(document: &DocumentMut) -> Result<bool, String> {
+    let Some(windows) = document.get("windows") else {
+        return Ok(true);
+    };
+    let windows = windows
+        .as_table()
+        .ok_or("Settings [windows] must be a table")?;
+    match windows.get("quit_when_last_window_closes") {
+        None => Ok(true),
+        Some(quit) => quit.as_bool().ok_or_else(|| {
+            "Settings [windows].quit_when_last_window_closes must be a boolean".to_owned()
+        }),
     }
 }
 
@@ -315,6 +365,43 @@ mod tests {
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("# replaced by editor"));
         assert!(content.contains("value = 42 # keep"));
+    }
+
+    #[test]
+    fn last_window_choice_defaults_on_and_preserves_other_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert!(super::load(&path).unwrap().quit_when_last_window_closes());
+        fs::write(
+            &path,
+            "# keep\n[appearance]\ntheme_mode = 'dark'\n[windows]\nquit_when_last_window_closes = true # keep inline\n[future]\nvalue = 42\n",
+        )
+        .unwrap();
+        super::save(&path, SettingsChange::QuitWhenLastWindowCloses(false)).unwrap();
+        let restarted = super::load(&path).unwrap();
+        assert!(!restarted.quit_when_last_window_closes());
+        assert_eq!(restarted.appearance(), Appearance::Dark);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# keep inline"));
+        assert!(content.contains("[future]\nvalue = 42"));
+        assert!(content.contains("quit_when_last_window_closes = false"));
+        super::save(&path, SettingsChange::Appearance(Appearance::Light)).unwrap();
+        assert!(!super::load(&path).unwrap().quit_when_last_window_closes());
+    }
+
+    #[test]
+    fn invalid_last_window_choice_does_not_overwrite_file() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        for content in [
+            "windows = false\n",
+            "[windows]\nquit_when_last_window_closes = 'no'\n",
+        ] {
+            fs::write(&path, content).unwrap();
+            assert!(super::load(&path).is_err());
+            assert!(super::save(&path, SettingsChange::QuitWhenLastWindowCloses(false)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), content);
+        }
     }
 
     #[test]

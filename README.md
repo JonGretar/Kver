@@ -79,21 +79,21 @@ artifacts across checkouts:
 ```sh
 corgi build
 corgi build --release
-corgi test --all-targets --features screenshot
+corgi test
 ```
 
 Until Corgi's feature-planning issue is fixed, Kver enables GPUI Kit's
 `test-support` dependencies for normal GUI builds so Corgi can run the visual
-tests. The `screenshot` feature still gates the visual test target; plain
-`corgi test` does not run it. This adds build dependencies to normal GUI
+capture tool when requested. The `screenshot` feature gates that opt-in target;
+plain `corgi test` and CI do not run it. This adds build dependencies to normal GUI
 builds, but the measured release binary grew by about 0.5 MiB. The first
 Corgi build populates the shared store; it does not remove existing Cargo
 `target/` directories or the user-local `sccache` cache.
 
 Corgi is macOS-only. Linux Cloud Runners and CI continue using Cargo
-(`cargo +stable test --locked --all-targets --features screenshot` for the
-full suite). Local macOS packaging uses Corgi when available and falls back
-to Cargo.
+(`cargo +stable test --locked --all-targets` in CI). For an opt-in capture,
+run `corgi test --features screenshot --test visual` on macOS. Local macOS
+packaging uses Corgi when available and falls back to Cargo.
 
 ## License
 

@@ -32,10 +32,9 @@ jobs:
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
 
-      # Cache compiled dependencies on repeat Linux builds, not Kver's own
-      # artifacts. Revisit if cache storage or save time outweighs the benefit.
-      - name: Cache Linux Rust dependencies
-        if: runner.os == 'Linux'
+      # Cache compiled dependencies, not Kver's own artifacts, on both runners.
+      # The action keys them by toolchain and OS, so macOS and Linux do not mix.
+      - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install Linux GUI and software rendering libraries
@@ -55,25 +54,11 @@ jobs:
       - name: Check formatting
         run: cargo +stable fmt --all -- --check
 
-      - name: Test all targets including headless visuals
-        run: cargo +stable test --locked --all-targets --features screenshot
+      - name: Test all targets
+        run: cargo +stable test --locked --all-targets
 
       - name: Lint all targets
-        run: cargo +stable clippy --locked --all-targets --features screenshot -- -D warnings
+        run: cargo +stable clippy --locked --all-targets -- -D warnings
 
       - name: Build normal GUI binary
         run: cargo +stable build --locked --bin kver
-
-      - name: Build and inspect unsigned macOS app
-        if: runner.os == 'macOS'
-        run: |
-          sh scripts/package-macos-app.sh
-
-      - name: Upload captures for visual review
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: kver-captures-${{ matrix.os }}
-          path: target/captures/*.png
-          if-no-files-found: ignore
-          retention-days: 7

@@ -38,32 +38,34 @@ docs or a test diary.
    checks relevant to that behavior, and demonstrate it with a real PDF where
    UI or rendering behavior matters. Local and Cloud Runner threads may have
    different machines and tools; use the checks available in each, and briefly
-   report what ran in the issue or PR. While the repository is private, PR CI
-   builds, tests, and runs the headless visual integration target on Linux only;
-   the macOS matrix entry in `.github/workflows/ci.yml` is paused to save billed
-   Actions minutes. These checks validate off-screen rendering, not a visible
-   window or pointer hit-testing. For changes to native window/input behavior,
-   confirm a real-Mac manual check before landing and record its outcome in the
+   report what ran in the issue or PR. PR CI runs Rust and GPUI Kit in-process
+   tests and builds the GUI binary on Linux and macOS. These checks do not
+   validate a visible window, screenshot pixels, or OS-native pointer behavior.
+   For changes to native window/input behavior, confirm a real-Mac manual check
+   before landing and record its outcome in the
    issue or PR; a Linux Cloud Runner cannot substitute for that check. Before
    a downloadable release, validate launch and reading behavior in a real Mac
    window. Do not require a local Mac for every routine UI PR.
-   For exploratory UI probes, temporarily add a Rust case to `tests/visual.rs`,
-   run it on the main thread with `cargo +stable test --locked --features screenshot --test visual`,
-   and inspect captures under ignored `target/`. Remove the probe code when
-   done; retain a test or committed screenshot only when intentionally chosen
-   as a stable regression gate. Preserve other work in the file when removing
-   your probe.
+   For visible UI changes, use the opt-in `tests/visual.rs` tool to capture a
+   representative state and show the image in the Delta thread when requesting
+   visual feedback or approval. A file path alone does not show the result.
+   Temporarily adapt the tool as needed, then run
+   `corgi test --features screenshot --test visual` on macOS (or
+   `cargo +stable test --locked --features screenshot --test visual` on Linux).
+   Captures go under ignored `target/`; attach the image or use a link the
+   reviewer can open, and check that it renders. If capture is unavailable,
+   say what was not visually checked. Before finishing, restore the capture
+   baseline while preserving other work. Put lasting behavioral regressions
+   in ordinary Rust or `gpui_kit::test` tests; keep capture opt-in, not a PR gate.
 4. **Review, then land.** Inspect **Review Changes** in Delta and resolve
    feedback. Implementation threads create PRs only when explicitly instructed;
    orchestrators should not ask them to create PRs by default. During an
    explicitly requested landing, the Land skill creates a PR if needed; an
    existing PR can also be used. While the repository is private, require the
-   passing Linux PR check before landing, plus the real-Mac check for native
-   window/input changes. Check any configured required status checks
-   before landing: a required paused macOS check must be updated explicitly,
-   not treated as passing or bypassed. Once the repository is public, restore
-   `macos-15` in the CI matrix and require passing macOS and Linux PR checks
-   again. An independent thread's changes reach the project through
+   passing Linux and macOS PR checks before landing, plus the real-Mac check
+   for native window/input changes. Before tagging a release, run the
+   unsigned archive verification in `scripts/package-macos-app.sh` on an Apple
+   silicon Mac. An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree
    pull into its parent. Landing on `main` requires approval for that specific
    change.
@@ -140,6 +142,6 @@ set the package version to `x.y.z`, and use a `vx.y.z` tag. The automated
 release workflow should check that these agree before attaching assets to
 the GitHub Release; creating the tag or publishing the release requires
 authorization for that release. The separate `.github/workflows/release.yml`
-runs a macOS build only for `v*` tag pushes, not for routine PRs or pushes
-to `main`. Keep that release path available during the private-repo CI
-pause; do not push a release tag to test the CI change.
+runs a macOS archive build only for `v*` tag pushes, not for routine PRs or
+pushes to `main`. Verify the archive before tagging; do not push a release
+tag to test a CI change.

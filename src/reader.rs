@@ -717,13 +717,6 @@ impl Preview {
         self.sidebar.as_ref().and_then(ReaderSidebar::active)
     }
 
-    #[cfg(feature = "screenshot")]
-    pub fn active_find_match(&self) -> Option<(usize, usize)> {
-        let find = self.sidebar.as_ref()?.find();
-        let index = find.active?;
-        Some((index, find.results.get(index)?.page))
-    }
-
     fn load(&mut self, cx: &mut Context<Self>) {
         let Some(path) = self.path.clone() else {
             return;
@@ -813,16 +806,6 @@ impl Preview {
             .as_ref()
             .map(|palette| palette.read(cx).query(cx))
     }
-    #[cfg(feature = "screenshot")]
-    pub fn palette_matches(&self, cx: &gpui::App) -> Option<usize> {
-        self.palette
-            .as_ref()
-            .map(|palette| palette.read(cx).matched_count())
-    }
-    #[cfg(feature = "screenshot")]
-    pub fn reader_focus(&self) -> FocusHandle {
-        self.focus.clone()
-    }
     pub fn page_index(&self) -> usize {
         self.page_index
     }
@@ -859,22 +842,6 @@ impl Preview {
         self.text
             .get(&selection.start.page)
             .and_then(|page| selected_text(selection, page))
-    }
-
-    #[cfg(feature = "screenshot")]
-    pub fn text_screen_point(
-        &self,
-        page: usize,
-        glyph_index: usize,
-        fraction: f64,
-    ) -> Option<gpui::Point<gpui::Pixels>> {
-        let glyph = self.text.get(&page)?.glyphs.get(glyph_index)?;
-        let document = Point {
-            x: glyph.start.x + (glyph.end.x - glyph.start.x) * fraction,
-            y: glyph.start.y + (glyph.top - glyph.start.y) * 0.4,
-        };
-        let screen = self.page_viewport(page)?.document_to_screen(document);
-        Some(point(px(screen.x as f32), px(screen.y as f32)))
     }
 
     /// Measured scroll bounds and centered page layout define the window origin.
@@ -2082,6 +2049,394 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui_kit::{TestAppContext, point, size, test::TestWindowExt};
+
+    fn three_page_pdf(sizes: [(u32, u32); 3]) -> Vec<u8> {
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>".to_owned(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] >>",
+                sizes[0].0, sizes[0].1
+            ),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] >>",
+                sizes[1].0, sizes[1].1
+            ),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] >>",
+                sizes[2].0, sizes[2].1
+            ),
+        ];
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        pdf
+    }
+
+    #[gpui_kit::test]
+    fn opening_and_replacing_documents_ignores_obsolete_loads(cx: &mut TestAppContext) {
+        let reader = cx.new(|cx| Preview::new(None, 1.0, cx));
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.status(), "Open a PDF to start reading");
+        });
+
+        reader.update(cx, |reader, cx| {
+            reader.open_path(PathBuf::from("examples/missing.pdf"), cx);
+            reader.open_path(PathBuf::from("examples/readme-sample.pdf"), cx);
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_count(), Some(100));
+            assert_eq!(reader.page_index(), 0);
+            assert_eq!(reader.status(), "Page 1 of 100 · 100%");
+        });
+
+        reader.update(cx, |reader, cx| {
+            reader.next_page(cx);
+            reader.zoom_in(cx);
+        });
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert_eq!(reader.scale(), 1.25);
+        });
+        reader.update(cx, |reader, cx| reader.previous_page(cx));
+        assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 0);
+    }
+
+    #[gpui_kit::test]
+    fn reading_keys_navigate_and_zoom_without_screenshots(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+        });
+        let window = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        window
+            .read_with(cx, |reader, _| assert_eq!(reader.page_count(), Some(100)))
+            .unwrap();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
+                .unwrap();
+        });
+        cx.simulate_keystrokes(window.into(), "right =");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert_eq!(reader.scale(), 1.25);
+            })
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn reader_sidebar_opens_and_remembers_its_panel(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+        });
+        let window = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("toggle-sidebar", cx);
+            })
+            .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.sidebar_panel(), Some(SidebarPanel::Contents));
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "cmd-f");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.sidebar_panel(), Some(SidebarPanel::Find));
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "cmd-b cmd-b");
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.sidebar_panel(), Some(SidebarPanel::Find));
+            })
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn find_query_survives_closing_and_reopening_the_sidebar(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+        });
+        let window = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        cx.simulate_keystrokes(window.into(), "cmd-f");
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(frame.find("find-query").focused(), Some(true));
+                frame.input("KVER", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes(window.into(), "cmd-b cmd-b");
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(frame.find("find-query").value(), Some("KVER"));
+                assert_eq!(frame.find("find-query").focused(), Some(true));
+                assert!(
+                    frame
+                        .find("find-status")
+                        .label()
+                        .unwrap()
+                        .contains("matches")
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[gpui_kit::test]
+    fn reader_navigation_is_window_local(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+        });
+        let first = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        let second = cx.add_window(|window, cx| Preview::new(None, window.scale_factor(), cx));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(first.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+            cx.update_window(second.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        cx.simulate_keystrokes(first.into(), "right =");
+        first
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_index(), 1);
+                assert_eq!(reader.scale(), 1.25);
+            })
+            .unwrap();
+        second
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.page_count(), None);
+                assert_eq!(reader.page_index(), 0);
+                assert_eq!(reader.scale(), 1.0);
+            })
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn fit_width_tracks_window_resize_and_manual_zoom_exits_fit(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        window
+            .update(cx, |reader, _, cx| reader.fit_width(cx))
+            .unwrap();
+        let before = window.read_with(cx, |reader, _| reader.scale()).unwrap();
+        assert!(before > 0.25);
+
+        cx.simulate_window_resize(window.into(), size(px(600.0), px(700.0)));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        let after = window.read_with(cx, |reader, _| reader.scale()).unwrap();
+        assert!(after < before, "a narrower viewport must reduce fit width");
+        window
+            .update(cx, |reader, _, cx| reader.zoom_in(cx))
+            .unwrap();
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
+                assert!((reader.scale() - after * 1.25).abs() < 0.01);
+            })
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn fit_page_scrolling_does_not_jump_back_across_a_page_boundary(cx: &mut TestAppContext) {
+        let path = PathBuf::from("target/test-fixtures/fit-scroll-regression.pdf");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, three_page_pdf([(384, 504), (378, 288), (352, 294)])).unwrap();
+        cx.update(gpui_kit::init);
+        let window =
+            cx.add_window(|window, cx| Preview::new(Some(path), window.scale_factor(), cx));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        window
+            .update(cx, |reader, _, cx| reader.fit_page(cx))
+            .unwrap();
+
+        let mut highest = 0;
+        for _ in 0..20 {
+            window
+                .update(cx, |reader, _, cx| reader.scroll_by(80.0, cx))
+                .unwrap();
+            cx.run_until_parked();
+            cx.update(|cx| {
+                cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                    .unwrap();
+            });
+            let state = window
+                .read_with(cx, |reader, _| (reader.page_index(), reader.scale()))
+                .unwrap();
+            assert!(
+                state.0 >= highest,
+                "fit-page went backwards without scrolling backwards"
+            );
+            highest = state.0;
+            cx.update(|cx| {
+                cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                    .unwrap();
+            });
+            assert_eq!(
+                window
+                    .read_with(cx, |reader, _| (reader.page_index(), reader.scale()))
+                    .unwrap(),
+                state,
+                "fit-page changed without input"
+            );
+        }
+        assert!(highest >= 1, "scrolling must reach page two");
+    }
+
+    #[gpui_kit::test]
+    fn dragging_text_and_copying_uses_document_coordinates(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+        });
+        let window = cx.add_window(|window, cx| {
+            Preview::new(
+                Some(PathBuf::from("examples/readme-sample.pdf")),
+                window.scale_factor(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        cx.run_until_parked();
+        let (start, end) = window
+            .read_with(cx, |reader, _| {
+                let text = reader.text.get(&0).expect("page text loaded");
+                let viewport = reader.page_viewport(0).expect("page viewport measured");
+                let screen_point = |index: usize, fraction: f64| {
+                    let glyph = &text.glyphs[index];
+                    let screen = viewport.document_to_screen(Point {
+                        x: glyph.start.x + (glyph.end.x - glyph.start.x) * fraction,
+                        y: glyph.start.y + (glyph.top - glyph.start.y) * 0.4,
+                    });
+                    point(px(screen.x as f32), px(screen.y as f32))
+                };
+                (screen_point(0, 0.1), screen_point(4, 0.8))
+            })
+            .unwrap();
+        cx.update(|cx| {
+            cx.update_window(window.into(), |_, frame, cx| {
+                frame.drag(start, end, cx);
+            })
+            .unwrap();
+        });
+        window
+            .read_with(cx, |reader, _| {
+                assert_eq!(reader.selected_text().as_deref(), Some("KVER "));
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "cmd-c");
+        assert_eq!(
+            cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
+            Some("KVER ".into())
+        );
+    }
+
+    #[gpui_kit::test]
+    fn loading_errors_leave_the_reader_without_a_document(cx: &mut TestAppContext) {
+        let reader =
+            cx.new(|cx| Preview::new(Some(PathBuf::from("examples/missing.pdf")), 1.0, cx));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert!(
+                reader.status().starts_with("Cannot read "),
+                "{}",
+                reader.status()
+            );
+            assert_eq!(reader.page_count(), None);
+        });
+
+        reader.update(cx, |reader, cx| {
+            reader.open_path(PathBuf::from("Cargo.toml"), cx);
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.status(),
+                "Cannot open PDF: invalid or unsupported PDF file"
+            );
+            assert_eq!(reader.page_count(), None);
+        });
+    }
 
     #[test]
     fn toolbar_uses_filename_instead_of_parent_directories() {

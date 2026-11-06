@@ -20,10 +20,6 @@ differ between releases.
   and persistence. PDF processing should not block input; document-space positions
   must survive viewport changes ([architecture](../architecture.md#boundaries),
   [coordinate systems](../architecture.md#coordinate-systems)).
-- The visual ruler is a wanted reading feature, not an MVP blocker. Its design
-  calls for line-aware movement where text geometry permits, positional
-  movement on image-only pages, and an overlay separate from page rasterization
-  ([architecture](../architecture.md#visual-ruler), [features](../features.md#visual-ruler)).
 
 ## What Sioyek actually offers
 
@@ -33,10 +29,6 @@ differ between releases.
   as `42gg` ([project README](https://github.com/ahrm/sioyek/blob/development/README.md),
   [usage](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#basic-movement),
   [configuration](https://sioyek-documentation.readthedocs.io/en/latest/configuration.html#syntax-of-keys-config-files)).
-- Its *visual mark* follows text lines with `j`/`k`, can highlight below or
-  around the line, and can move with the wheel in visual-scroll mode
-  ([usage](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#visual-mark),
-  [configuration](https://sioyek-documentation.readthedocs.io/en/latest/configuration.html#ruler-mode)).
 - Location history works across documents. Lowercase marks are document-local,
   uppercase marks global; bookmarks have descriptive names
   ([history](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#history-navigation),
@@ -65,16 +57,11 @@ differ between releases.
 ## Takeaways for Kver
 
 - Validate PDF rendering, positioned text, coordinate transforms, worker
-  behavior, and packaging before choosing the backend. The ruler can remain
-  unimplemented while its prerequisites are checked
+  behavior, and packaging before choosing the backend
   ([roadmap](../roadmap.md#0-validate-the-stack)).
 - Keep persistent locations in document space so restoration, navigation,
   and later overlays do not depend on screen dimensions
   ([architecture](../architecture.md#coordinate-systems)).
-- Sioyek's visual mark illustrates line-aware reading; Kver still needs to
-  decide how to order lines in multi-column layouts when it builds its ruler
-  ([Sioyek visual mark](https://sioyek-documentation.readthedocs.io/en/latest/usage.html#visual-mark),
-  [Kver ruler design](../architecture.md#visual-ruler)).
 
 No engine benchmark, platform prototype, or hands-on Sioyek test was performed
 for this note; those remain validation work, not established conclusions.

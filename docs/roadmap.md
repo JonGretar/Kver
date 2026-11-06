@@ -49,8 +49,7 @@ belongs to the next reader-experience gate.
 **Gate:** Pages render correctly at multiple scales; input remains responsive;
 text geometry and coordinate transforms have been tested; backend and platform
 risks are documented. A full PDFium implementation is not required if Hayro
-meets these checks. This is a technical prototype, not a release. It need not
-implement the visual ruler.
+meets these checks. This is a technical prototype, not a release.
 
 ## 1. Ship a macOS MVP
 
@@ -172,8 +171,7 @@ Keep these visible without implying a date or order:
 - Internal links; navigation history and restoration of the last reading
   position.
 - Visual ruler: keyboard movement along text lines, a positional fallback on
-  scans, and stable placement through zoom/scroll. Validate its coordinate and
-  text-geometry prerequisites in Phase 0; implement it when ready.
+  scans, and stable placement through zoom/scroll.
 - Configurable keybindings, numeric counts, multi-key commands, named marks,
   recent-file search, and drag-and-drop.
 - Password-protected PDFs if not shipped in the MVP.

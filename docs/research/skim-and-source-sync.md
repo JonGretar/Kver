@@ -17,8 +17,6 @@ and LaTeX integration
   instead mask the surrounding text
   ([reading bar](https://skim-app.sourceforge.io/manual/SkimHelp_30.html),
   [appearance](https://skim-app.sourceforge.io/manual/SkimHelp_31.html)).
-  This is a closer analogue of Kver's core
-  [visual ruler](../architecture.md#visual-ruler) than Skim's annotation tools.
 - **Snapshots:** Keep a selected page region visible for reference without
   navigating away. Skim says snapshots are *not* saved with the PDF
   ([snapshot help](https://skim-app.sourceforge.io/manual/SkimHelp_23.html)).
@@ -96,5 +94,5 @@ untrusted input rather than interpolating them into a shell command.
 Open questions for a later prototype: how to locate a sidecar when TeX outputs
 to a different build directory, how to handle stale maps after a rebuild, how
 forward requests reach a running Kver instance on each platform, and whether
-reload retains marks/ruler state when pagination changes. No hands-on Skim
+reload retains saved reading positions when pagination changes. No hands-on Skim
 evaluation or SyncTeX integration test was performed for this note.

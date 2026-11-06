@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Show Contents before Find in the sidebar and open Contents by default the first time the sidebar is shown.
+
 ## [0.3.1] - 2026-11-06
 
 ### Added

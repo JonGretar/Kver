@@ -1299,10 +1299,19 @@ fn sidebar_host() -> Result<(), Box<dyn std::error::Error>> {
         );
         window.click("toggle-sidebar", app);
     })?;
+    cx.run_until_parked();
     assert_eq!(
         cx.update(|app| first_reader.read(app).sidebar_panel()),
-        Some(SidebarPanel::Find)
+        Some(SidebarPanel::Contents)
     );
+    cx.update_window(first.into(), |_, window, app| {
+        window.render_frame(app);
+        assert!(
+            window.find_by_label("Contents").bounds().left()
+                < window.find_by_label("Find").bounds().left()
+        );
+        assert!(window.find("contents-panel").visible());
+    })?;
     click_control(&mut cx, first.into(), "toggle-sidebar")?;
     assert_eq!(
         cx.update(|app| first_reader.read(app).sidebar_panel()),

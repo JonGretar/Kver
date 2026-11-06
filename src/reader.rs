@@ -697,7 +697,7 @@ impl Preview {
             let panel = self
                 .sidebar
                 .as_ref()
-                .map_or(SidebarPanel::Find, ReaderSidebar::last);
+                .map_or(SidebarPanel::default(), ReaderSidebar::last);
             self.show_sidebar(panel, window, cx);
         }
     }

@@ -16,10 +16,11 @@ use gpui_kit::{
 use crate::pdf::{OutlineDestination, OutlineEntry};
 use crate::{contents_panel::ContentsPanel, find_panel::FindPanel};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SidebarPanel {
-    Find,
+    #[default]
     Contents,
+    Find,
 }
 
 const DEFAULT_WIDTH_REMS: f32 = 16.;
@@ -49,7 +50,7 @@ impl ReaderSidebar {
     pub fn new(window: &mut Window, cx: &mut Context<crate::reader::Preview>) -> Self {
         Self {
             active: None,
-            last: SidebarPanel::Find,
+            last: SidebarPanel::default(),
             width_rems: DEFAULT_WIDTH_REMS,
             find: FindPanel::new(window, cx),
             contents: ContentsPanel::new(cx),
@@ -206,16 +207,16 @@ impl ReaderSidebar {
                         .w_full()
                         .underline()
                         .selected_index(match active {
-                            SidebarPanel::Find => 0,
-                            SidebarPanel::Contents => 1,
+                            SidebarPanel::Contents => 0,
+                            SidebarPanel::Find => 1,
                         })
                         .last_empty_space(div().w_0())
-                        .child(Tab::new().label("Find").flex_1())
                         .child(Tab::new().label("Contents").flex_1())
+                        .child(Tab::new().label("Find").flex_1())
                         .on_click(|ix, window, cx| {
                             let action: Box<dyn gpui_kit::Action> = match ix {
-                                0 => Box::new(crate::reader::ShowFind),
-                                _ => Box::new(crate::reader::ShowContents),
+                                0 => Box::new(crate::reader::ShowContents),
+                                _ => Box::new(crate::reader::ShowFind),
                             };
                             window.dispatch_action(action, cx);
                         }),

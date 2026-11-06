@@ -35,6 +35,7 @@ fn main() {
         bind_reader_keys(cx);
         reader_windows::install(cx);
         kver::settings_ui::install(cx);
+        kver::recent::install(cx, kver::settings::AppPaths::resolve());
         #[cfg(target_os = "macos")]
         kver::app_menu::install(cx);
         cx.on_window_closed(|cx, _| {

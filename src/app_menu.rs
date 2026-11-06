@@ -6,8 +6,8 @@ use gpui_kit as gpui;
 use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding, Menu, MenuItem};
 
 use crate::reader::{
-    Continuous, Copy, NextPage, OpenPdf, PreviousPage, ShowContents, ShowFind, SinglePage,
-    ToggleSidebar,
+    Continuous, Copy, NextPage, OpenPdf, PreviousPage, ShowContents, ShowFind, ShowRecent,
+    SinglePage, ToggleSidebar,
 };
 use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 use crate::settings_ui::ShowSettings;
@@ -49,6 +49,7 @@ pub fn install(cx: &mut App) {
         Menu::new("File").items([
             MenuItem::action("New Window", NewWindow),
             MenuItem::action("Open PDF…", OpenPdf),
+            MenuItem::action("Open Recent…", ShowRecent),
         ]),
         Menu::new("Edit").items([
             MenuItem::action("Copy", Copy),

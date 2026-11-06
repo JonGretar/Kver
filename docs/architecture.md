@@ -37,13 +37,18 @@ and accepted limitations.
 
 ### Rendering and navigation
 
-The reader loads page dimensions in background work, then lays out the full
-document with spacers around visible pages. It selects one raster job at a
-time from the current viewport rather than queueing work that a scroll or
-zoom might make obsolete. Old-document, old-scale, and offscreen results are
-discarded. Only visible bitmaps are retained, within a 128 MiB budget;
-offscreen pages remain placeholders. Rasterization accounts for display
-density and passes pixels directly to GPUI without a PNG round trip.
+The reader loads page dimensions in background work. Continuous mode lays out
+the document with spacers around visible pages; Single Page mode lays out only
+the selected page and bounds the scroll region to that page. Each reader window
+owns its mode; this slice does not persist a mode or set a configurable default.
+Wheel and trackpad input never turn pages in Single Page mode; page turns are
+explicit Actions. Page-local PDF-point positions anchor mode switches, zoom,
+and jumps, clamped to the destination page's viewport. The reader selects one
+raster job at a time from the current viewport rather than queueing work that
+a scroll or zoom might make obsolete. Old-document, old-scale, and offscreen
+results are discarded. Only visible bitmaps are retained, within a 128 MiB
+budget; offscreen pages remain placeholders. Rasterization accounts for
+display density and passes pixels directly to GPUI without a PNG round trip.
 
 The reader preserves a page-local position in PDF points across zoom and
 viewport changes. Fixed zoom, fit width, and fit page use one scale for
@@ -77,9 +82,9 @@ work in #69.
 
 ### Actions, palette, and menu
 
-Open PDF, page turns, zoom, and fit modes are GPUI Actions handled by the
-active reader window. Toolbar controls, keybindings, and GPUI Kit's command
-palette dispatch those same Actions; reader methods own the underlying
+Open PDF, page turns, reading mode, zoom, and fit modes are GPUI Actions
+handled by the active reader window. Toolbar controls, keybindings, and GPUI
+Kit's command palette dispatch those same Actions; reader methods own the underlying
 navigation and loading behavior. The reader owns the file picker and ignores
 obsolete asynchronous load results, so entry points share error handling.
 The native picker uses `rfd` for its PDF extension filter because GPUI's
@@ -98,7 +103,8 @@ packaging work.
 Document-dependent Actions are unavailable in an empty, loading, or error
 window; each reader checks its own document state.
 Kit's `TitleBar` holds the truncating filename and persistent Open PDF button;
-the grouped `Toolbar` holds navigation, zoom, fit, and selection commands.
+the grouped `Toolbar` holds navigation, current reading mode, zoom, fit, and
+selection commands.
 `StatusBar` shows page position and zoom without taking space from the PDF.
 `Empty` shows the open, loading, or recoverable error state in the document
 area. Control presentation uses Kit's semantic theme colors and component

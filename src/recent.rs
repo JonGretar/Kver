@@ -1,6 +1,7 @@
-//! Local document records. This table owns a PDF's identity and is the parent
-//! for future marks, view overrides, and positions (with cascading foreign keys).
+//! Local document records. The documents table owns a PDF's identity and is the
+//! parent for marks, view overrides, and positions (with cascading foreign keys).
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -11,8 +12,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::settings::{AppPaths, ReadingView};
 
 // Version 2 holds reading modes; version 3 added positions in an independent
-// branch. Version 4 reconciles databases created by either branch alone.
-const SCHEMA_VERSION: i64 = 4;
+// branch. Version 4 reconciles databases created by either branch alone;
+// version 5 adds document-local letter marks.
+const SCHEMA_VERSION: i64 = 5;
 const RESULT_LIMIT: i64 = 100;
 
 /// Page-local distance in PDF points from the top of the displayed page.
@@ -20,6 +22,18 @@ const RESULT_LIMIT: i64 = 100;
 pub struct ReadingPosition {
     pub page: usize,
     pub y: f32,
+}
+
+/// A letter's destination and optional reader-facing label. The letter remains
+/// its identity; labels do not create independent named bookmarks.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LocalMark {
+    pub(crate) position: ReadingPosition,
+    pub(crate) label: Option<String>,
+}
+
+fn valid_mark_label(label: &str) -> bool {
+    !label.trim().is_empty() && label.chars().count() <= 80 && !label.chars().any(char::is_control)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +140,23 @@ impl RecentStore {
                      COMMIT;",
                 )
                 .map_err(|e| format!("Cannot reconcile reading data: {e}"))?;
+        }
+        if version < 5 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     CREATE TABLE IF NOT EXISTS local_marks (
+                         path TEXT NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
+                         letter TEXT NOT NULL CHECK(length(letter) = 1 AND letter BETWEEN 'a' AND 'z'),
+                         page INTEGER NOT NULL,
+                         y REAL NOT NULL,
+                         label TEXT,
+                         PRIMARY KEY(path, letter)
+                     );
+                     PRAGMA user_version = 5;
+                     COMMIT;",
+                )
+                .map_err(|e| format!("Cannot migrate local marks: {e}"))?;
         }
         Ok(connection)
     }
@@ -339,6 +370,99 @@ impl RecentStore {
             .map_err(|e| e.to_string())?;
         transaction.commit().map_err(|e| e.to_string())
     }
+
+    pub(crate) fn marks(&self, path: &Path) -> Result<BTreeMap<char, LocalMark>, String> {
+        if !self.database_exists()? {
+            return Ok(BTreeMap::new());
+        }
+        let path = path
+            .to_str()
+            .ok_or("Cannot read a non-UTF-8 document path")?;
+        let connection = self.connect()?;
+        let mut statement = connection
+            .prepare("SELECT letter, page, y, label FROM local_marks WHERE path = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([path], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, f64>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut marks = BTreeMap::new();
+        for row in rows {
+            let (letter, page, y, label) = row.map_err(|e| e.to_string())?;
+            if let (Some(letter), Ok(page)) = (letter.chars().next(), usize::try_from(page))
+                && letter.is_ascii_lowercase()
+                && y.is_finite()
+                && (0.0..=f32::MAX as f64).contains(&y)
+            {
+                marks.insert(
+                    letter,
+                    LocalMark {
+                        position: ReadingPosition { page, y: y as f32 },
+                        label,
+                    },
+                );
+            }
+        }
+        Ok(marks)
+    }
+
+    /// Replace the whole set atomically, including session-only deletions.
+    pub(crate) fn replace_marks(
+        &self,
+        path: &Path,
+        marks: &BTreeMap<char, LocalMark>,
+    ) -> Result<(), String> {
+        if marks.is_empty() && !self.database_exists()? {
+            return Ok(());
+        }
+        let path = path
+            .to_str()
+            .ok_or("Cannot store a non-UTF-8 document path")?;
+        let mut connection = self.connect()?;
+        let transaction = connection.transaction().map_err(|e| e.to_string())?;
+        if transaction
+            .query_row(
+                "SELECT 1 FROM documents WHERE path = ?1",
+                [path],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .is_none()
+        {
+            return Ok(());
+        }
+        transaction
+            .execute("DELETE FROM local_marks WHERE path = ?1", [path])
+            .map_err(|e| e.to_string())?;
+        for (&letter, mark) in marks {
+            let position = mark.position;
+            if !letter.is_ascii_lowercase()
+                || !position.y.is_finite()
+                || position.y < 0.0
+                || mark
+                    .label
+                    .as_deref()
+                    .is_some_and(|label| !valid_mark_label(label))
+            {
+                return Err("Invalid local mark".into());
+            }
+            let page = i64::try_from(position.page).map_err(|e| e.to_string())?;
+            transaction
+                .execute(
+                    "INSERT INTO local_marks(path, letter, page, y, label) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![path, letter.to_string(), page, position.y, mark.label.as_deref()],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        transaction.commit().map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(feature = "gui")]
@@ -356,6 +480,11 @@ mod shared {
 
     /// A single background consumer orders all reader-window requests by the
     /// time they are made, not by when separately spawned workers happen to run.
+    enum MarkEdit {
+        Position(Option<ReadingPosition>),
+        Label(Option<String>),
+    }
+
     enum Request {
         Record(PathBuf, u64, async_channel::Sender<Result<(), String>>),
         Search(
@@ -388,6 +517,18 @@ mod shared {
             u64,
             async_channel::Sender<Result<(), String>>,
         ),
+        Marks(
+            PathBuf,
+            u64,
+            async_channel::Sender<Result<BTreeMap<char, LocalMark>, String>>,
+        ),
+        EditMark(
+            PathBuf,
+            char,
+            MarkEdit,
+            u64,
+            async_channel::Sender<Result<BTreeMap<char, LocalMark>, String>>,
+        ),
     }
 
     #[derive(Clone)]
@@ -411,6 +552,7 @@ mod shared {
                     let mut session = Vec::<PathBuf>::new();
                     let mut positions = HashMap::<PathBuf, ReadingPosition>::new();
                     let mut modes = HashMap::<PathBuf, Option<ReadingView>>::new();
+                    let mut marks = HashMap::<PathBuf, BTreeMap<char, LocalMark>>::new();
                     while let Ok(request) = receiver.recv().await {
                         match request {
                             Request::Record(path, token, reply) => {
@@ -458,6 +600,7 @@ mod shared {
                                     session.retain(|entry| entry != &path);
                                     positions.remove(&path);
                                     modes.remove(&path);
+                                    marks.remove(&path);
                                     worker_epoch.fetch_add(1, Ordering::SeqCst);
                                 }
                                 let _ = reply.try_send(result);
@@ -468,6 +611,7 @@ mod shared {
                                     session.clear();
                                     positions.clear();
                                     modes.clear();
+                                    marks.clear();
                                     worker_epoch.fetch_add(1, Ordering::SeqCst);
                                 }
                                 let _ = reply.try_send(result);
@@ -487,6 +631,11 @@ mod shared {
                                         .and_then(|()| {
                                             modes.iter().try_for_each(|(path, mode)| {
                                                 store.set_reading_mode(path, *mode)
+                                            })
+                                        })
+                                        .and_then(|()| {
+                                            marks.iter().try_for_each(|(path, letters)| {
+                                                store.replace_marks(path, letters)
                                             })
                                         })
                                 } else {
@@ -543,6 +692,55 @@ mod shared {
                                 if result.is_ok() && token == worker_epoch.load(Ordering::SeqCst) {
                                     modes.insert(path, mode);
                                 }
+                                let _ = reply.try_send(result);
+                            }
+                            Request::Marks(path, token, reply) => {
+                                let result = if token != worker_epoch.load(Ordering::SeqCst) {
+                                    Ok(BTreeMap::new())
+                                } else if let Some(cached) = marks.get(&path) {
+                                    Ok(cached.clone())
+                                } else {
+                                    store.marks(&path)
+                                };
+                                let _ = reply.try_send(result);
+                            }
+                            Request::EditMark(path, letter, edit, token, reply) => {
+                                let result = (|| {
+                                    if token != worker_epoch.load(Ordering::SeqCst)
+                                        || !session.contains(&path)
+                                    {
+                                        return Err("This PDF's saved data was cleared; reopen it before changing marks".into());
+                                    }
+                                    if !letter.is_ascii_lowercase() {
+                                        return Err("Invalid local mark letter".into());
+                                    }
+                                    let mut updated = match marks.get(&path) {
+                                        Some(cached) => cached.clone(),
+                                        None => store.marks(&path)?,
+                                    };
+                                    match edit {
+                                        MarkEdit::Position(Some(position)) => {
+                                            let label = updated.get(&letter).and_then(|mark| mark.label.clone());
+                                            updated.insert(letter, LocalMark { position, label });
+                                        }
+                                        MarkEdit::Position(None) => {
+                                            updated.remove(&letter);
+                                        }
+                                        MarkEdit::Label(label) => {
+                                            if label.as_deref().is_some_and(|label| !valid_mark_label(label)) {
+                                                return Err("Invalid local mark name".into());
+                                            }
+                                            let mark = updated.get_mut(&letter)
+                                                .ok_or("This local mark is no longer set")?;
+                                            mark.label = label;
+                                        }
+                                    }
+                                    if recording {
+                                        store.replace_marks(&path, &updated)?;
+                                    }
+                                    marks.insert(path, updated.clone());
+                                    Ok(updated)
+                                })();
                                 let _ = reply.try_send(result);
                             }
                         }
@@ -714,6 +912,63 @@ mod shared {
             let queued = self
                 .sender
                 .try_send(Request::WriteMode(path, mode, self.epoch(), reply))
+                .map_err(|_| "Reading history worker is unavailable".to_owned());
+            async move {
+                queued?;
+                answer
+                    .recv()
+                    .await
+                    .map_err(|_| "Reading history worker stopped".to_owned())?
+            }
+        }
+
+        pub(crate) fn marks(
+            &self,
+            path: PathBuf,
+            epoch: u64,
+        ) -> impl Future<Output = Result<BTreeMap<char, LocalMark>, String>> + use<> {
+            let (reply, answer) = async_channel::bounded(1);
+            let queued = self
+                .sender
+                .try_send(Request::Marks(path, epoch, reply))
+                .map_err(|_| "Reading history worker is unavailable".to_owned());
+            async move {
+                queued?;
+                answer
+                    .recv()
+                    .await
+                    .map_err(|_| "Reading history worker stopped".to_owned())?
+            }
+        }
+
+        pub(crate) fn change_mark(
+            &self,
+            path: PathBuf,
+            letter: char,
+            position: Option<ReadingPosition>,
+        ) -> impl Future<Output = Result<BTreeMap<char, LocalMark>, String>> + use<> {
+            self.edit_mark(path, letter, MarkEdit::Position(position))
+        }
+
+        pub(crate) fn name_mark(
+            &self,
+            path: PathBuf,
+            letter: char,
+            label: Option<String>,
+        ) -> impl Future<Output = Result<BTreeMap<char, LocalMark>, String>> + use<> {
+            self.edit_mark(path, letter, MarkEdit::Label(label))
+        }
+
+        fn edit_mark(
+            &self,
+            path: PathBuf,
+            letter: char,
+            edit: MarkEdit,
+        ) -> impl Future<Output = Result<BTreeMap<char, LocalMark>, String>> + use<> {
+            let (reply, answer) = async_channel::bounded(1);
+            let queued = self
+                .sender
+                .try_send(Request::EditMark(path, letter, edit, self.epoch(), reply))
                 .map_err(|_| "Reading history worker is unavailable".to_owned());
             async move {
                 queued?;
@@ -985,6 +1240,53 @@ mod tests {
             .set_reading_mode(path, Some(ReadingView::Page))
             .unwrap();
         assert_eq!(store.reading_mode(path).unwrap(), Some(ReadingView::Page));
+    }
+
+    #[test]
+    fn version_four_adds_marks_without_losing_modes_or_positions() {
+        let (root, store) = store();
+        fs::create_dir_all(root.path().join("local")).unwrap();
+        let connection = Connection::open(&store.database).unwrap();
+        connection.execute_batch(
+            "CREATE TABLE documents (path TEXT PRIMARY KEY NOT NULL, last_opened INTEGER NOT NULL);
+             CREATE TABLE reading_modes (path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE, mode TEXT NOT NULL);
+             CREATE TABLE reading_positions (path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE, page INTEGER NOT NULL, y REAL NOT NULL);
+             INSERT INTO documents VALUES ('/book.pdf', 1);
+             INSERT INTO reading_modes VALUES ('/book.pdf', 'page');
+             INSERT INTO reading_positions VALUES ('/book.pdf', 2, 45.0);
+             PRAGMA user_version = 4;",
+        ).unwrap();
+        drop(connection);
+        let path = Path::new("/book.pdf");
+        assert_eq!(store.reading_mode(path).unwrap(), Some(ReadingView::Page));
+        assert_eq!(
+            store.position(path).unwrap(),
+            Some(ReadingPosition { page: 2, y: 45.0 })
+        );
+        let mut marks = BTreeMap::new();
+        marks.insert(
+            'a',
+            LocalMark {
+                position: ReadingPosition { page: 1, y: 55.0 },
+                label: Some("Introduction".into()),
+            },
+        );
+        store.replace_marks(path, &marks).unwrap();
+        assert_eq!(store.marks(path).unwrap(), marks);
+        marks.clear();
+        marks.insert(
+            'b',
+            LocalMark {
+                position: ReadingPosition { page: 0, y: 100.0 },
+                label: None,
+            },
+        );
+        store.replace_marks(path, &marks).unwrap();
+        assert_eq!(store.marks(path).unwrap(), marks);
+        store.remove(path).unwrap();
+        assert!(store.marks(path).unwrap().is_empty());
+        store.replace_marks(path, &marks).unwrap();
+        assert!(store.marks(path).unwrap().is_empty());
     }
 
     #[test]

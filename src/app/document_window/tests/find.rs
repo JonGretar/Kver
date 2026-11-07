@@ -166,6 +166,10 @@ fn replacing_query_and_document_discards_old_find_work(cx: &mut TestAppContext) 
         .unwrap();
     cx.update_window(window, |_, frame, cx| {
         frame.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    // Let deferred selection run before typing the replacement query.
+    cx.update_window(window, |_, frame, cx| {
         frame.input("not-a-phrase-in-this-pdf", cx);
     })
     .unwrap();
@@ -182,6 +186,9 @@ fn replacing_query_and_document_discards_old_find_work(cx: &mut TestAppContext) 
         );
         assert!(frame.try_find(("find-result", 0usize)).is_none());
         frame.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
+    })
+    .unwrap();
+    cx.update_window(window, |_, frame, cx| {
         frame.input("This is page 99 of 100", cx);
         frame.render_frame(cx);
         assert_eq!(

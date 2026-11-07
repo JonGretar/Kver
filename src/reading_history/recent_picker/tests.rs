@@ -152,9 +152,11 @@ fn replacing_search_discards_obsolete_rows(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         // Exercise replacement without assuming the platform's select-all key.
         window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
-        window.input("second", cx);
     })
     .unwrap();
+    // Action dispatch is deferred until the window update ends.
+    cx.update_window(handle, |_, window, cx| window.input("second", cx))
+        .unwrap();
     cx.run_until_parked();
     picker.read_with(cx, |picker, cx| {
         assert_eq!(picker.query(cx), "second");

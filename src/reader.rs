@@ -3554,9 +3554,20 @@ mod tests {
         cx.run_until_parked();
         cx.update(|cx| {
             cx.update_window(window, |_, frame, cx| {
+                // The test API's synthetic "cmd-a" does not model the Linux
+                // text-selection modifier. Set an empty field, then exercise
+                // the real popup Save control on both platforms.
+                reader.update(cx, |reader, cx| {
+                    let input = reader
+                        .marks_panel
+                        .as_ref()
+                        .unwrap()
+                        .name_input
+                        .as_ref()
+                        .unwrap();
+                    input.update(cx, |input, cx| input.set_value("", frame, cx));
+                });
                 frame.render_frame(cx);
-                frame.press("cmd-a", cx);
-                frame.press("backspace", cx);
                 frame.click("save-mark-name", cx);
             })
             .unwrap()

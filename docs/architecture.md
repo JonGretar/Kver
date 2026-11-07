@@ -186,9 +186,17 @@ and refuses a file that changed while the replacement was prepared. A panel
 choice cannot replace malformed config. Unavailable paths and read/write
 errors leave the window usable and appear beside the setting.
 
-`src/reading_history.rs` owns local PDF identity and the SQLite schema.
-The former `recent` module path remains a re-export of this capability.
-A successful
+`src/reading_history.rs` is the entry module for shared reading history.
+Its private `store.rs` owns local PDF identity, record types, SQLite operations,
+and schema migrations, without a GPUI dependency. Its private `worker.rs` owns
+the single serialized request consumer, session state, deletion epoch, and
+application-wide history/revision handles. Request methods enqueue immediately;
+the returned futures only await replies, so dropping a reply does not cancel an
+already submitted write. Schema and transaction tests live under
+`reading_history/store/`; request-ordering and worker-lifecycle tests live under
+`reading_history/worker/`. No panel has its own store or worker.
+The former `recent` module path and existing store/import names remain re-exports
+of this capability. A successful
 page load records the canonical local path; failed and cancelled opens do not.
 The `documents` table is the ownership boundary for per-PDF records: child tables
 must reference its path with `ON DELETE CASCADE`, so removing a document

@@ -13,10 +13,18 @@ depend on the PDF engine or physical keybindings.
 
 ## Application boundaries
 
-`src/main.rs` initializes GPUI Kit, keybindings, and the initial reader window.
+`src/main.rs` parses the command line and calls `app::run`. `src/app.rs`
+registers OS open/reopen entry points before launch, initializes GPUI Kit and
+shared state, and creates the initial reader window. Settings and history
+receive the same resolved application paths.
+`src/app/keymap.rs` installs all Kver default bindings before the native
+menus snapshot their shortcuts. It owns physical keys and context expressions;
+features still declare Actions and attach handlers to their focused regions.
+GPUI owns dispatch and pending multi-keystroke sequences. User overrides and
+keymap reloads are not implemented.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
-`src/reader_windows.rs` creates empty reader windows, cycles focus, and owns
+`src/app/windows.rs` creates empty reader windows, cycles focus, and owns
 the last-window policy; it does not share document or viewport state between readers.
 Each window mounts its reader inside GPUI Kit's `Root`, which owns component
 overlays and applies the theme's interface scale. The window uses Kit's
@@ -25,7 +33,9 @@ title. Kver follows the system's light/dark appearance for reader chrome
 unless the app-wide preference selects Light or Dark; PDF pages retain their
 document colors.
 `src/reader.rs` owns the viewport, document identity, navigation state,
-render scheduling, and window-local Actions. `src/pdf.rs` isolates Hayro:
+render scheduling, and window-local action handling. `src/reader/commands.rs`
+declares its document commands independently of physical bindings.
+`src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
 entries and destinations, and premultiplied BGRA pixels, not Hayro types, to
 the reader. The adapter currently reads and
@@ -114,7 +124,9 @@ and refuses a file that changed while the replacement was prepared. A panel
 choice cannot replace malformed config. Unavailable paths and read/write
 errors leave the window usable and appear beside the setting.
 
-`src/recent.rs` owns local PDF identity and the SQLite schema. A successful
+`src/reading_history.rs` owns local PDF identity and the SQLite schema.
+The former `recent` module path remains a re-export of this capability.
+A successful
 page load records the canonical local path; failed and cancelled opens do not.
 The `documents` table is the ownership boundary for per-PDF records: child tables
 must reference its path with `ON DELETE CASCADE`, so removing a document
@@ -166,6 +178,16 @@ panels in other windows refresh after deletion. The recent-file
 behavior, pointer hit testing, and focus restoration come from the window
 overlay layer rather than a second hand-built reader overlay.
 
+`src/reading_history/recent_picker.rs` owns the Open Recent dialog, query,
+history-revision subscription, and search task. It receives the normalized
+active path as an exclusion snapshot and emits an open request rather than
+loading PDFs. The document owner replies to the originating picker and request;
+a late completion cannot dismiss a reopened dialog. Search, open, and removal
+have independent busy state, so a search refresh cannot enable rows while an
+open is pending. Confirmed removals complete and notify other windows even if
+the originating picker closes. This retains the shared serialized history
+worker and existing schema rather than introducing a separate picker store.
+
 ### Actions, palette, and menu
 
 Open PDF, page turns, reading mode, zoom, and fit modes are GPUI Actions
@@ -196,37 +218,59 @@ selection commands.
 area. Control presentation uses Kit's semantic theme colors and component
 states rather than a reader-specific palette.
 
-The command palette is an inline overlay owned by the reader. This keeps the reader
-in its Action dispatch path rather than relying on a global handler that
-could affect another window. Kit's `Command` owns search and selection;
+`src/app/document_window/command_palette.rs` owns the command palette's
+catalogue, retained `CommandState`, focus trap, and overlay presentation.
+Its host supplies a read-only availability snapshot instead of a reader
+back-reference. It remains an inline overlay in the document's Action dispatch
+path, rather than relying on a global handler that could affect another window.
+Kit's `Command` owns search and selection;
 `Root` handles the overlay's focus trap through Kit's `FocusTrapElement`.
 The overlay has a dialog role and a rem-based maximum width so it remains
-usable in narrow windows. Dismissing it restores the active sidebar panel's
+usable in narrow windows. A dismissal Action lets the host restore focus
+without exposing itself to palette callbacks. Dismissing it restores the active sidebar panel's
 focus when one is open, otherwise reader focus. GPUI Kit
 resolves shortcut hints from active keybindings. Bare reading keys apply only
 while the reader has focus; text entry in the palette does not navigate the
 PDF.
 
-The reader owns one `ReaderSidebar` per window in `src/reader_sidebar.rs`. It
-selects one panel, reserves a bounded side of the window's reading area
+The current reader composition owns one `ReaderSidebar` entity per window,
+implemented in `src/app/document_window/sidebar.rs`. The host has no
+`Preview` back-reference: resizing, panel selection, and focus transfer use
+its own entity context. Its owner observes layout changes so PDF fit modes
+follow the resized viewport. The host selects one panel and reserves a bounded
+side of the window's reading area
 (toolbar, document, and status bar), and transfers focus on open, switch, and
 close. The toolbar's leading control, View menu, and command palette dispatch
 the same `ToggleSidebar` Action, reopening the last-selected panel. Bottom,
 equal-width `TabBar` tabs switch panels; the panel content owns the scroll
 region above them. The macOS title bar stays across the full window to
-preserve its native controls. `src/find_panel.rs` owns the Find query;
-`src/contents_panel.rs` owns Contents focus and GPUI Kit's virtualized
-outline tree. Command-T dispatches `ShowContents` from the active reader window
-even when Find has focus; Command-F returns to Find. Kver's documents remain in
+preserve its native controls. `src/reader/find.rs` owns the Find query,
+results, active selection, and batched search task in its own entity;
+`src/reader/contents.rs` owns lazy outline loading, Contents focus, and GPUI
+Kit's virtualized outline tree in a separate entity. Command-T dispatches
+`ShowContents` from the active reader window even when Find has focus;
+Command-F returns to Find. Kver's documents remain in
 independent windows, not document tabs. The tree preserves PDF hierarchy,
 supports collapse/expand with the arrow keys, and navigates when a usable row
 is clicked or confirmed. Only the chevron toggles disclosure by pointer;
 clicking the rest of a parent row navigates without folding it. Both panels
 supply content to the same host; search and outline state remain separate.
-The sidebar remains attached to the reader
-across document changes, while its outline state resets immediately and
-background extraction results carry the reader's document generation. The
-Find panel is still an interim surface, not a search result.
+The sidebar remains attached across document changes, preserving its width
+and last panel. Both panels receive document snapshots from the reader's
+single document-generation owner. Contents cancels pending extraction and
+clears its tree on replacement; it loads only when opened or when a new
+document arrives while Contents is open. Its own activation Action and pointer
+handlers emit generation-tagged destinations, and load completion transfers
+focus only if its loading placeholder still has focus. Replacing a document
+or query cancels Find's search task and invalidates
+obsolete batches and queued navigation events. Closing the sidebar preserves
+the query and results; replacing the document clears them. Find emits a
+document-space match destination for the reader to apply and exposes the
+active highlight without exposing mutable result state. The reader retains
+the subscription handles and handles viewport placement; Find has no reader
+back-reference. Search and outline lifecycle tests live beside their features;
+composed navigation, focus, and sidebar-resize workflows live under
+`src/reader/tests/`.
 
 Hayro 0.8 exposes the PDF catalog through `xref.root_id()` and `xref.get`,
 and individual page dictionaries through `page.raw()`. The PDF adapter
@@ -240,8 +284,11 @@ with children remain expandable. Outline parsing starts on a background worker
 only when Contents first opens for a document. The reader applies destinations
 through its existing page/zoom/scroll model.
 
-On macOS, `src/app_menu.rs` installs native Kver, File, Edit, Window, and View menus
-at startup.
+On macOS, `src/app/menu.rs` installs native Kver, File, Edit, Window, and View
+menus at startup. Application-wide About, update, and Quit Actions are declared
+in `src/app/commands.rs`. The former `app_menu` and `reader_windows` module
+paths, along with `reader_sidebar`, remain available as re-exports, not
+duplicate implementations.
 File → Open PDF dispatches the reader's `OpenPdf` Action when a reader exists;
 with no windows the global fallback first opens a reader. The app-wide
 `NewWindow` Action opens a reader even with no focused window, while Window →

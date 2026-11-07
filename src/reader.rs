@@ -1,5 +1,17 @@
 //! Reader geometry drives layout; only the viewport owns bitmaps.
 
+mod commands;
+mod contents;
+mod find;
+pub use crate::app::document_window::command_palette::ShowCommandPalette;
+pub use crate::app::document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar};
+pub use crate::reading_history::ShowRecent;
+pub use commands::*;
+pub use contents::ActivateOutline;
+pub(crate) use contents::ContentsPanel;
+pub(crate) use find::FindPanel;
+pub use find::{NextMatch, PreviousMatch};
+
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
@@ -11,16 +23,14 @@ use gpui_kit as gpui;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
     Animation, AnimationExt, App, BoxShadow, ClipboardItem, Context, Entity, FocusHandle,
-    KeyBinding, RenderImage, ScrollHandle, Subscription, Window, div, img, point, prelude::*, px,
-    rgb,
+    RenderImage, ScrollHandle, Subscription, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
     base::{Disableable, FocusTrapElement, TestSupportExt as _},
     component::{
-        ActiveTheme, Selectable, Sizable, TitleBar, WindowExt as _,
-        button::{Button, ButtonVariant, ButtonVariants},
+        ActiveTheme, Selectable, Sizable, TitleBar,
+        button::{Button, ButtonVariants},
         command::{Command, CommandItem, CommandState},
-        dialog::DialogEntrance,
         empty::{
             Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
             EmptyTitle,
@@ -36,12 +46,15 @@ use gpui_kit::{
 use image::{Frame, RgbaImage};
 
 use crate::{
+    app::document_window::command_palette::{
+        CommandAvailability, CommandPalette, DismissCommandPalette,
+    },
     coordinates::{PageViewport, Point},
-    find_panel::MAX_MATCHES,
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
-    reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
-    recent::{self, LocalMark, ReadingPosition, RecentFile, RecentStore},
+    reader_windows::{self, CloseWindow, NextWindow, PreviousWindow},
+    reading_history::recent_picker::{RecentPicker, RecentPickerEvent},
+    recent::{self, LocalMark, ReadingPosition, RecentStore},
     settings::{InitialZoom, ReadingView},
     settings_ui::{self, ShowSettings},
 };
@@ -50,128 +63,6 @@ const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
 const PAGE_PADDING: f32 = 16.0;
 const FIT_LABEL_MIN_REMS: f32 = 35.0;
-
-gpui::actions!(
-    kver,
-    [
-        OpenPdf,
-        ShowRecent,
-        ShowCommandPalette,
-        ShowMarks,
-        ShowSetMark,
-        ShowJumpMark,
-        ShowDeleteMark,
-        NextPage,
-        PreviousPage,
-        ZoomIn,
-        ZoomOut,
-        FitWidth,
-        FitPage,
-        SinglePage,
-        Continuous,
-        UseDefaultReadingMode,
-        Copy,
-        ShowFind,
-        NextMatch,
-        PreviousMatch,
-        ShowContents,
-        ToggleSidebar,
-        ActivateOutline
-    ]
-);
-
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = kver, no_json)]
-pub struct SetLocalMark(pub char);
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = kver, no_json)]
-pub struct JumpLocalMark(pub char);
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = kver, no_json)]
-pub struct DeleteLocalMark(pub char);
-
-// GPUI keeps incomplete key bindings pending and resolves the next keystroke
-// before dispatching one-key reader shortcuts (notably `p`, `n`, `s`, and `c`).
-const MARK_KEY_SEQUENCES: [(char, &str, &str, &str); 26] = [
-    ('a', "m a", "' a", "d m a"),
-    ('b', "m b", "' b", "d m b"),
-    ('c', "m c", "' c", "d m c"),
-    ('d', "m d", "' d", "d m d"),
-    ('e', "m e", "' e", "d m e"),
-    ('f', "m f", "' f", "d m f"),
-    ('g', "m g", "' g", "d m g"),
-    ('h', "m h", "' h", "d m h"),
-    ('i', "m i", "' i", "d m i"),
-    ('j', "m j", "' j", "d m j"),
-    ('k', "m k", "' k", "d m k"),
-    ('l', "m l", "' l", "d m l"),
-    ('m', "m m", "' m", "d m m"),
-    ('n', "m n", "' n", "d m n"),
-    ('o', "m o", "' o", "d m o"),
-    ('p', "m p", "' p", "d m p"),
-    ('q', "m q", "' q", "d m q"),
-    ('r', "m r", "' r", "d m r"),
-    ('s', "m s", "' s", "d m s"),
-    ('t', "m t", "' t", "d m t"),
-    ('u', "m u", "' u", "d m u"),
-    ('v', "m v", "' v", "d m v"),
-    ('w', "m w", "' w", "d m w"),
-    ('x', "m x", "' x", "d m x"),
-    ('y', "m y", "' y", "d m y"),
-    ('z', "m z", "' z", "d m z"),
-];
-
-/// Bind reading keys only in a focused reader, not in the palette's text input.
-/// Kit resolves the displayed shortcuts from these active Action bindings.
-pub fn bind_reader_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-o", OpenPdf, None),
-        KeyBinding::new("cmd-shift-o", ShowRecent, None),
-        KeyBinding::new("cmd-n", NewWindow, None),
-        KeyBinding::new("cmd-`", NextWindow, None),
-        KeyBinding::new("cmd-shift-`", PreviousWindow, None),
-        KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
-        KeyBinding::new("cmd-shift-m", ShowMarks, None),
-        KeyBinding::new("cmd-f", ShowFind, None),
-        KeyBinding::new("cmd-b", ToggleSidebar, None),
-        KeyBinding::new("cmd-g", NextMatch, None),
-        KeyBinding::new("cmd-shift-g", PreviousMatch, None),
-        KeyBinding::new("cmd-t", ShowContents, None),
-        KeyBinding::new("escape", ToggleSidebar, Some("ReaderSidebar")),
-        KeyBinding::new("enter", ActivateOutline, Some("ContentsPanel")),
-        KeyBinding::new("right", NextPage, Some("Reader")),
-        KeyBinding::new("n", NextPage, Some("Reader")),
-        KeyBinding::new("left", PreviousPage, Some("Reader")),
-        KeyBinding::new("p", PreviousPage, Some("Reader")),
-        KeyBinding::new("=", ZoomIn, Some("Reader")),
-        KeyBinding::new("shift-=", ZoomIn, Some("Reader")),
-        KeyBinding::new("-", ZoomOut, Some("Reader")),
-        KeyBinding::new("w", FitWidth, Some("Reader")),
-        KeyBinding::new("f", FitPage, Some("Reader")),
-        KeyBinding::new("s", SinglePage, Some("Reader")),
-        KeyBinding::new("c", Continuous, Some("Reader")),
-        // These modified bindings stay active while the palette has focus,
-        // so Kit can show real shortcuts without hijacking search text.
-        KeyBinding::new("cmd-alt-right", NextPage, None),
-        KeyBinding::new("cmd-alt-left", PreviousPage, None),
-        KeyBinding::new("cmd-alt-=", ZoomIn, None),
-        KeyBinding::new("cmd-alt--", ZoomOut, None),
-        KeyBinding::new("cmd-alt-w", FitWidth, None),
-        KeyBinding::new("cmd-alt-f", FitPage, None),
-        KeyBinding::new("cmd-c", Copy, Some("Reader")),
-    ]);
-    cx.bind_keys(
-        MARK_KEY_SEQUENCES
-            .into_iter()
-            .flat_map(|(letter, set, jump, delete)| {
-                [
-                    KeyBinding::new(set, SetLocalMark(letter), Some("Reader")),
-                    KeyBinding::new(jump, JumpLocalMark(letter), Some("Reader")),
-                    KeyBinding::new(delete, DeleteLocalMark(letter), Some("Reader")),
-                ]
-            }),
-    );
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoomMode {
@@ -410,26 +301,23 @@ pub struct Preview {
     last_viewport: (f32, f32, f32),
     scroll: ScrollHandle,
     focus: FocusHandle,
-    palette_focus: FocusHandle,
+    marks_focus: FocusHandle,
     focus_initialized: bool,
-    palette: Option<Entity<CommandState>>,
+    palette: Option<CommandPalette>,
     marks_panel: Option<MarksPanel>,
     _mark_name_subscription: Option<Subscription>,
-    recent: Option<RecentPanel>,
-    recent_revision: u64,
-    recent_open: Option<u64>,
-    sidebar: Option<ReaderSidebar>,
-    pending_find_reset: bool,
-    outline_in_flight: bool,
+    recent: Option<Entity<RecentPicker>>,
+    recent_subscription: Option<Subscription>,
+    recent_open: Option<PendingRecentOpen>,
+    sidebar: Option<Entity<ReaderSidebar>>,
+    panel_subscriptions: Vec<Subscription>,
     status: String,
 }
 
-#[derive(Clone)]
-struct RecentPanel {
-    command: Entity<CommandState>,
-    files: Vec<RecentFile>,
-    error: Option<String>,
-    loading: bool,
+struct PendingRecentOpen {
+    generation: u64,
+    picker: gpui::WeakEntity<RecentPicker>,
+    request: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -451,161 +339,10 @@ struct MarksPanel {
     error: Option<String>,
 }
 
-fn recent_content(
-    panel: &RecentPanel,
-    owner: gpui::WeakEntity<Preview>,
-    cx: &mut App,
-) -> impl IntoElement {
-    let entries = panel
-        .files
-        .iter()
-        .map(|file| {
-            let path = file.path.display().to_string();
-            let name = document_name(&file.path);
-            let file_path = file.path.clone();
-            let owner = owner.clone();
-            let loading = panel.loading;
-            CommandItem::new()
-                .label(name.clone())
-                .keywords([path.clone()])
-                .disabled(loading)
-                .child(move |_, cx| {
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(div().truncate().child(name.clone()))
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(path.clone()),
-                                ),
-                        )
-                        .child(
-                            Button::new(format!("forget-pdf:{path}"))
-                                .icon(IconName::Close)
-                                .accessibility_label(format!("Forget {}", name))
-                                .tooltip("Forget PDF")
-                                .ghost()
-                                .xsmall()
-                                .disabled(loading)
-                                .on_click({
-                                    let owner = owner.clone();
-                                    let file_path = file_path.clone();
-                                    let name = name.clone();
-                                    move |_, window, cx| {
-                                        cx.stop_propagation();
-                                        let owner = owner.clone();
-                                        let path = file_path.clone();
-                                        let name = name.clone();
-                                        window.open_alert_dialog(cx, move |alert, _, _| {
-                                            let owner = owner.clone();
-                                            let focus_owner = owner.clone();
-                                            let path = path.clone();
-                                            alert
-                                                .title(format!("Forget \"{name}\"?"))
-                                                .description("Remove this PDF from Open Recent and erase its saved reading data. The PDF file will not be deleted.")
-                                                .confirm()
-                                                .centered()
-                                                .entrance(DialogEntrance::None)
-                                                .ok_text("Forget PDF")
-                                                .ok_variant(ButtonVariant::Danger)
-                                                .on_ok(move |_, _, cx| {
-                                                    let _ = owner.update(cx, |reader, cx| {
-                                                        reader.remove_recent(path.clone(), cx);
-                                                    });
-                                                    true
-                                                })
-                                                .on_close(move |_, window, _| {
-                                                    let owner = focus_owner.clone();
-                                                    window.on_next_frame(move |window, cx| {
-                                                        let _ = owner.update(cx, |reader, cx| {
-                                                            if let Some(panel) = reader.recent.as_ref() {
-                                                                panel.command.update(cx, |state, cx| state.focus(window, cx));
-                                                            }
-                                                        });
-                                                    });
-                                                })
-                                        });
-                                    }
-                                }),
-                        )
-                })
-        })
-        .collect::<Vec<_>>();
-    let loading = panel.loading;
-    let error = panel.error.clone();
-    div()
-        .id("recent-panel")
-        .test_support()
-        .role(gpui::Role::Dialog)
-        .aria_label("Open Recent")
-        .w_full()
-        .child(
-            Command::new(&panel.command)
-                .bordered(false)
-                .placeholder("Search stored PDFs…")
-                .items(entries)
-                .empty(|_, _, cx| {
-                    div()
-                        .p_4()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No stored PDFs match this search")
-                })
-                .on_query({
-                    let owner = owner.clone();
-                    move |query, _, cx| {
-                        let _ = owner
-                            .update(cx, |reader, cx| reader.search_recent(query.to_owned(), cx));
-                    }
-                })
-                .on_confirm(move |index, _, cx| {
-                    let _ = owner.update(cx, |reader, cx| reader.open_recent(index.row, cx));
-                }),
-        )
-        .when(loading, |content| {
-            content.child(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Loading stored PDFs…"),
-            )
-        })
-        .when_some(error, |content, error| {
-            content.child(
-                div()
-                    .id("recent-error")
-                    .test_support()
-                    .role(gpui::Role::Status)
-                    .aria_label(error.clone())
-                    .px_3()
-                    .py_2()
-                    .text_color(cx.theme().danger)
-                    .child(error),
-            )
-        })
-}
-
 impl Preview {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
         if let Some(revision) = recent::revision(cx) {
             cx.observe(&revision, |reader, _, cx| {
-                if let Some(panel) = reader.recent.as_ref() {
-                    let query = panel.command.read(cx).query(cx).to_string();
-                    reader.search_recent(query, cx);
-                }
                 if reader.marks_panel.is_some() {
                     reader.refresh_marks(cx);
                 }
@@ -641,17 +378,16 @@ impl Preview {
             last_viewport: (f32::NAN, f32::NAN, f32::NAN),
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
-            palette_focus: cx.focus_handle(),
+            marks_focus: cx.focus_handle(),
             focus_initialized: false,
             palette: None,
             marks_panel: None,
             _mark_name_subscription: None,
             recent: None,
-            recent_revision: 0,
+            recent_subscription: None,
             recent_open: None,
             sidebar: None,
-            pending_find_reset: false,
-            outline_in_flight: false,
+            panel_subscriptions: Vec::new(),
             status: "Open a PDF to start reading".into(),
         };
         let settings = settings_ui::state(cx);
@@ -667,21 +403,30 @@ impl Preview {
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.generation += 1;
         self.document_generation += 1;
-        self.recent_open = None;
+        if let Some(pending) = self.recent_open.take() {
+            let _ = pending
+                .picker
+                .update(cx, |picker, cx| picker.cancel_open(pending.request, cx));
+        }
+        if let Some(picker) = &self.recent {
+            picker.update(cx, |picker, cx| picker.set_active_path(None, cx));
+        }
         self.marks_panel = None;
         self._mark_name_subscription = None;
         if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.reset_document(cx);
+            sidebar.update(cx, |sidebar, cx| {
+                sidebar.contents().update(cx, |contents, cx| {
+                    contents.set_document(self.document_generation, None, cx);
+                });
+                sidebar.find().update(cx, |find, cx| {
+                    find.set_document(self.document_generation, None, 0, cx);
+                });
+            });
         }
-        self.outline_in_flight = false;
         self.text.clear();
         self.text_failed.clear();
         self.text_in_flight = None;
         self.selection = None;
-        if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.find_mut().clear_results();
-            self.pending_find_reset = true;
-        }
         self.dragging = false;
         self.path = Some(path);
         self.record_path = None;
@@ -735,9 +480,7 @@ impl Preview {
         }
         self.marks_panel = None;
         self._mark_name_subscription = None;
-        let palette = cx.new(|cx| CommandState::new(window, cx));
-        self.palette = Some(palette.clone());
-        palette.update(cx, |palette, cx| palette.focus(window, cx));
+        self.palette = Some(CommandPalette::new(window, cx));
         cx.notify();
     }
 
@@ -991,174 +734,42 @@ impl Preview {
             return;
         }
         self.palette = None;
-        let command = cx.new(|cx| CommandState::new(window, cx));
-        self.recent = Some(RecentPanel {
-            command: command.clone(),
-            files: Vec::new(),
-            error: None,
-            loading: true,
-        });
-        self.search_recent(String::new(), cx);
-        let owner = cx.weak_entity();
-        let initial_focus = std::cell::Cell::new(true);
-        window.open_dialog(cx, move |dialog, window, cx| {
-            if initial_focus.replace(false) {
-                command.update(cx, |state, cx| state.focus(window, cx));
+        let picker = cx.new(|cx| RecentPicker::new(self.record_path.clone(), window, cx));
+        self.recent_subscription = Some(cx.subscribe(&picker, |reader, picker, event, cx| {
+            if !reader
+                .recent
+                .as_ref()
+                .is_some_and(|current| current.entity_id() == picker.entity_id())
+            {
+                return;
             }
-            let title_command = command.clone();
-            let current = owner
-                .upgrade()
-                .and_then(|reader| reader.read(cx).recent.clone());
-            let dialog_owner = owner.clone();
-            let content_owner = owner.clone();
-            dialog
-                .title(
-                    div()
-                        .id("recent-header")
-                        .test_support()
-                        .px_3()
-                        .pt_3()
-                        .pb_2()
-                        .on_click(move |_, window, cx| {
-                            title_command.update(cx, |state, cx| state.focus(window, cx));
-                        })
-                        .child("Open Recent"),
-                )
-                .close_button(false)
-                .centered()
-                .entrance(DialogEntrance::None)
-                .p_0()
-                .w(px(544.)) // Dialog's width API accepts Pixels, not rem-based lengths.
-                .on_close(move |_, _, cx| {
-                    let _ = dialog_owner.update(cx, |reader, cx| {
-                        reader.recent_revision += 1;
-                        reader.recent = None;
-                        cx.notify();
+            match event {
+                RecentPickerEvent::Open { path, request } => {
+                    reader.open_path(path.clone(), cx);
+                    reader.recent_open = Some(PendingRecentOpen {
+                        generation: reader.generation,
+                        picker: picker.downgrade(),
+                        request: *request,
                     });
-                })
-                .content(move |content, _, cx| {
-                    content.child(
-                        current
-                            .clone()
-                            .map(|panel| {
-                                recent_content(&panel, content_owner.clone(), cx).into_any_element()
-                            })
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
-        });
-        cx.notify();
-    }
-
-    fn dismiss_recent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.recent_revision += 1;
-        self.recent = None;
-        window.close_dialog(cx);
-        cx.notify();
-    }
-
-    fn search_recent(&mut self, query: String, cx: &mut Context<Self>) {
-        self.recent_revision += 1;
-        let revision = self.recent_revision;
-        let Some(panel) = self.recent.as_mut() else {
-            return;
-        };
-        panel.loading = true;
-        panel.error = None;
-        let Some(history) = recent::history(cx) else {
-            panel.error = Some("Local reading history is unavailable.".into());
-            panel.loading = false;
+                }
+                RecentPickerEvent::Closed => {
+                    reader.recent = None;
+                    reader.recent_subscription = None;
+                }
+            }
             cx.notify();
-            return;
-        };
-        let excluded = self.record_path.clone();
-        let work = history.search_excluding(query, excluded);
-        cx.spawn(async move |this, cx| {
-            let result = work.await;
-            let _ = this.update(cx, |this, cx| {
-                if this.recent_revision != revision {
-                    return;
-                }
-                if let Some(panel) = this.recent.as_mut() {
-                    panel.loading = false;
-                    match result {
-                        Ok(files) => panel.files = files,
-                        Err(error) => {
-                            panel.files.clear();
-                            panel.error = Some(format!(
-                                "{error}. Check the local data directory and try again."
-                            ));
-                        }
-                    }
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn open_recent(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(path) = self
-            .recent
-            .as_ref()
-            .and_then(|panel| panel.files.get(index))
-            .map(|file| file.path.clone())
-        else {
-            return;
-        };
-        self.open_path(path.clone(), cx);
-        self.recent_open = Some(self.generation);
-        if let Some(panel) = self.recent.as_mut() {
-            panel.error = None;
-            panel.loading = true;
-        }
+        }));
+        self.recent = Some(picker.clone());
+        picker.update(cx, |picker, cx| picker.show(window, cx));
         cx.notify();
-    }
-
-    fn remove_recent(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        if self
-            .recent
-            .as_ref()
-            .is_none_or(|panel| panel.loading || !panel.files.iter().any(|file| file.path == path))
-        {
-            return;
-        }
-        let Some(history) = recent::history(cx) else {
-            return;
-        };
-        if let Some(panel) = self.recent.as_mut() {
-            panel.loading = true;
-        }
-        cx.notify();
-        let work = history.remove(path.clone());
-        cx.spawn(async move |this, cx| {
-            let result = work.await;
-            let _ = this.update(cx, |this, cx| {
-                if let Some(panel) = this.recent.as_mut() {
-                    panel.loading = false;
-                    match result {
-                        Ok(_) => {
-                            panel.files.retain(|file| file.path != path);
-                            panel.error = None;
-                            recent::notify_changed(cx);
-                        }
-                        Err(error) => {
-                            panel.error = Some(format!("Cannot remove saved data: {error}"))
-                        }
-                    }
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
     }
 
     fn dismiss_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.palette = None;
         if let Some(sidebar) = self.sidebar.as_mut()
-            && let Some(panel) = sidebar.active()
+            && let Some(panel) = sidebar.read(cx).active()
         {
-            sidebar.open(panel, window, cx);
+            sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
         } else {
             window.focus(&self.focus, cx);
         }
@@ -1166,110 +777,48 @@ impl Preview {
     }
 
     fn show_sidebar(&mut self, panel: SidebarPanel, window: &mut Window, cx: &mut Context<Self>) {
-        let sidebar = self
-            .sidebar
-            .get_or_insert_with(|| ReaderSidebar::new(window, cx));
-        sidebar.open(panel, window, cx);
-        if panel == SidebarPanel::Contents && !self.outline_in_flight && !sidebar.has_outline() {
-            self.load_outline(cx);
-        }
-    }
-
-    pub(crate) fn find_query_changed(&mut self, query: String, cx: &mut Context<Self>) {
-        let Some(sidebar) = self.sidebar.as_mut() else {
-            return;
-        };
-        sidebar.find_mut().clear_results();
-        if !query.trim().is_empty() && !self.pages.is_empty() {
-            sidebar.find_mut().searching = true;
-            self.search_next_batch(query, cx);
-        }
-        cx.notify();
-    }
-
-    fn search_next_batch(&mut self, query: String, cx: &mut Context<Self>) {
-        let Some(find) = self.sidebar.as_ref().map(ReaderSidebar::find) else {
-            return;
-        };
-        if !find.searching || find.scanned >= self.pages.len() || find.results.len() >= MAX_MATCHES
-        {
-            return;
-        }
-        let start = find.scanned;
-        let end = (start + 4).min(self.pages.len());
-        let revision = find.revision;
-        let document = self.document_generation;
-        let Some(path) = self.path.clone() else {
-            return;
-        };
-        let worker_query = query.clone();
-        let work = cx.background_executor().spawn(async move {
-            pdf::page_text_batch(&path, start..end)
-                .into_iter()
-                .enumerate()
-                .map(|(offset, page)| match page {
-                    Ok(text) => {
-                        let mapped = !text.glyphs.is_empty();
-                        (
-                            mapped,
-                            find_search::matches_on_page(&text, start + offset, &worker_query),
-                            false,
-                        )
-                    }
-                    Err(_) => (false, Vec::new(), true),
-                })
-                .collect::<Vec<_>>()
-        });
-        cx.spawn(async move |this, cx| {
-            let batch = work.await;
-            let _ = this.update(cx, |this, cx| {
-                if this.document_generation != document {
-                    return;
-                }
-                let Some(find) = this.sidebar.as_mut().map(ReaderSidebar::find_mut) else {
-                    return;
-                };
-                if find.revision != revision {
-                    return;
-                }
-                for (mapped, hits, failed) in batch {
-                    find.scanned += 1;
-                    find.mapped_pages += usize::from(mapped);
-                    find.failed_pages += usize::from(failed);
-                    let remaining = MAX_MATCHES.saturating_sub(find.results.len());
-                    if hits.len() > remaining {
-                        find.truncated = true;
-                    }
-                    find.results.extend(hits.into_iter().take(remaining));
-                }
-                let activate_first = find.pending_next && !find.results.is_empty();
-                if activate_first {
-                    find.pending_next = false;
-                }
-                if find.scanned >= this.pages.len() || find.results.len() >= MAX_MATCHES {
-                    find.searching = false;
-                    find.truncated |= find.scanned < this.pages.len();
-                } else {
-                    this.search_next_batch(query, cx);
-                }
-                if activate_first {
-                    this.select_match(0, cx);
-                }
-                cx.notify();
+        if self.sidebar.is_none() {
+            let sidebar = cx.new(|cx| ReaderSidebar::new(window, cx));
+            let contents = sidebar.read(cx).contents().clone();
+            let find = sidebar.read(cx).find().clone();
+            contents.update(cx, |contents, cx| {
+                contents.set_document(self.document_generation, self.path.clone(), cx);
             });
-        })
-        .detach();
+            find.update(cx, |find, cx| {
+                find.set_document(
+                    self.document_generation,
+                    self.path.clone(),
+                    self.pages.len(),
+                    cx,
+                );
+            });
+            self.panel_subscriptions = vec![
+                // Sidebar layout changes also change the PDF viewport.
+                cx.observe(&sidebar, |_, _, cx| cx.notify()),
+                cx.observe(&find, |_, _, cx| cx.notify()),
+                cx.subscribe(&find, |reader, find, navigation, cx| {
+                    if navigation.document_generation() == reader.document_generation
+                        && find.read(cx).is_current(navigation)
+                    {
+                        reader.navigate_find(navigation.hit(), cx);
+                    }
+                }),
+                cx.subscribe(&contents, |reader, _, navigation, cx| {
+                    if navigation.generation() == reader.document_generation {
+                        reader.navigate_outline(navigation.destination(), cx);
+                    }
+                }),
+            ];
+            self.sidebar = Some(sidebar);
+        }
+        let sidebar = self.sidebar.as_mut().expect("sidebar initialized above");
+        sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
     }
 
-    pub(crate) fn select_match(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(hit) = self
-            .sidebar
-            .as_ref()
-            .and_then(|sidebar| sidebar.find().results.get(index))
-            .cloned()
-        else {
+    fn navigate_find(&mut self, hit: &find_search::FindMatch, cx: &mut Context<Self>) {
+        if hit.page >= self.pages.len() {
             return;
-        };
+        }
         self.position_touched = true;
         let (_, width, height) = self.viewport();
         self.focus_page(hit.page);
@@ -1282,89 +831,46 @@ impl Preview {
             (width, height),
             0.,
         );
-        let y = find_search::page_rect(&hit, self.pages[hit.page]).1;
+        let y = find_search::page_rect(hit, self.pages[hit.page]).1;
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
             self.page_top(hit.page) + y * self.scale - height * 0.25,
         );
-        if let Some(sidebar) = self.sidebar.as_mut() {
-            let find = sidebar.find_mut();
-            find.active = Some(index);
-            find.pulse = find.pulse.wrapping_add(1);
-        }
         self.sync_viewport(cx);
         cx.notify();
     }
 
     fn step_match(&mut self, direction: i32, cx: &mut Context<Self>) {
-        let Some(find) = self.sidebar.as_ref().map(ReaderSidebar::find) else {
-            return;
-        };
-        if find.results.is_empty() {
-            // Enter before the first batch completes should still select the
-            // first result as soon as it is discovered.
-            if direction > 0
-                && find.searching
-                && let Some(sidebar) = self.sidebar.as_mut()
-            {
-                sidebar.find_mut().pending_next = true;
-            }
-            return;
+        if let Some(sidebar) = self.sidebar.as_ref() {
+            let find = sidebar.read(cx).find().clone();
+            find.update(cx, |find, cx| find.step_match(direction, cx));
         }
-        let next = match (find.active, direction) {
-            (Some(0), -1) | (None, -1) => find.results.len() - 1,
-            (Some(index), -1) => index - 1,
-            (Some(index), _) => (index + 1) % find.results.len(),
-            (None, _) => 0,
-        };
-        self.select_match(next, cx);
-    }
-
-    pub(crate) fn next_find_match(&mut self, cx: &mut Context<Self>) {
-        self.step_match(1, cx);
     }
 
     fn close_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(sidebar) = self.sidebar.as_mut()
-            && sidebar.active().is_some()
+            && sidebar.read(cx).active().is_some()
         {
-            sidebar.close(window, &self.focus, cx);
-        }
-    }
-
-    pub(crate) fn resize_sidebar(
-        &mut self,
-        position: f32,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.resize(position, window);
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn reset_sidebar_width(&mut self, cx: &mut Context<Self>) {
-        if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.reset_width();
-            cx.notify();
+            sidebar.update(cx, |sidebar, cx| sidebar.close(window, &self.focus, cx));
         }
     }
 
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sidebar_panel().is_some() {
+        if self.sidebar_panel(cx).is_some() {
             self.close_sidebar(window, cx);
         } else if !self.pages.is_empty() {
             let panel = self
                 .sidebar
                 .as_ref()
-                .map_or(SidebarPanel::default(), ReaderSidebar::last);
+                .map_or(SidebarPanel::default(), |sidebar| sidebar.read(cx).last());
             self.show_sidebar(panel, window, cx);
         }
     }
 
-    pub fn sidebar_panel(&self) -> Option<SidebarPanel> {
-        self.sidebar.as_ref().and_then(ReaderSidebar::active)
+    pub fn sidebar_panel(&self, cx: &App) -> Option<SidebarPanel> {
+        self.sidebar
+            .as_ref()
+            .and_then(|sidebar| sidebar.read(cx).active())
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
@@ -1423,13 +929,14 @@ impl Preview {
             } else {
                 Ok(None)
             };
-            let dismiss = this.update(cx, |this, cx| {
+            let completion = this.update(cx, |this, cx| {
                 if generation != this.generation {
-                    return false;
+                    return None;
                 }
-                let mut dismiss = false;
+                let mut opened = false;
                 match result {
                     Ok(pages) if !pages.is_empty() => {
+                        opened = true;
                         if let Ok(Some(mode)) = saved_mode {
                             this.reading_mode = match mode {
                                 ReadingView::Continuous => ReadingMode::Continuous,
@@ -1444,6 +951,9 @@ impl Preview {
                         match normalized {
                             Some(Ok(path)) => {
                                 this.record_path = Some(path.clone());
+                                if let Some(picker) = &this.recent {
+                                    picker.update(cx, |picker, cx| picker.set_active_path(Some(path.clone()), cx));
+                                }
                                 if let Some(history) = history {
                                     let record = history.record_at(path.clone(), history_epoch.unwrap_or(0));
                                     let position = history.position(path, history_epoch.unwrap_or(0));
@@ -1480,26 +990,20 @@ impl Preview {
                         if this.record_path.is_none() {
                             this.finish_position_load(None, cx);
                         }
-                        if this.recent_open == Some(generation) {
-                            this.recent_open = None;
-                            dismiss = true;
-                        }
                     }
                     Ok(_) => this.status = "PDF has no pages".into(),
                     Err(error) => this.status = error,
                 }
-                if let Some(opened) = this.recent_open.take()
-                    && opened == generation
-                    && let Some(panel) = this.recent.as_mut()
-                {
-                    panel.error = Some(format!("Could not open this PDF: {}. Use the X on its row to forget its record without deleting the PDF.", this.status));
-                    panel.loading = false;
-                }
+                let completion = this.recent_open.take()
+                    .filter(|pending| pending.generation == generation)
+                    .map(|pending| (pending, if opened { Ok(()) } else { Err(this.status.clone()) }));
                 cx.notify();
-                dismiss
+                completion
             });
-            if matches!(dismiss, Ok(true)) {
-                let _ = this.update_in(cx, |this, window, cx| this.dismiss_recent(window, cx));
+            if let Ok(Some((pending, result))) = completion {
+                let _ = pending.picker.update_in(cx, |picker, window, cx| {
+                    picker.finish_open(pending.request, result, window, cx);
+                });
             }
         })
         .detach();
@@ -1509,8 +1013,23 @@ impl Preview {
         self.pages = pages;
         self.selected_page = Some(0);
         self.status = self.ready_status();
-        if self.sidebar_panel() == Some(SidebarPanel::Contents) {
-            self.load_outline(cx);
+        if let Some(sidebar) = self.sidebar.as_ref() {
+            sidebar.update(cx, |sidebar, cx| {
+                sidebar.contents().update(cx, |contents, cx| {
+                    contents.set_document(self.document_generation, self.path.clone(), cx);
+                    if sidebar.active() == Some(SidebarPanel::Contents) {
+                        contents.ensure_loaded(cx);
+                    }
+                });
+                sidebar.find().update(cx, |find, cx| {
+                    find.set_document(
+                        self.document_generation,
+                        self.path.clone(),
+                        self.pages.len(),
+                        cx,
+                    );
+                });
+            });
         }
         self.sync_viewport(cx);
     }
@@ -1549,38 +1068,6 @@ impl Preview {
         );
     }
 
-    fn load_outline(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.path.clone() else {
-            return;
-        };
-        self.outline_in_flight = true;
-        let generation = self.document_generation;
-        let work = cx
-            .background_executor()
-            .spawn(async move { pdf::document_outline(&path) });
-        cx.spawn(async move |this, cx| {
-            let result = work.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                if generation != this.document_generation {
-                    return;
-                }
-                this.outline_in_flight = false;
-                if let Some(sidebar) = this.sidebar.as_mut() {
-                    sidebar.install_outline(result, cx);
-                    // Tree's focus handle is tracked by the newly rendered tree.
-                    // Transfer focus after that render, not before it exists.
-                    cx.on_next_frame(window, |this, window, cx| {
-                        if let Some(sidebar) = &this.sidebar {
-                            sidebar.focus_loaded_outline(window, cx);
-                        }
-                    });
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     fn ready_status(&self) -> String {
         format!(
             "Page {} of {} · {}%",
@@ -1597,9 +1084,7 @@ impl Preview {
         self.palette.is_some()
     }
     pub fn palette_query(&self, cx: &gpui::App) -> Option<gpui::SharedString> {
-        self.palette
-            .as_ref()
-            .map(|palette| palette.read(cx).query(cx))
+        self.palette.as_ref().map(|palette| palette.query(cx))
     }
     pub fn page_index(&self) -> usize {
         self.page_index
@@ -2064,21 +1549,6 @@ impl Preview {
         self.schedule_text(cx);
         cx.notify();
     }
-    pub(crate) fn select_outline(
-        &mut self,
-        index: usize,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let destination = self
-            .sidebar
-            .as_ref()
-            .and_then(|sidebar| sidebar.outline_destination(index));
-        if let Some(destination) = destination {
-            self.navigate_outline(destination, cx);
-        }
-    }
-
     fn navigate_outline(&mut self, destination: pdf::OutlineDestination, cx: &mut Context<Self>) {
         let page = destination.page();
         if page >= self.pages.len() {
@@ -2244,17 +1714,6 @@ impl Render for Preview {
         let settings = settings_ui::state(cx);
         let show_toolbar = settings.read(cx).show_toolbar();
         let show_statusbar = settings.read(cx).show_statusbar();
-        if self.pending_find_reset {
-            self.pending_find_reset = false;
-            // InputState::set_value needs a Window. Defer the one-shot reset
-            // until after this render, without changing open_path's document API.
-            cx.defer_in(window, |this, window, cx| {
-                if let Some(sidebar) = this.sidebar.as_ref() {
-                    sidebar.find().reset_query(window, cx);
-                    cx.notify();
-                }
-            });
-        }
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
             cx.observe_window_appearance(window, |_, window, cx| {
@@ -2315,6 +1774,14 @@ impl Render for Preview {
             .flex()
             .flex_col()
             .child(div().h(px(top_space)).flex_shrink_0());
+        let find_highlight = self.sidebar.as_ref().and_then(|sidebar| {
+            sidebar
+                .read(cx)
+                .find()
+                .read(cx)
+                .highlight()
+                .map(|(hit, pulse)| (hit.clone(), pulse))
+        });
         for index in range {
             let (width, page_height) = self.pages[index];
             let page_width = px(width * self.scale);
@@ -2329,17 +1796,9 @@ impl Render for Preview {
                 .when_some(image, |element, image| {
                     element.child(img(image).size_full())
                 });
-            if let Some((hit, pulse)) = self
-                .sidebar
-                .as_ref()
-                .and_then(|sidebar| {
-                    let find = sidebar.find();
-                    find.active
-                        .and_then(|active| find.results.get(active))
-                        .map(|hit| (hit, find.pulse))
-                })
-                .filter(|(hit, _)| hit.page == index)
+            if let Some((hit, pulse)) = find_highlight.as_ref().filter(|(hit, _)| hit.page == index)
             {
+                let pulse = *pulse;
                 let (left, top, width, height) =
                     find_search::highlight_rect(hit, self.pages[index]);
                 let (x, y, w, h) = (
@@ -2481,6 +1940,13 @@ impl Render for Preview {
                 reader_windows::cycle(window, cx, -1);
             }))
             .on_action(cx.listener(Self::on_show_palette))
+            .on_action(cx.listener(|this, _: &DismissCommandPalette, window, cx| {
+                // A selected action may already have replaced the palette with
+                // marks or another modal before the deferred confirmation.
+                if this.palette.is_some() {
+                    this.dismiss_palette(window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &ShowMarks, window, cx| this.show_marks(MarksView::List, window, cx)))
             .on_action(cx.listener(|this, _: &ShowSetMark, window, cx| this.show_marks(MarksView::Set, window, cx)))
             .on_action(cx.listener(|this, _: &ShowJumpMark, window, cx| this.show_marks(MarksView::Jump, window, cx)))
@@ -2509,15 +1975,6 @@ impl Render for Preview {
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
                 this.toggle_sidebar(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ActivateOutline, _, cx| {
-                if let Some(dest) = this
-                    .sidebar
-                    .as_ref()
-                    .and_then(|sidebar| sidebar.selected_outline(cx))
-                {
-                    this.navigate_outline(dest, cx);
-                }
             }))
             .on_action(cx.listener(Self::on_copy))
             .on_mouse_up(
@@ -2644,8 +2101,8 @@ impl Render for Preview {
                     .when_some(
                         self.sidebar
                             .as_ref()
-                            .filter(|sidebar| sidebar.active().is_some()),
-                        |row, sidebar| row.child(sidebar.render(window, self.pages.len(), cx)),
+                            .filter(|sidebar| sidebar.read(cx).active().is_some()),
+                        |row, sidebar| row.child(sidebar.clone()),
                     )
                     .child(
                         div()
@@ -2659,7 +2116,7 @@ impl Render for Preview {
                                     .px_3()
                                     .content(reader_button(
                                         "toggle-sidebar",
-                                        if self.sidebar_panel().is_some() {
+                                        if self.sidebar_panel(cx).is_some() {
                                             "Hide sidebar"
                                         } else {
                                             "Show sidebar"
@@ -2667,7 +2124,7 @@ impl Render for Preview {
                                         Some(IconName::PanelLeft),
                                         Box::new(ToggleSidebar),
                                         has_document,
-                                        self.sidebar_panel().is_some(),
+                                        self.sidebar_panel(cx).is_some(),
                                     ))
                                     .content(
                                         gpui_kit::component::separator::Separator::vertical().h_5(),
@@ -2944,220 +2401,15 @@ impl Render for Preview {
                     ),
             )
             .when_some(self.palette.clone(), |reader, palette| {
-                let owner = cx.weak_entity();
-                reader
-                    .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .bg(cx.theme().overlay)
-                            .on_mouse_down(gpui::MouseButton::Left, {
-                                let owner = owner.clone();
-                                move |_, window, cx| {
-                                    let _ = owner.update(cx, |reader, cx| {
-                                        reader.dismiss_palette(window, cx)
-                                    });
-                                }
-                            }),
-                    )
-                    .child(
-                        div()
-                            .id("palette-panel")
-                            .test_support()
-                            .role(gpui::Role::Dialog)
-                            .aria_label("Commands")
-                            .absolute()
-                            .inset_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .p_4()
-                            .child(
-                                div().w_full().max_w(gpui::rems(24.)).child(
-                                    Command::new(&palette)
-                                        .placeholder("Search actions…")
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Open PDF…")
-                                                .action(Box::new(OpenPdf)),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Open Recent…")
-                                                .action(Box::new(ShowRecent)),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Open marks…")
-                                                .action(Box::new(ShowMarks))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Set local mark…")
-                                                .action(Box::new(ShowSetMark))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Jump to local mark…")
-                                                .action(Box::new(ShowJumpMark))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Delete local mark…")
-                                                .action(Box::new(ShowDeleteMark))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Settings…")
-                                                .action(Box::new(ShowSettings)),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Find")
-                                                .action(Box::new(ShowFind))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Next match")
-                                                .action(Box::new(NextMatch))
-                                                .disabled(
-                                                    self.sidebar.as_ref().is_none_or(|s| {
-                                                        s.find().results.is_empty()
-                                                    }),
-                                                ),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Previous match")
-                                                .action(Box::new(PreviousMatch))
-                                                .disabled(
-                                                    self.sidebar.as_ref().is_none_or(|s| {
-                                                        s.find().results.is_empty()
-                                                    }),
-                                                ),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Contents")
-                                                .action(Box::new(ShowContents))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Toggle Sidebar")
-                                                .action(Box::new(ToggleSidebar))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("New Window")
-                                                .action(Box::new(NewWindow)),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Next Window")
-                                                .action(Box::new(NextWindow))
-                                                .disabled(cx.windows().len() < 2),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Previous Window")
-                                                .action(Box::new(PreviousWindow))
-                                                .disabled(cx.windows().len() < 2),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Next Page")
-                                                .action(Box::new(NextPage))
-                                                .disabled(
-                                                    !has_document
-                                                        || self.page_index + 1 >= self.pages.len(),
-                                                ),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Previous Page")
-                                                .action(Box::new(PreviousPage))
-                                                .disabled(!has_document || self.page_index == 0),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Single page")
-                                                .action(Box::new(SinglePage))
-                                                .disabled(
-                                                    !has_document
-                                                        || self.mode_override == Some(ReadingMode::SinglePage),
-                                                ),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Continuous")
-                                                .action(Box::new(Continuous))
-                                                .disabled(
-                                                    !has_document
-                                                        || self.mode_override == Some(ReadingMode::Continuous),
-                                                ),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Use default reading mode")
-                                                .action(Box::new(UseDefaultReadingMode))
-                                                .disabled(!has_document || self.mode_override.is_none()),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Zoom In")
-                                                .action(Box::new(ZoomIn))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Zoom Out")
-                                                .action(Box::new(ZoomOut))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Fit Width")
-                                                .action(Box::new(FitWidth))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Fit Page")
-                                                .action(Box::new(FitPage))
-                                                .disabled(!has_document),
-                                        )
-                                        .item(
-                                            CommandItem::new()
-                                                .label("Copy")
-                                                .action(Box::new(Copy))
-                                                .disabled(self.selected_text().is_none()),
-                                        )
-                                        .on_confirm({
-                                            let owner = owner.clone();
-                                            move |_, window, cx| {
-                                                let _ = owner.update(cx, |reader, cx| {
-                                                    if reader.palette.is_some() {
-                                                        reader.dismiss_palette(window, cx);
-                                                    }
-                                                });
-                                            }
-                                        })
-                                        .on_cancel(move |window, cx| {
-                                            let _ = owner.update(cx, |reader, cx| {
-                                                reader.dismiss_palette(window, cx)
-                                            });
-                                        }),
-                                ),
-                            )
-                            .focus_trap("reader-command-palette", &self.palette_focus),
-                    )
+                reader.children(palette.render(CommandAvailability {
+                    page_ix: self.page_index,
+                    page_count: self.pages.len(),
+                    mode_override: self.mode_override,
+                    has_selection: self.selected_text().is_some(),
+                    has_matches: self.sidebar.as_ref().is_some_and(|sidebar| {
+                        sidebar.read(cx).find().read(cx).has_matches()
+                    }),
+                }, cx))
             })
             .when_some(self.marks_panel.clone(), |reader, panel| {
                 let owner = cx.weak_entity();
@@ -3313,7 +2565,7 @@ impl Render for Preview {
                             .when(panel.loading, |content| content.child(div().px_3().py_2().child("Loading marks…")))
                             .when_some(panel.error, |content, error| content.child(div().px_3().py_2()
                                 .text_color(cx.theme().danger).child(error))))
-                        .focus_trap("reader-marks-palette", &self.palette_focus))
+                        .focus_trap("reader-marks-palette", &self.marks_focus))
             })
     }
 }
@@ -3337,10 +2589,17 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::keymap::install as bind_reader_keys;
     use gpui_kit::{
         AnyWindowHandle, Focusable as _, TestAppContext, point, size,
         test::{TestEventExt as _, TestWindowExt},
     };
+
+    mod contents;
+    mod find;
+    mod palette;
+    mod recent_picker;
+    mod sidebar;
 
     fn recent_test_window(
         cx: &mut TestAppContext,
@@ -3682,7 +2941,7 @@ mod tests {
         cx.run_until_parked();
         other.read_with(cx, |reader, cx| {
             let palette = reader.palette.as_ref().expect("command palette opened");
-            assert_eq!(palette.read(cx).query(cx), "Open marks");
+            assert_eq!(palette.query(cx), "Open marks");
         });
         cx.update(|cx| {
             cx.update_window(other_window, |_, frame, cx| frame.press("enter", cx))
@@ -4090,7 +3349,8 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        empty.update(cx, |reader, cx| reader.open_recent(0, cx));
+        cx.update_window(empty_window, |_, frame, cx| frame.press("enter", cx))
+            .unwrap();
         cx.run_until_parked();
         assert_eq!(
             cx.update(|cx| empty.read(cx).mode_override()),
@@ -5045,97 +4305,6 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn single_page_find_jump_and_window_modes_are_local(cx: &mut TestAppContext) {
-        cx.update(gpui_kit::init);
-        let first = cx.add_window(|frame, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                frame.scale_factor(),
-                cx,
-            )
-        });
-        let second = cx.add_window(|frame, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                frame.scale_factor(),
-                cx,
-            )
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(first.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        first
-            .update(cx, |reader, frame, cx| {
-                reader.set_reading_mode(ReadingMode::SinglePage, cx);
-                reader.show_sidebar(SidebarPanel::Find, frame, cx);
-                reader.find_query_changed("This is page 3 of 100".into(), cx);
-            })
-            .unwrap();
-        cx.run_until_parked();
-        first
-            .update(cx, |reader, _, cx| {
-                let index = reader
-                    .sidebar
-                    .as_ref()
-                    .unwrap()
-                    .find()
-                    .results
-                    .iter()
-                    .position(|hit| hit.page == 2)
-                    .expect("page 3 has a find result");
-                reader.select_match(index, cx);
-            })
-            .unwrap();
-        first
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 2);
-                assert_eq!(reader.reading_position().0, 2);
-                assert_eq!(reader.visible_pages(0.0, 700.0), 2..3);
-                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
-            })
-            .unwrap();
-        second
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 0);
-                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
-            })
-            .unwrap();
-        first
-            .update(cx, |reader, _, cx| {
-                reader.open_path(PathBuf::from("examples/field-guide.pdf"), cx);
-            })
-            .unwrap();
-        cx.run_until_parked();
-        let destination = pdf::document_outline(Path::new("examples/field-guide.pdf")).unwrap()[0]
-            .destination()
-            .unwrap();
-        first
-            .update(cx, |reader, _, cx| {
-                // A new document starts with the configured default view.
-                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
-                reader.set_reading_mode(ReadingMode::SinglePage, cx);
-                reader.navigate_outline(destination, cx);
-            })
-            .unwrap();
-        first
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 2);
-                assert_eq!(reader.reading_position().0, 2);
-                assert_eq!(reader.visible_pages(0.0, 700.0), 2..3);
-            })
-            .unwrap();
-        cx.run_until_parked();
-        first
-            .read_with(cx, |reader, _| {
-                assert!(reader.images.keys().all(|page| *page == 2));
-                assert!(reader.retained_bitmap_bytes() <= BITMAP_BUDGET);
-            })
-            .unwrap();
-    }
-
-    #[gpui_kit::test]
     fn opening_and_replacing_documents_ignores_obsolete_loads(cx: &mut TestAppContext) {
         let reader = cx.new(|cx| Preview::new(None, 1.0, cx));
         reader.read_with(cx, |reader, _| {
@@ -5193,93 +4362,6 @@ mod tests {
                 assert_eq!(reader.scale(), 1.25);
             })
             .unwrap();
-    }
-
-    #[gpui_kit::test]
-    fn reader_sidebar_opens_and_remembers_its_panel(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-        });
-        let window = cx.add_window(|window, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                window.scale_factor(),
-                cx,
-            )
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.click("toggle-sidebar", cx);
-            })
-            .unwrap();
-        });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.sidebar_panel(), Some(SidebarPanel::Contents));
-            })
-            .unwrap();
-
-        cx.simulate_keystrokes(window.into(), "cmd-f");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.sidebar_panel(), Some(SidebarPanel::Find));
-            })
-            .unwrap();
-        cx.simulate_keystrokes(window.into(), "cmd-b cmd-b");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.sidebar_panel(), Some(SidebarPanel::Find));
-            })
-            .unwrap();
-    }
-
-    #[gpui_kit::test]
-    fn find_query_survives_closing_and_reopening_the_sidebar(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-        });
-        let window = cx.add_window(|window, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                window.scale_factor(),
-                cx,
-            )
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        cx.simulate_keystrokes(window.into(), "cmd-f");
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
-                frame.render_frame(cx);
-                assert_eq!(frame.find("find-query").focused(), Some(true));
-                frame.input("KVER", cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.simulate_keystrokes(window.into(), "cmd-b cmd-b");
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
-                frame.render_frame(cx);
-                assert_eq!(frame.find("find-query").value(), Some("KVER"));
-                assert_eq!(frame.find("find-query").focused(), Some(true));
-                assert!(
-                    frame
-                        .find("find-status")
-                        .label()
-                        .unwrap()
-                        .contains("matches")
-                );
-            })
-            .unwrap();
-        });
     }
 
     #[gpui_kit::test]
@@ -5348,8 +4430,11 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        second_reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.recent.as_ref().unwrap().files[0].path, pdf)
+        second_reader.read_with(cx, |reader, cx| {
+            assert_eq!(
+                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
+                pdf
+            )
         });
         assert!(!paths.local_data().join("reading.sqlite3").exists());
         cx.update(|cx| {
@@ -5395,9 +4480,15 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        second_reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.recent.as_ref().unwrap().files[0].path, pdf);
-            assert_eq!(reader.recent.as_ref().unwrap().files[1].path, missing);
+        second_reader.read_with(cx, |reader, cx| {
+            assert_eq!(
+                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
+                pdf
+            );
+            assert_eq!(
+                reader.recent.as_ref().unwrap().read(cx).files()[1].path,
+                missing
+            );
         });
         // Restart while recording is off: only the previously saved missing
         // path survives; a session-only open is never written implicitly.
@@ -5473,17 +4564,20 @@ mod tests {
             });
         }
         cx.run_until_parked();
-        first_reader.update(cx, |reader, cx| reader.remove_recent(missing.clone(), cx));
+        first_reader
+            .read_with(cx, |reader, _| reader.recent.as_ref().unwrap().clone())
+            .update(cx, |picker, cx| picker.remove(missing.clone(), cx));
         cx.run_until_parked();
         assert!(!store.contains(&missing).unwrap());
         assert!(store.contains(&pdf).unwrap());
-        second_reader.read_with(cx, |reader, _| {
+        second_reader.read_with(cx, |reader, cx| {
             assert!(
                 !reader
                     .recent
                     .as_ref()
                     .unwrap()
-                    .files
+                    .read(cx)
+                    .files()
                     .iter()
                     .any(|file| file.path == missing)
             );
@@ -5524,8 +4618,8 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        first_reader.read_with(cx, |reader, _| {
-            let files = &reader.recent.as_ref().unwrap().files;
+        first_reader.read_with(cx, |reader, cx| {
+            let files = reader.recent.as_ref().unwrap().read(cx).files();
             assert_eq!(
                 files.iter().map(|file| &file.path).collect::<Vec<_>>(),
                 vec![&older]
@@ -5538,8 +4632,8 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        first_reader.read_with(cx, |reader, _| {
-            assert!(reader.recent.as_ref().unwrap().files.is_empty());
+        first_reader.read_with(cx, |reader, cx| {
+            assert!(reader.recent.as_ref().unwrap().read(cx).files().is_empty());
         });
         assert!(store.contains(&active).unwrap());
         cx.update(|cx| {
@@ -5550,165 +4644,10 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        second_reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.recent.as_ref().unwrap().files[0].path, active);
-        });
-    }
-
-    #[gpui_kit::test]
-    fn command_palette_opens_recent_with_search_focus(cx: &mut TestAppContext) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (window, reader) = recent_test_window(cx, None);
-        cx.update(|cx| {
-            cx.update_window(window, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowCommandPalette), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.input("Open Recent", cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        reader.read_with(cx, |reader, cx| {
-            let palette = reader.palette.as_ref().unwrap().read(cx);
-            assert_eq!(palette.query(cx), "Open Recent");
-            assert!(palette.selected_index().is_some());
-        });
-        cx.update(|cx| {
-            cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
-                .unwrap();
-        });
-        cx.run_until_parked();
-        reader.read_with(cx, |reader, _| {
-            assert!(reader.palette.is_none());
-            assert!(reader.recent.is_some());
-        });
-        cx.update(|cx| {
-            cx.update_window(window, |_, frame, cx| {
-                assert_eq!(frame.find("recent-panel").label(), Some("Open Recent"));
-                frame.input("book", cx);
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, cx| {
+        second_reader.read_with(cx, |reader, cx| {
             assert_eq!(
-                reader.recent.as_ref().unwrap().command.read(cx).query(cx),
-                "book"
-            );
-        });
-    }
-
-    #[gpui_kit::test]
-    fn successful_open_records_normal_path_and_recent_reopens_in_active_window(
-        cx: &mut TestAppContext,
-    ) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (_first, first_reader) = recent_test_window(cx, None);
-        let (second, second_reader) = recent_test_window(cx, None);
-        first_reader.update(cx, |reader, cx| {
-            reader.open_path(PathBuf::from("examples/readme-sample.pdf"), cx);
-        });
-        cx.run_until_parked();
-        let normalized = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        assert!(store.contains(&normalized).unwrap());
-        second_reader.read_with(cx, |reader, _| assert!(reader.path.is_none()));
-        cx.update(|cx| {
-            cx.update_window(second, |_, window, cx| {
-                window.render_frame(cx);
-                window.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(second, |_, window, cx| window.press("enter", cx))
-                .unwrap();
-        });
-        cx.run_until_parked();
-        second_reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.page_count(), Some(100));
-            assert!(reader.recent.is_none());
-        });
-        first_reader.read_with(cx, |reader, _| assert_eq!(reader.page_count(), Some(100)));
-    }
-
-    #[gpui_kit::test]
-    fn recent_dialog_arrows_do_not_scroll_the_pdf(cx: &mut TestAppContext) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        for name in ["field-guide", "selection-sample"] {
-            store
-                .record(
-                    &RecentStore::normalize(&PathBuf::from(format!("examples/{name}.pdf")))
-                        .unwrap(),
-                )
-                .unwrap();
-        }
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (handle, reader) = recent_test_window(
-            cx,
-            Some(RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap()),
-        );
-        cx.run_until_parked();
-        let before = reader.read_with(cx, |reader, _| reader.scroll.offset());
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| frame.press("down", cx))
-                .unwrap();
-        });
-        reader.read_with(cx, |reader, cx| {
-            assert_eq!(reader.scroll.offset(), before);
-            assert_eq!(
-                reader
-                    .recent
-                    .as_ref()
-                    .unwrap()
-                    .command
-                    .read(cx)
-                    .selected_index()
-                    .unwrap()
-                    .row,
-                1
+                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
+                active
             );
         });
     }
@@ -5753,7 +4692,6 @@ mod tests {
                     .recent
                     .as_ref()
                     .unwrap()
-                    .command
                     .read(cx)
                     .focus_handle(cx);
                 assert!(
@@ -5764,13 +4702,7 @@ mod tests {
             .unwrap();
         });
         let before = reader.read_with(cx, |reader, cx| {
-            reader
-                .recent
-                .as_ref()
-                .unwrap()
-                .command
-                .read(cx)
-                .selected_index()
+            reader.recent.as_ref().unwrap().read(cx).selected_row(cx)
         });
         cx.update(|cx| {
             cx.update_window(handle, |_, frame, cx| {
@@ -5781,13 +4713,7 @@ mod tests {
         });
         reader.read_with(cx, |reader, cx| {
             assert_ne!(
-                reader
-                    .recent
-                    .as_ref()
-                    .unwrap()
-                    .command
-                    .read(cx)
-                    .selected_index(),
+                reader.recent.as_ref().unwrap().read(cx).selected_row(cx),
                 before,
                 "arrow keys must navigate recent rows after clicking the header"
             );
@@ -5798,7 +4724,7 @@ mod tests {
         });
         reader.read_with(cx, |reader, cx| {
             assert_eq!(
-                reader.recent.as_ref().unwrap().command.read(cx).query(cx),
+                reader.recent.as_ref().unwrap().read(cx).query(cx),
                 "read",
                 "clicking the panel header must not strand keyboard search"
             );
@@ -5920,7 +4846,6 @@ mod tests {
                     .recent
                     .as_ref()
                     .unwrap()
-                    .command
                     .read(cx)
                     .focus_handle(cx);
                 assert!(
@@ -5939,7 +4864,7 @@ mod tests {
         });
         reader.read_with(cx, |reader, cx| {
             assert_eq!(
-                reader.recent.as_ref().unwrap().command.read(cx).query(cx),
+                reader.recent.as_ref().unwrap().read(cx).query(cx),
                 "readme",
                 "cancelling Forget must return focus to recent-file search"
             );
@@ -5965,7 +4890,6 @@ mod tests {
                     .recent
                     .as_ref()
                     .unwrap()
-                    .command
                     .read(cx)
                     .focus_handle(cx);
                 assert!(
@@ -5978,7 +4902,7 @@ mod tests {
         });
         reader.read_with(cx, |reader, cx| {
             assert_eq!(
-                reader.recent.as_ref().unwrap().command.read(cx).query(cx),
+                reader.recent.as_ref().unwrap().read(cx).query(cx),
                 "readmex",
                 "confirming Forget must return focus even when its row disappears"
             );
@@ -6012,10 +4936,10 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        first_reader.read_with(cx, |reader, _| {
-            let panel = reader.recent.as_ref().unwrap();
-            assert_eq!(panel.files.len(), 2);
-            assert_eq!(panel.files[0].path, pdf);
+        first_reader.read_with(cx, |reader, cx| {
+            let panel = reader.recent.as_ref().unwrap().read(cx);
+            assert_eq!(panel.files().len(), 2);
+            assert_eq!(panel.files()[0].path, pdf);
         });
         second_reader.read_with(cx, |reader, _| {
             assert!(reader.recent.is_none());
@@ -6031,8 +4955,11 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        first_reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.recent.as_ref().unwrap().files[0].path, missing);
+        first_reader.read_with(cx, |reader, cx| {
+            assert_eq!(
+                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
+                missing
+            );
         });
         cx.update(|cx| {
             cx.update_window(first, |_, frame, cx| {
@@ -6041,17 +4968,23 @@ mod tests {
             .unwrap();
         });
         cx.run_until_parked();
-        first_reader.read_with(cx, |reader, _| {
-            let panel = reader.recent.as_ref().unwrap();
-            assert!(panel.error.as_ref().unwrap().contains("Could not open"));
+        first_reader.read_with(cx, |reader, cx| {
+            let panel = reader.recent.as_ref().unwrap().read(cx);
+            assert!(panel.error().unwrap().contains("Could not open"));
             assert_eq!(reader.page_count(), None);
         });
-        first_reader.update(cx, |reader, cx| reader.remove_recent(missing.clone(), cx));
+        first_reader
+            .read_with(cx, |reader, _| reader.recent.as_ref().unwrap().clone())
+            .update(cx, |picker, cx| picker.remove(missing.clone(), cx));
         cx.run_until_parked();
-        first_reader.read_with(cx, |reader, _| {
-            let panel = reader.recent.as_ref().unwrap();
-            assert!(!panel.loading, "removal still pending");
-            assert!(panel.error.is_none(), "removal failed: {:?}", panel.error);
+        first_reader.read_with(cx, |reader, cx| {
+            let panel = reader.recent.as_ref().unwrap().read(cx);
+            assert!(!panel.is_loading(), "removal still pending");
+            assert!(
+                panel.error().is_none(),
+                "removal failed: {:?}",
+                panel.error()
+            );
         });
         assert!(!store.contains(&missing).unwrap());
         assert!(store.contains(&pdf).unwrap());

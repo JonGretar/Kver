@@ -5,8 +5,8 @@ use gpui_kit::base::{Link, StyledExt as _};
 use gpui_kit::component::{ActiveTheme as _, TitleBar, button::Button};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Bounds, ClipboardItem, Context, FocusHandle,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, Styled as _,
-    Window, WindowBounds, WindowOptions, div, img, px, size,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, Window,
+    WindowBounds, WindowOptions, div, img, px, size,
 };
 
 use crate::reader_windows::CloseWindow;
@@ -15,10 +15,6 @@ const PROJECT_URL: &str = "https://github.com/JonGretar/Kver";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 gpui::actions!(kver, [CloseAbout]);
-
-pub(crate) fn bind_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("escape", CloseAbout, Some("AboutKver"))]);
-}
 
 pub(crate) fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
     // Initial native window bounds are in platform pixels; content uses rem helpers.

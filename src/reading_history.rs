@@ -1,5 +1,11 @@
 //! Local document records. The documents table owns a PDF's identity and is the
 //! parent for marks, view overrides, and positions (with cascading foreign keys).
+
+#[cfg(feature = "gui")]
+pub(crate) mod recent_picker;
+#[cfg(feature = "gui")]
+pub use recent_picker::ShowRecent;
+
 use std::{
     collections::BTreeMap,
     fs,

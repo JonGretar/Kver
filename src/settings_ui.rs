@@ -17,8 +17,8 @@ use gpui_kit::component::{
     tree::{TreeItem, TreeState, tree},
 };
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, KeyBinding,
-    Render, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, Render, Window,
+    WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
 
 use crate::{
@@ -305,10 +305,6 @@ pub fn install(cx: &mut App) {
 pub fn install_with_paths(cx: &mut App, paths: Option<AppPaths>) {
     let settings = cx.new(|_| SettingsState::new(paths.clone()));
     cx.set_global(SharedSettings(settings.clone()));
-    cx.bind_keys([
-        KeyBinding::new("cmd-,", ShowSettings, None),
-        KeyBinding::new("escape", CloseSettings, Some("KverSettings")),
-    ]);
     let open_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &ShowSettings, cx| {
         if let Some(handle) = open_window.get()
@@ -1617,6 +1613,7 @@ mod tests {
         let config = root.path().join("config/config.toml");
         cx.update(|cx| {
             gpui_kit::init(cx);
+            crate::app::keymap::install(cx);
             install_with_paths(
                 cx,
                 Some(AppPaths::for_locations(
@@ -1797,7 +1794,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         cx.update(|cx| {
             gpui_kit::init(cx);
-            crate::reader::bind_reader_keys(cx);
+            crate::app::keymap::install(cx);
             install_with_paths(
                 cx,
                 Some(AppPaths::for_locations(

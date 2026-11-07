@@ -4,6 +4,7 @@ mod commands;
 mod contents;
 mod find;
 mod marks;
+pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
 pub use crate::app::document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar};
 pub use crate::reading_history::ShowRecent;
@@ -42,7 +43,6 @@ use gpui_kit::{
         },
         spinner::Spinner,
         status_bar::StatusBar,
-        theme::Theme,
         toolbar::{Toolbar, ToolbarGroup},
         tooltip::Tooltip,
     },
@@ -56,7 +56,6 @@ use crate::{
     coordinates::{PageViewport, Point},
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
-    reader_windows::{self, CloseWindow, NextWindow, PreviousWindow},
     reading_history::recent_picker::{RecentPicker, RecentPickerEvent},
     recent::{self, ReadingPosition, RecentStore},
     settings::{InitialZoom, ReadingView},
@@ -423,30 +422,6 @@ impl Preview {
         self.status = "Loading document…".into();
         self.load(cx);
         cx.notify();
-    }
-
-    pub fn open_dialog(&mut self, cx: &mut Context<Self>) {
-        let generation = self.generation;
-        let choice = rfd::AsyncFileDialog::new()
-            .set_title("Open PDF")
-            .add_filter("PDF documents", &["pdf"])
-            .pick_file();
-        cx.spawn(async move |this, cx| {
-            let result = choice.await;
-            let _ = this.update(cx, |this, cx| {
-                if generation != this.generation {
-                    return;
-                }
-                if let Some(file) = result {
-                    this.open_path(file.path().to_path_buf(), cx);
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn on_open_pdf(&mut self, _: &OpenPdf, _: &mut Window, cx: &mut Context<Self>) {
-        self.open_dialog(cx);
     }
 
     fn show_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -933,6 +908,9 @@ impl Preview {
     }
     pub fn path(&self) -> Option<&std::path::Path> {
         self.path.as_deref()
+    }
+    pub(crate) fn document_generation(&self) -> u64 {
+        self.document_generation
     }
     pub fn displayed_page_index(&self) -> Option<usize> {
         self.images
@@ -1533,19 +1511,13 @@ impl Render for Preview {
         let show_statusbar = settings.read(cx).show_statusbar();
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
-            cx.observe_window_appearance(window, |_, window, cx| {
-                if settings_ui::state(cx).read(cx).appearance()
-                    == crate::settings::Appearance::System
-                {
-                    Theme::sync_system_appearance(Some(window), cx);
-                }
-                cx.notify();
-            })
-            .detach();
             cx.observe_window_bounds(window, |_, window, cx| {
                 // The scroll area's bounds are laid out in the resize frame.
                 // Refit after that frame, using its measured content viewport.
-                cx.on_next_frame(window, |this, _, cx| this.sync_viewport(cx));
+                let reader = cx.weak_entity();
+                window.on_next_frame(move |_, cx| {
+                    let _ = reader.update(cx, |reader, cx| reader.sync_viewport(cx));
+                });
             })
             .detach();
             self.focus_initialized = true;
@@ -1748,14 +1720,6 @@ impl Render for Preview {
                 self.palette.is_none() && !self.marks_open(cx) && self.recent.is_none() && self.focus.is_focused(window),
                 |reader| reader.key_context("Reader"),
             )
-            .on_action(cx.listener(Self::on_open_pdf))
-            .on_action(|_: &CloseWindow, window, _| window.remove_window())
-            .on_action(cx.listener(|_, _: &NextWindow, window, cx| {
-                reader_windows::cycle(window, cx, 1);
-            }))
-            .on_action(cx.listener(|_, _: &PreviousWindow, window, cx| {
-                reader_windows::cycle(window, cx, -1);
-            }))
             .on_action(cx.listener(Self::on_show_palette))
             .on_action(cx.listener(|this, _: &DismissCommandPalette, window, cx| {
                 // A selected action may already have replaced the palette with
@@ -2271,10 +2235,12 @@ mod tests {
         path: Option<PathBuf>,
     ) -> (AnyWindowHandle, Entity<Preview>) {
         cx.update(|cx| {
-            gpui_kit::open_window(gpui::WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| Preview::new(path, window.scale_factor(), cx))
-            })
-            .unwrap()
+            let (handle, document) =
+                gpui_kit::open_window(gpui::WindowOptions::default(), cx, |window, cx| {
+                    cx.new(|cx| crate::app::document_window::DocumentWindow::new(path, window, cx))
+                })
+                .unwrap();
+            (handle, document.read(cx).reader().clone())
         })
     }
 

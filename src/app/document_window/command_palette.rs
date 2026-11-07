@@ -13,13 +13,16 @@ use gpui_kit::{
     },
 };
 
-use super::sidebar::{ShowContents, ShowFind, ToggleSidebar};
+use super::{
+    OpenPdf,
+    sidebar::{ShowContents, ShowFind, ToggleSidebar},
+};
 use crate::{
     app::windows::{NewWindow, NextWindow, PreviousWindow},
     reader::{
-        Continuous, Copy, FitPage, FitWidth, NextMatch, NextPage, OpenPdf, PreviousMatch,
-        PreviousPage, ReadingMode, ShowDeleteMark, ShowJumpMark, ShowMarks, ShowSetMark,
-        SinglePage, UseDefaultReadingMode, ZoomIn, ZoomOut,
+        Continuous, Copy, FitPage, FitWidth, NextMatch, NextPage, PreviousMatch, PreviousPage,
+        ReadingMode, ShowDeleteMark, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage,
+        UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::ShowRecent,
     settings_ui::ShowSettings,

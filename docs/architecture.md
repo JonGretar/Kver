@@ -24,14 +24,33 @@ GPUI owns dispatch and pending multi-keystroke sequences. User overrides and
 keymap reloads are not implemented.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
-`src/app/windows.rs` creates empty reader windows, cycles focus, and owns
+`src/app/windows.rs` creates document windows, cycles focus, and owns
 the last-window policy; it does not share document or viewport state between readers.
-Each window mounts its reader inside GPUI Kit's `Root`, which owns component
+Each window mounts `app::document_window::DocumentWindow` inside GPUI Kit's
+`Root`, which owns component
 overlays and applies the theme's interface scale. The window uses Kit's
 `TitleBar` options so its native controls and dragging agree with the document
 title. Kver follows the system's light/dark appearance for reader chrome
 unless the app-wide preference selects Light or Dark; PDF pages retain their
-document colors.
+document colors. `DocumentWindow` retains the system-appearance subscription
+and owns the native file picker and Open/Close/Next Window/Previous Window
+handlers. Those handlers are ancestors of the reader's focused regions, so
+sidebar and palette input still reach the correct window.
+
+The window strongly owns one reader entity, with no reverse reference. The
+reader remains the source of document identity, loading, and restoration;
+window and OS open requests call that same load path. A file-picker result
+checks the document generation rather than the raster generation, so a
+replacement document invalidates it but an intervening zoom does not.
+The native picker task belongs to the window lifetime. Deferred reader resize
+work uses a weak handle so a queued frame does not retain a closed reader.
+
+The layout migration is not complete: `Preview` still composes the title bar,
+toolbar, sidebar, status bar, and inline overlays. These remain together until
+the next ownership slice can move chrome and overlays without changing their
+geometry or action ancestry. `ReaderView` will name the narrowed PDF surface,
+not this transitional workspace.
+
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local action handling. `src/reader/commands.rs`
 declares its document commands independently of physical bindings.
@@ -209,8 +228,9 @@ worker and existing schema rather than introducing a separate picker store.
 Open PDF, page turns, reading mode, zoom, and fit modes are GPUI Actions
 handled by the active reader window. Toolbar controls, keybindings, and GPUI
 Kit's command palette dispatch those same Actions; reader methods own the underlying
-navigation and loading behavior. The reader owns the file picker and ignores
-obsolete asynchronous load results, so entry points share error handling.
+navigation and loading behavior. The document window owns the file picker;
+its reader ignores obsolete asynchronous load results, so entry points share
+error handling.
 The native picker uses `rfd` for its PDF extension filter because GPUI's
 `PathPromptOptions` does not expose file-type filtering. Its asynchronous API
 keeps the picker from blocking GPUI's event loop; cancellation leaves the

@@ -6,9 +6,9 @@ use gpui_kit::{AnyWindowHandle, App, AppContext as _};
 #[cfg(target_os = "macos")]
 use gpui_kit::{Menu, MenuItem};
 
+use super::document_window::OpenPdf;
 #[cfg(target_os = "macos")]
 use super::windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
-use crate::reader::OpenPdf;
 #[cfg(target_os = "macos")]
 use crate::reader::{
     Continuous, Copy, NextPage, PreviousPage, ShowContents, ShowFind, SinglePage, ToggleSidebar,
@@ -157,8 +157,9 @@ mod tests {
             crate::reader_windows::install(cx);
             install(cx);
         });
-        let reader = cx
-            .add_window(|window, cx| crate::reader::Preview::new(None, window.scale_factor(), cx));
+        let reader = cx.add_window(|window, cx| {
+            super::super::document_window::DocumentWindow::new(None, window, cx)
+        });
         cx.update(|cx| cx.dispatch_action(&AboutKver));
         let about = cx.update(|cx| {
             assert_eq!(cx.windows().len(), 2);

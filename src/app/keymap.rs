@@ -8,6 +8,7 @@ use gpui_kit::{App, KeyBinding};
 
 use super::{
     commands::Quit,
+    document_window::OpenPdf,
     document_window::command_palette::ShowCommandPalette,
     document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar},
     windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow},
@@ -16,8 +17,8 @@ use crate::{
     about::CloseAbout,
     reader::{
         ActivateOutline, Continuous, Copy, DeleteLocalMark, FitPage, FitWidth, JumpLocalMark,
-        NextMatch, NextPage, OpenPdf, PreviousMatch, PreviousPage, SetLocalMark, ShowMarks,
-        SinglePage, ZoomIn, ZoomOut,
+        NextMatch, NextPage, PreviousMatch, PreviousPage, SetLocalMark, ShowMarks, SinglePage,
+        ZoomIn, ZoomOut,
     },
     reading_history::ShowRecent,
     settings_ui::{CloseSettings, ShowSettings},

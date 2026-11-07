@@ -5,7 +5,6 @@ use gpui_kit as gpui;
 gpui::actions!(
     kver,
     [
-        OpenPdf,
         NextPage,
         PreviousPage,
         ZoomIn,

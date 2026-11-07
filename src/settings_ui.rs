@@ -3,10 +3,11 @@ use std::{cell::Cell, time::Duration};
 
 use gpui_kit as gpui;
 use gpui_kit::assets::IconName;
-use gpui_kit::base::{StyledExt as _, TestSupportExt as _};
+use gpui_kit::base::{Disableable as _, StyledExt as _, TestSupportExt as _};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, TitleBar, WindowExt as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonVariant, ButtonVariants as _},
+    dialog::DialogEntrance,
     menu::{DropdownMenu as _, PopupMenuItem},
     notification::Notification,
     scroll::ScrollableElement as _,
@@ -21,6 +22,7 @@ use gpui_kit::{
 
 use crate::{
     reader_windows::CloseWindow,
+    recent,
     settings::{self, AppPaths, AppSettings, Appearance, InitialZoom, SettingsChange},
 };
 
@@ -34,6 +36,7 @@ pub struct SettingsState {
     revision: u64,
     saving: bool,
     pending: Option<SettingsChange>,
+    recording_requested: bool,
 }
 
 impl SettingsState {
@@ -46,11 +49,16 @@ impl SettingsState {
             revision: 0,
             saving: false,
             pending: None,
+            recording_requested: true,
         }
     }
 
     pub fn appearance(&self) -> Appearance {
         self.settings.appearance()
+    }
+
+    pub fn remember_reading_history(&self) -> bool {
+        self.settings.remember_reading_history()
     }
 
     pub fn quit_when_last_window_closes(&self) -> bool {
@@ -76,6 +84,9 @@ impl SettingsState {
             SettingsChange::QuitWhenLastWindowCloses(quit) => {
                 self.settings.with_quit_when_last_window_closes(quit)
             }
+            SettingsChange::RememberReadingHistory(remember) => {
+                self.settings.with_remember_reading_history(remember)
+            }
         };
         if self.settings == updated && self.pending.is_none() {
             return;
@@ -93,9 +104,56 @@ impl SettingsState {
         cx.notify();
     }
 
+    fn choose_history(&mut self, remember: bool, cx: &mut Context<Self>) {
+        if self.remember_reading_history() == remember && self.pending.is_none() {
+            return;
+        }
+        self.revision += 1;
+        // Stop writes as soon as the reader requests privacy. Re-enabling
+        // waits for the TOML save so a failed preference edit cannot leak.
+        if !remember && let Some(history) = recent::history(cx) {
+            self.recording_requested = false;
+            let work = history.set_recording(remember);
+            cx.spawn(async move |this, cx| {
+                if let Err(error) = work.await {
+                    let _ = this.update(cx, |this, cx| {
+                        this.error = Some(format!("Reading history could not be updated: {error}"));
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        }
+        if self.paths.is_none() {
+            self.apply_settings(self.settings.with_remember_reading_history(remember), cx);
+            self.error = Some(
+                "Settings cannot be saved: no user configuration directory is available.".into(),
+            );
+        } else {
+            self.pending = Some(SettingsChange::RememberReadingHistory(remember));
+            self.start_save(cx);
+        }
+        cx.notify();
+    }
+
     fn apply_settings(&mut self, updated: AppSettings, cx: &mut Context<Self>) {
         if self.settings.appearance() != updated.appearance() {
             updated.appearance().apply(cx);
+        }
+        if self.recording_requested != updated.remember_reading_history()
+            && let Some(history) = recent::history(cx)
+        {
+            self.recording_requested = updated.remember_reading_history();
+            let work = history.set_recording(updated.remember_reading_history());
+            cx.spawn(async move |this, cx| {
+                if let Err(error) = work.await {
+                    let _ = this.update(cx, |this, cx| {
+                        this.error = Some(format!("Reading history could not be updated: {error}"));
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
         }
         self.settings = updated;
         cx.notify();
@@ -134,6 +192,15 @@ impl SettingsState {
                             this.error = None;
                         }
                         Err(error) => {
+                            if let Some(history) = recent::history(cx) {
+                                this.recording_requested = this.remember_reading_history();
+                                let rollback =
+                                    history.set_recording(this.remember_reading_history());
+                                cx.spawn(async move |_, _| {
+                                    let _ = rollback.await;
+                                })
+                                .detach();
+                            }
                             this.error =
                                 Some(format!("{error}. Check the settings file and try again."));
                         }
@@ -267,7 +334,7 @@ pub fn install_with_paths(cx: &mut App, paths: Option<AppPaths>) {
 
 fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
     // Window bounds are platform pixels; controls and spacing use rem-based tiers.
-    let bounds = Bounds::centered(None, size(px(700.), px(540.)), cx);
+    let bounds = Bounds::centered(None, size(px(700.), px(640.)), cx);
     let (handle, _) = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -288,6 +355,8 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
                     choice_focus,
                     zoom_focus,
                     settings,
+                    clearing: false,
+                    clear_error: None,
                 }
             })
         },
@@ -301,6 +370,39 @@ struct SettingsView {
     choice_focus: FocusHandle,
     zoom_focus: FocusHandle,
     settings: Entity<SettingsState>,
+    clearing: bool,
+    clear_error: Option<String>,
+}
+
+impl SettingsView {
+    fn clear_history(&mut self, cx: &mut Context<Self>) {
+        if self.clearing {
+            return;
+        }
+        let Some(history) = recent::history(cx) else {
+            self.clear_error = Some("Local reading history is unavailable.".into());
+            cx.notify();
+            return;
+        };
+        self.clearing = true;
+        self.clear_error = None;
+        cx.notify();
+        let work = history.clear();
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.clearing = false;
+                match result {
+                    Ok(()) => recent::notify_changed(cx),
+                    Err(error) => {
+                        this.clear_error = Some(format!("Could not clear reading history: {error}"))
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
 }
 
 impl Render for SettingsView {
@@ -317,6 +419,11 @@ impl Render for SettingsView {
         let zoom_focus = self.zoom_focus.clone();
         let reset_state = self.settings.clone();
         let reset_focus = self.choice_focus.clone();
+        let remember = settings.remember_reading_history();
+        let history_state = self.settings.clone();
+        let clear_owner = cx.weak_entity();
+        let clearing = self.clearing;
+        let clear_error = self.clear_error.clone();
         div()
             .size_full()
             .flex()
@@ -547,6 +654,97 @@ impl Render for SettingsView {
                                             }),
                                     ),
                             )
+                            .child(
+                                div()
+                                    .mx_4()
+                                    .pb_2()
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Reading history"),
+                            )
+                            .child(
+                                div()
+                                    .p_4()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_4()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(div().text_sm().font_medium().child("Remember Reading History"))
+                                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("Keep recently opened PDFs on this device. Turning this off does not erase saved data.")),
+                                    )
+                                    .child(
+                                        Switch::new("remember-reading-history")
+                                            .accessibility_label("Remember Reading History")
+                                            .checked(remember)
+                                            .on_change(move |next, _, cx| {
+                                                history_state.update(cx, |settings, cx| settings.choose_history(*next, cx));
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .p_4()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_4()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(div().text_sm().font_medium().child("Clear Reading History"))
+                                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("Erase saved data for every PDF. PDF files and app preferences stay unchanged.")),
+                                    )
+                                    .child(
+                                        Button::new("clear-reading-history")
+                                            .small()
+                                            .outline()
+                                            .label(if clearing { "Clearing…" } else { "Clear…" })
+                                            .disabled(clearing)
+                                            .on_click(move |_, window, cx| {
+                                                let owner = clear_owner.clone();
+                                                window.open_alert_dialog(cx, move |alert, _, _| {
+                                                    let owner = owner.clone();
+                                                    alert
+                                                        .title("Clear reading history?")
+                                                        .description("Erase saved data for every PDF, including this session? PDF files and app preferences will not be changed.")
+                                                        .confirm()
+                                                        .centered()
+                                                        .entrance(DialogEntrance::None)
+                                                        .ok_text("Clear history")
+                                                        .ok_variant(ButtonVariant::Danger)
+                                                        .on_ok(move |_, _, cx| {
+                                                            let _ = owner.update(cx, |view, cx| view.clear_history(cx));
+                                                            true
+                                                        })
+                                                });
+                                            }),
+                                    ),
+                            )
+                            .when_some(clear_error, |view, message| {
+                                view.child(
+                                    div()
+                                        .id("clear-history-error")
+                                        .test_support()
+                                        .role(gpui::Role::Status)
+                                        .aria_label(message.clone())
+                                        .text_sm()
+                                        .text_color(cx.theme().danger)
+                                        .child(message),
+                                )
+                            })
                             .when_some(error, |view, message| {
                                 view.child(
                                     div()
@@ -568,6 +766,10 @@ impl Render for SettingsView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        reader::{Preview, ShowRecent},
+        recent::RecentStore,
+    };
     use gpui_kit::{TestAppContext, test::TestWindowExt as _};
 
     fn choose(cx: &mut TestAppContext, window: AnyWindowHandle, option: usize) {
@@ -593,6 +795,139 @@ mod tests {
         cx.background_executor
             .advance_clock(Duration::from_millis(400));
         cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn clear_all_requires_confirmation_and_refreshes_reader_windows(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            AppPaths::for_locations(root.path().join("config.toml"), root.path().join("data"));
+        let store = RecentStore::new(&paths);
+        let pdf =
+            RecentStore::normalize(std::path::Path::new("examples/readme-sample.pdf")).unwrap();
+        let missing = root.path().join("missing.pdf");
+        store.record(&pdf).unwrap();
+        store.record(&missing).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            install_with_paths(cx, Some(paths.clone()));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let settings_window = cx.update(|cx| cx.windows()[0]);
+        let (reader_window, reader) = cx.update(|cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| Preview::new(Some(pdf.clone()), window.scale_factor(), cx))
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(reader_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(ShowRecent), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(reader_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert!(
+                    frame
+                        .try_find(format!("forget-pdf:{}", missing.display()))
+                        .is_some()
+                );
+            })
+            .unwrap()
+        });
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("remember-reading-history", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            !settings::load(paths.config())
+                .unwrap()
+                .remember_reading_history()
+        );
+        assert!(
+            store.contains(&missing).unwrap(),
+            "turning off erased old data"
+        );
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.scroll(
+                    "remember-reading-history",
+                    gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-800.))),
+                    cx,
+                );
+                frame.click("clear-reading-history", cx);
+                assert_eq!(frame.find("ok").label(), Some("Clear history"));
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(store.contains(&pdf).unwrap());
+        assert!(store.contains(&missing).unwrap());
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| frame.click("cancel", cx))
+                .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(store.contains(&pdf).unwrap());
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.click("clear-reading-history", cx);
+                frame.click("ok", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(store.search("").unwrap().is_empty());
+        assert!(std::path::Path::new("examples/readme-sample.pdf").exists());
+        assert!(
+            !settings::load(paths.config())
+                .unwrap()
+                .remember_reading_history()
+        );
+        cx.update(|cx| {
+            cx.update_window(reader_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert!(
+                    frame
+                        .try_find(format!("forget-pdf:{}", missing.display()))
+                        .is_none()
+                );
+                assert!(frame.find("recent-panel").visible());
+            })
+            .unwrap()
+        });
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.path(), Some(pdf.as_path()))
+        });
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("remember-reading-history", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            settings::load(paths.config())
+                .unwrap()
+                .remember_reading_history()
+        );
+        assert!(
+            store.search("").unwrap().is_empty(),
+            "re-enabling restored cleared data"
+        );
     }
 
     #[gpui_kit::test]

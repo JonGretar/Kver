@@ -30,6 +30,15 @@ impl RecentStore {
         }
     }
 
+    fn database_exists(&self) -> Result<bool, String> {
+        self.database.try_exists().map_err(|error| {
+            format!(
+                "Cannot access reading history at {}: {error}",
+                self.database.display()
+            )
+        })
+    }
+
     fn connect(&self) -> Result<Connection, String> {
         if let Some(parent) = self.database.parent() {
             fs::create_dir_all(parent)
@@ -105,6 +114,9 @@ impl RecentStore {
         query: &str,
         excluded: Option<&Path>,
     ) -> Result<Vec<RecentFile>, String> {
+        if !self.database_exists()? {
+            return Ok(Vec::new());
+        }
         let connection = self.connect()?;
         let excluded = excluded
             .map(|path| {
@@ -140,6 +152,9 @@ impl RecentStore {
     /// Deleting the parent cascades to *all* future per-PDF child tables.
     /// Never touches the PDF on disk.
     pub fn remove(&self, path: &Path) -> Result<bool, String> {
+        if !self.database_exists()? {
+            return Ok(false);
+        }
         let path = path
             .to_str()
             .ok_or("Cannot store a non-UTF-8 document path")?;
@@ -150,7 +165,21 @@ impl RecentStore {
             .map_err(|e| e.to_string())
     }
 
+    /// The parent table is the ownership boundary for all per-PDF child data.
+    pub fn clear(&self) -> Result<(), String> {
+        if !self.database_exists()? {
+            return Ok(());
+        }
+        self.connect()?
+            .execute("DELETE FROM documents", [])
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn contains(&self, path: &Path) -> Result<bool, String> {
+        if !self.database_exists()? {
+            return Ok(false);
+        }
         let path = path
             .to_str()
             .ok_or("Cannot store a non-UTF-8 document path")?;
@@ -169,57 +198,144 @@ impl RecentStore {
 #[cfg(feature = "gui")]
 mod shared {
     use super::*;
-    use gpui_kit::{App, Global};
-    use std::future::Future;
+    use gpui_kit::{App, AppContext as _, Entity, Global};
+    use std::{
+        future::Future,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+    };
 
     /// A single background consumer orders all reader-window requests by the
     /// time they are made, not by when separately spawned workers happen to run.
     enum Request {
-        Record(PathBuf, async_channel::Sender<Result<(), String>>),
+        Record(PathBuf, u64, async_channel::Sender<Result<(), String>>),
         Search(
             String,
             Option<PathBuf>,
             async_channel::Sender<Result<Vec<RecentFile>, String>>,
         ),
         Remove(PathBuf, async_channel::Sender<Result<bool, String>>),
+        Clear(async_channel::Sender<Result<(), String>>),
+        SetRecording(bool, async_channel::Sender<Result<(), String>>),
     }
 
     #[derive(Clone)]
     pub struct RecentHistory {
         sender: async_channel::Sender<Request>,
+        epoch: Arc<AtomicU64>,
     }
 
     impl RecentHistory {
-        fn new(store: RecentStore, cx: &mut App) -> Self {
+        fn new(store: RecentStore, config: PathBuf, cx: &mut App) -> Self {
             let (sender, receiver) = async_channel::unbounded();
+            let epoch = Arc::new(AtomicU64::new(0));
+            let worker_epoch = epoch.clone();
             cx.background_executor()
                 .spawn(async move {
+                    // Read before the first queued open: an off preference must
+                    // never briefly write history during startup.
+                    let mut recording = crate::settings::load(&config)
+                        .map(|settings| settings.remember_reading_history())
+                        .unwrap_or(true);
+                    let mut session = Vec::<PathBuf>::new();
                     while let Ok(request) = receiver.recv().await {
                         match request {
-                            Request::Record(path, reply) => {
-                                let _ = reply.try_send(store.record(&path));
+                            Request::Record(path, token, reply) => {
+                                let result = if token != worker_epoch.load(Ordering::SeqCst) {
+                                    Ok(())
+                                } else if recording {
+                                    store.record(&path)
+                                } else {
+                                    Ok(())
+                                };
+                                if result.is_ok() && token == worker_epoch.load(Ordering::SeqCst) {
+                                    session.retain(|entry| entry != &path);
+                                    session.insert(0, path);
+                                }
+                                let _ = reply.try_send(result);
                             }
                             Request::Search(query, excluded, reply) => {
-                                let _ = reply
-                                    .try_send(store.search_excluding(&query, excluded.as_deref()));
+                                let result = store
+                                    .search_excluding(&query, excluded.as_deref())
+                                    .map(|files| {
+                                        let mut merged = session
+                                            .iter()
+                                            .filter(|path| {
+                                                excluded.as_ref() != Some(path)
+                                                    && path
+                                                        .to_string_lossy()
+                                                        .to_lowercase()
+                                                        .contains(&query.to_lowercase())
+                                            })
+                                            .map(|path| RecentFile { path: path.clone() })
+                                            .collect::<Vec<_>>();
+                                        merged.extend(
+                                            files
+                                                .into_iter()
+                                                .filter(|file| !session.contains(&file.path)),
+                                        );
+                                        merged.truncate(RESULT_LIMIT as usize);
+                                        merged
+                                    });
+                                let _ = reply.try_send(result);
                             }
                             Request::Remove(path, reply) => {
-                                let _ = reply.try_send(store.remove(&path));
+                                let result = store.remove(&path);
+                                if result.is_ok() {
+                                    session.retain(|entry| entry != &path);
+                                    worker_epoch.fetch_add(1, Ordering::SeqCst);
+                                }
+                                let _ = reply.try_send(result);
+                            }
+                            Request::Clear(reply) => {
+                                let result = store.clear();
+                                if result.is_ok() {
+                                    session.clear();
+                                    worker_epoch.fetch_add(1, Ordering::SeqCst);
+                                }
+                                let _ = reply.try_send(result);
+                            }
+                            Request::SetRecording(enabled, reply) => {
+                                let result = if enabled {
+                                    session.iter().rev().try_for_each(|path| store.record(path))
+                                } else {
+                                    Ok(())
+                                };
+                                // A failed flush remains retryable; the worker
+                                // must not start writing new records on failure.
+                                if result.is_ok() {
+                                    recording = enabled;
+                                }
+                                let _ = reply.try_send(result);
                             }
                         }
                     }
                 })
                 .detach();
-            Self { sender }
+            Self { sender, epoch }
+        }
+
+        pub fn epoch(&self) -> u64 {
+            self.epoch.load(Ordering::SeqCst)
         }
 
         /// Enqueue on the UI thread without doing disk work there. The returned
         /// future only waits for the background consumer's answer.
         pub fn record(&self, path: PathBuf) -> impl Future<Output = Result<(), String>> + use<> {
+            self.record_at(path, self.epoch())
+        }
+
+        pub fn record_at(
+            &self,
+            path: PathBuf,
+            epoch: u64,
+        ) -> impl Future<Output = Result<(), String>> + use<> {
             let (reply, answer) = async_channel::bounded(1);
             let queued = self
                 .sender
-                .try_send(Request::Record(path, reply))
+                .try_send(Request::Record(path, epoch, reply))
                 .map_err(|_| "Reading history worker is unavailable".to_owned());
             async move {
                 queued?;
@@ -263,14 +379,54 @@ mod shared {
                     .map_err(|_| "Reading history worker stopped".to_owned())?
             }
         }
+
+        pub fn clear(&self) -> impl Future<Output = Result<(), String>> + use<> {
+            let (reply, answer) = async_channel::bounded(1);
+            let queued = self
+                .sender
+                .try_send(Request::Clear(reply))
+                .map_err(|_| "Reading history worker is unavailable".to_owned());
+            async move {
+                queued?;
+                answer
+                    .recv()
+                    .await
+                    .map_err(|_| "Reading history worker stopped".to_owned())?
+            }
+        }
+
+        pub fn set_recording(
+            &self,
+            enabled: bool,
+        ) -> impl Future<Output = Result<(), String>> + use<> {
+            let (reply, answer) = async_channel::bounded(1);
+            let queued = self
+                .sender
+                .try_send(Request::SetRecording(enabled, reply))
+                .map_err(|_| "Reading history worker is unavailable".to_owned());
+            async move {
+                queued?;
+                answer
+                    .recv()
+                    .await
+                    .map_err(|_| "Reading history worker stopped".to_owned())?
+            }
+        }
     }
 
     pub(super) struct SharedStore(pub RecentHistory);
     impl Global for SharedStore {}
 
+    pub struct HistoryRevision;
+    struct SharedRevision(Entity<HistoryRevision>);
+    impl Global for SharedRevision {}
+
     pub fn install(cx: &mut App, paths: Option<AppPaths>) {
+        let revision = cx.new(|_| HistoryRevision);
+        cx.set_global(SharedRevision(revision));
         if let Some(paths) = paths {
-            let history = RecentHistory::new(RecentStore::new(&paths), cx);
+            let history =
+                RecentHistory::new(RecentStore::new(&paths), paths.config().to_path_buf(), cx);
             cx.set_global(SharedStore(history));
         }
     }
@@ -279,10 +435,21 @@ mod shared {
         cx.try_global::<SharedStore>()
             .map(|shared| shared.0.clone())
     }
+
+    pub fn revision(cx: &App) -> Option<Entity<HistoryRevision>> {
+        cx.try_global::<SharedRevision>()
+            .map(|shared| shared.0.clone())
+    }
+
+    pub fn notify_changed(cx: &mut App) {
+        if let Some(revision) = revision(cx) {
+            revision.update(cx, |_, cx| cx.notify());
+        }
+    }
 }
 
 #[cfg(feature = "gui")]
-pub use shared::{history, install};
+pub use shared::{history, install, notify_changed, revision};
 
 #[cfg(test)]
 mod tests {
@@ -354,6 +521,42 @@ mod tests {
     }
 
     #[test]
+    fn clear_cascades_for_missing_paths_without_changing_preferences() {
+        let (root, store) = store();
+        let config = root.path().join("config.toml");
+        crate::settings::save(
+            &config,
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        let existing = root.path().join("exists.pdf");
+        fs::write(&existing, b"%PDF").unwrap();
+        let missing = root.path().join("offline.pdf");
+        store.record(&existing).unwrap();
+        store.record(&missing).unwrap();
+        let connection = store.connect().unwrap();
+        connection.execute_batch(
+            "CREATE TABLE positions (path TEXT REFERENCES documents(path) ON DELETE CASCADE, page INTEGER);
+             INSERT INTO positions VALUES ((SELECT path FROM documents LIMIT 1), 2);"
+        ).unwrap();
+        store.clear().unwrap();
+        assert!(store.search("").unwrap().is_empty());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM positions", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(existing.exists());
+        assert!(
+            !crate::settings::load(&config)
+                .unwrap()
+                .remember_reading_history()
+        );
+    }
+
+    #[test]
     fn migration_and_unknown_version() {
         let (_root, store) = store();
         let connection = store.connect().unwrap();
@@ -378,6 +581,54 @@ mod tests {
             fs::canonicalize(&pdf).unwrap()
         );
         assert!(RecentStore::normalize(&root.path().join("missing.pdf")).is_err());
+    }
+
+    #[cfg(feature = "gui")]
+    #[gpui_kit::test]
+    fn pending_open_from_before_clear_does_not_recreate_deleted_data(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use std::sync::{Arc, Mutex};
+        let (root, store) = store();
+        let pdf = root.path().join("pending.pdf");
+        store.record(&pdf).unwrap();
+        let paths =
+            AppPaths::for_locations(root.path().join("config.toml"), root.path().join("local"));
+        let history = cx.update(|cx| {
+            gpui_kit::init(cx);
+            install(cx, Some(paths));
+            history(cx).unwrap()
+        });
+        let pending = history.epoch();
+        let clear = history.clear();
+        let observed = Arc::new(Mutex::new(None));
+        let answer = observed.clone();
+        cx.update(|cx| {
+            cx.spawn(async move |_| *answer.lock().unwrap() = Some(clear.await))
+                .detach();
+        });
+        cx.run_until_parked();
+        observed.lock().unwrap().take().unwrap().unwrap();
+        let late = history.record_at(pdf.clone(), pending);
+        let observed = Arc::new(Mutex::new(None));
+        let answer = observed.clone();
+        cx.update(|cx| {
+            cx.spawn(async move |_| *answer.lock().unwrap() = Some(late.await))
+                .detach();
+        });
+        cx.run_until_parked();
+        observed.lock().unwrap().take().unwrap().unwrap();
+        assert!(!store.contains(&pdf).unwrap());
+        let reopened = history.record(pdf.clone());
+        let observed = Arc::new(Mutex::new(None));
+        let answer = observed.clone();
+        cx.update(|cx| {
+            cx.spawn(async move |_| *answer.lock().unwrap() = Some(reopened.await))
+                .detach();
+        });
+        cx.run_until_parked();
+        observed.lock().unwrap().take().unwrap().unwrap();
+        assert!(store.contains(&pdf).unwrap());
     }
 
     #[cfg(feature = "gui")]

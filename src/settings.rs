@@ -121,6 +121,7 @@ impl InitialZoom {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     appearance: Appearance,
+    remember_reading_history: bool,
     quit_when_last_window_closes: bool,
     initial_zoom: InitialZoom,
 }
@@ -132,6 +133,15 @@ impl AppSettings {
 
     pub fn with_appearance(mut self, appearance: Appearance) -> Self {
         self.appearance = appearance;
+        self
+    }
+
+    pub fn remember_reading_history(self) -> bool {
+        self.remember_reading_history
+    }
+
+    pub fn with_remember_reading_history(mut self, remember: bool) -> Self {
+        self.remember_reading_history = remember;
         self
     }
 
@@ -156,6 +166,7 @@ impl AppSettings {
     fn from_document(document: &DocumentMut) -> Result<Self, String> {
         Ok(Self {
             appearance: appearance_in(document)?,
+            remember_reading_history: history_in(document)?,
             quit_when_last_window_closes: quit_when_last_window_closes_in(document)?,
             initial_zoom: initial_zoom_in(document)?,
         })
@@ -166,6 +177,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             appearance: Appearance::default(),
+            remember_reading_history: true,
             quit_when_last_window_closes: true,
             initial_zoom: InitialZoom::default(),
         }
@@ -176,6 +188,7 @@ impl Default for AppSettings {
 #[derive(Clone, Copy, Debug)]
 pub enum SettingsChange {
     Appearance(Appearance),
+    RememberReadingHistory(bool),
     QuitWhenLastWindowCloses(bool),
     InitialZoom(InitialZoom),
 }
@@ -194,6 +207,18 @@ impl SettingsChange {
                     *existing.decor_mut() = decor;
                 } else {
                     document["appearance"]["theme_mode"] = value(appearance.key());
+                }
+            }
+            Self::RememberReadingHistory(remember) => {
+                if document.get("reading_history").is_none() {
+                    document["reading_history"] = Item::Table(Table::new());
+                }
+                if let Some(existing) = document["reading_history"]["remember"].as_value_mut() {
+                    let decor = existing.decor().clone();
+                    *existing = remember.into();
+                    *existing.decor_mut() = decor;
+                } else {
+                    document["reading_history"]["remember"] = value(remember);
                 }
             }
             Self::QuitWhenLastWindowCloses(quit) => {
@@ -264,6 +289,21 @@ fn appearance_in(document: &DocumentMut) -> Result<Appearance, String> {
             .as_str()
             .ok_or_else(|| "Settings [appearance].theme_mode must be a string".to_owned())
             .and_then(Appearance::parse),
+    }
+}
+
+fn history_in(document: &DocumentMut) -> Result<bool, String> {
+    let Some(history) = document.get("reading_history") else {
+        return Ok(true);
+    };
+    let history = history
+        .as_table()
+        .ok_or("Settings [reading_history] must be a table")?;
+    match history.get("remember") {
+        None => Ok(true),
+        Some(remember) => remember
+            .as_bool()
+            .ok_or_else(|| "Settings [reading_history].remember must be a boolean".to_owned()),
     }
 }
 
@@ -361,7 +401,31 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config/config.toml");
         assert_eq!(load(&path).unwrap(), Appearance::System);
+        assert!(super::load(&path).unwrap().remember_reading_history());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn history_choice_preserves_other_toml_and_rejects_invalid_edits() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "# keep\n[reading_history]\nremember = true # keep inline\n[other]\nvalue = 7\n",
+        )
+        .unwrap();
+        super::save(&path, SettingsChange::RememberReadingHistory(false)).unwrap();
+        assert!(!super::load(&path).unwrap().remember_reading_history());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("remember = false # keep inline"));
+        assert!(text.contains("[other]\nvalue = 7"));
+        fs::write(&path, "[reading_history]\nremember = 'no'\n").unwrap();
+        assert!(super::load(&path).is_err());
+        assert!(super::save(&path, SettingsChange::RememberReadingHistory(true)).is_err());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "[reading_history]\nremember = 'no'\n"
+        );
     }
 
     #[test]

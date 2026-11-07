@@ -63,7 +63,9 @@ document-owned marks coordination. It does not retain the sidebar or its
 panels, window chrome, the palette, or Recent dialogs. The former public
 `Preview` name remains an alias for callers adopting the narrower interface.
 `src/reader/commands.rs` declares document commands independently of physical
-bindings. Navigation and raster rules still share the reader implementation;
+bindings. `src/reader/selection.rs` owns text selection and its page-text cache
+as ordinary Rust state, without a separate entity or view back-reference.
+Navigation and raster rules still share the reader implementation;
 their deeper separation is the remaining modularization work.
 `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
@@ -397,12 +399,24 @@ Reader navigation anchors use page-local PDF points, not screen pixels.
 `src/coordinates.rs` provides transforms between PDF document coordinates,
 cropped/rotated page-local coordinates, and the viewport; the rendered bitmap
 is only a display representation. The PDF adapter collects positioned glyphs
-on a background worker for visible pages. The reader keeps one-line selection
-anchors in document coordinates and projects its transient highlight through
-the page transform at the current zoom, independently of the raster cache.
-Changing documents invalidates pending text work and clears selection. More
-general line grouping, rotated/cropped text selection, and scans are separate
-follow-ups.
+on a background worker for visible pages. The reader's `Selection` state owns
+glyph-boundary anchors, hit testing, drag lifetime, copied text, and page-local
+highlight rectangles. `ReaderView` converts pointer coordinates, executes
+background requests, projects highlights at the current zoom, and writes to
+the clipboard. Zoom does not invalidate selection or page text.
+
+Selection keeps visible page text plus the selected page so copying still
+works after scrolling away in Continuous mode. One current text request runs
+at a time; after completion, the next request uses the latest viewport.
+Requests carry the reader's document generation, not its raster generation.
+Replacing a document resets selection, retained text, failures, and the current
+request; an old reply cannot install text or clear a replacement request.
+Entering Single Page mode clears a selection on another page, and turning
+pages in that mode clears the selection.
+Pure selection and request-lifecycle tests live under
+`src/reader/selection/`; pointer, copy, zoom, and replacement workflows live in
+`src/reader/tests/selection.rs`. More general line grouping, rotated/cropped
+text selection, and scans remain separate follow-ups.
 
 ## Future state
 

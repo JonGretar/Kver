@@ -4,6 +4,7 @@ mod commands;
 mod contents;
 mod find;
 mod marks;
+mod selection;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
 pub use crate::app::document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar};
@@ -21,6 +22,7 @@ pub use marks::{
     ShowSetMark,
 };
 pub(crate) use marks::{LocalMarks, MarksView};
+use selection::Selection;
 
 use std::{
     collections::HashMap,
@@ -157,89 +159,6 @@ struct Bitmap {
     bytes: usize,
 }
 
-/// Boundary indices refer to visually ordered document-space glyphs, not pixels.
-#[derive(Clone, Copy)]
-struct TextAnchor {
-    page: usize,
-    line: usize,
-    boundary: usize,
-}
-
-#[derive(Clone, Copy)]
-struct TextSelection {
-    start: TextAnchor,
-    end: TextAnchor,
-}
-
-fn selected_ranges(selection: TextSelection, text: &pdf::PageText) -> Vec<std::ops::Range<usize>> {
-    let (start, end) = if (selection.start.line, selection.start.boundary)
-        <= (selection.end.line, selection.end.boundary)
-    {
-        (selection.start, selection.end)
-    } else {
-        (selection.end, selection.start)
-    };
-    (start.line..=end.line)
-        .filter_map(|line| {
-            let range = text.lines.get(line)?;
-            let from = if line == start.line {
-                start.boundary
-            } else {
-                range.start
-            };
-            let to = if line == end.line {
-                end.boundary
-            } else {
-                range.end
-            };
-            (from < to && from >= range.start && to <= range.end).then_some(from..to)
-        })
-        .collect()
-}
-
-fn selected_text(selection: TextSelection, text: &pdf::PageText) -> Option<String> {
-    let ranges = selected_ranges(selection, text);
-    let mut result = String::new();
-    let mut previous: Option<&pdf::TextGlyph> = None;
-    for range in ranges {
-        let first = text.glyphs.get(range.start)?;
-        if let Some(last) = previous {
-            result.push('\n');
-            let height = last.top - last.bottom;
-            if (last.start.y - first.start.y).abs() > height * 1.7 {
-                result.push('\n');
-            }
-        }
-        for glyph in &text.glyphs[range.clone()] {
-            result.push_str(&glyph.text);
-        }
-        previous = text.glyphs.get(range.end - 1);
-    }
-    (!result.is_empty()).then_some(result)
-}
-
-fn hit_boundary(text: &pdf::PageText, at: Point) -> Option<(usize, usize)> {
-    text.lines.iter().enumerate().find_map(|(line, range)| {
-        text.glyphs[range.clone()]
-            .iter()
-            .enumerate()
-            .filter(|(_, glyph)| {
-                at.y >= glyph.bottom - 3.0
-                    && at.y <= glyph.top + 3.0
-                    && at.x >= glyph.start.x - 8.0
-                    && at.x <= glyph.end.x + 8.0
-            })
-            .flat_map(|(offset, glyph)| {
-                [
-                    (line, range.start + offset, glyph.start),
-                    (line, range.start + offset + 1, glyph.end),
-                ]
-            })
-            .min_by(|(_, _, a), (_, _, b)| (a.x - at.x).abs().total_cmp(&(b.x - at.x).abs()))
-            .map(|(line, boundary, _)| (line, boundary))
-    })
-}
-
 /// Central PDF surface and document lifecycle, independent of window chrome.
 pub struct ReaderView {
     path: Option<PathBuf>,
@@ -261,11 +180,7 @@ pub struct ReaderView {
     in_flight: Option<(usize, u64)>,
     generation: u64,
     document_generation: u64,
-    text: HashMap<usize, pdf::PageText>,
-    text_failed: std::collections::HashSet<usize>,
-    text_in_flight: Option<usize>,
-    selection: Option<TextSelection>,
-    dragging: bool,
+    selection: Selection,
     failed: Option<usize>,
     page_index: usize,
     // A deliberate page turn remains current even if the viewport also shows
@@ -320,11 +235,7 @@ impl ReaderView {
             in_flight: None,
             generation: 0,
             document_generation: 0,
-            text: HashMap::new(),
-            text_failed: std::collections::HashSet::new(),
-            text_in_flight: None,
-            selection: None,
-            dragging: false,
+            selection: Selection::default(),
             failed: None,
             page_index: 0,
             selected_page: None,
@@ -351,11 +262,7 @@ impl ReaderView {
         self.marks = None;
         self.marks_subscriptions.clear();
         self.find_highlight = None;
-        self.text.clear();
-        self.text_failed.clear();
-        self.text_in_flight = None;
-        self.selection = None;
-        self.dragging = false;
+        self.selection.reset();
         self.path = Some(path);
         self.record_path = None;
         self.position_ready = false;
@@ -737,10 +644,7 @@ impl ReaderView {
     }
 
     pub fn selected_text(&self) -> Option<String> {
-        let selection = self.selection?;
-        self.text
-            .get(&selection.start.page)
-            .and_then(|page| selected_text(selection, page))
+        self.selection.selected_text()
     }
 
     fn page_top(&self, index: usize) -> f32 {
@@ -787,8 +691,7 @@ impl ReaderView {
 
     fn focus_page(&mut self, page: usize) {
         if self.reading_mode == ReadingMode::SinglePage && page != self.page_index {
-            self.selection = None;
-            self.dragging = false;
+            self.selection.clear();
         }
         self.page_index = page;
         self.selected_page = Some(page);
@@ -815,10 +718,10 @@ impl ReaderView {
         if mode == ReadingMode::SinglePage
             && self
                 .selection
-                .is_some_and(|selection| selection.start.page != page)
+                .page()
+                .is_some_and(|selected| selected != page)
         {
-            self.selection = None;
-            self.dragging = false;
+            self.selection.clear();
         }
         self.focus_page(page);
         let y = if position.page == page {
@@ -869,7 +772,7 @@ impl ReaderView {
 
     /// Measured scroll bounds and centered page layout define the window origin.
     fn page_viewport(&self, index: usize) -> Option<PageViewport> {
-        let text = self.text.get(&index)?;
+        let transform = self.selection.page_transform(index)?;
         let bounds = self.scroll.bounds();
         let width = self.pages.get(index)?.0 * self.scale;
         let inner_width = (f32::from(bounds.size.width) - PAGE_PADDING * 2.0).max(0.0);
@@ -882,7 +785,7 @@ impl ReaderView {
                 + self.page_top(index) as f64,
         };
         PageViewport::new(
-            text.transform,
+            transform,
             self.scale as f64,
             origin,
             Point {
@@ -892,21 +795,11 @@ impl ReaderView {
         )
     }
 
-    fn pointer_anchor(
-        &self,
-        page: usize,
-        position: gpui::Point<gpui::Pixels>,
-    ) -> Option<TextAnchor> {
+    fn pointer_document(&self, page: usize, position: gpui::Point<gpui::Pixels>) -> Option<Point> {
         let viewport = self.page_viewport(page)?;
-        let document = viewport.screen_to_document(Point {
+        viewport.screen_to_document(Point {
             x: f32::from(position.x) as f64,
             y: f32::from(position.y) as f64,
-        })?;
-        let (line, boundary) = hit_boundary(self.text.get(&page)?, document)?;
-        Some(TextAnchor {
-            page,
-            line,
-            boundary,
         })
     }
 
@@ -916,26 +809,16 @@ impl ReaderView {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.selection = self
-            .pointer_anchor(page, position)
-            .map(|anchor| TextSelection {
-                start: anchor,
-                end: anchor,
-            });
-        self.dragging = self.selection.is_some();
+        self.selection
+            .begin(page, self.pointer_document(page, position));
         cx.notify();
     }
 
     fn extend_selection(&mut self, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
-        if !self.dragging {
-            return;
-        }
-        let Some(mut selection) = self.selection else {
-            return;
-        };
-        if let Some(anchor) = self.pointer_anchor(selection.start.page, position) {
-            selection.end = anchor;
-            self.selection = Some(selection);
+        if let Some(page) = self.selection.dragging_page()
+            && let Some(at) = self.pointer_document(page, position)
+            && self.selection.extend(at)
+        {
             cx.notify();
         }
     }
@@ -947,44 +830,29 @@ impl ReaderView {
     }
 
     fn schedule_text(&mut self, cx: &mut Context<Self>) {
-        if self.pages.is_empty() || self.text_in_flight.is_some() {
+        if self.pages.is_empty() {
             return;
         }
+        let Some(path) = self.path.as_ref() else {
+            return;
+        };
         let (top, _, height) = self.viewport();
-        let mut visible = self.visible_pages(top, height);
-        self.text.retain(|index, _| {
-            visible.contains(index)
-                || self
-                    .selection
-                    .is_some_and(|selection| selection.start.page == *index)
-        });
-        let Some(index) = visible
-            .find(|index| !self.text.contains_key(index) && !self.text_failed.contains(index))
+        let visible = self.visible_pages(top, height);
+        let Some(request) = self
+            .selection
+            .request_text(visible, self.document_generation)
         else {
             return;
         };
-        let Some(path) = self.path.clone() else {
-            return;
-        };
-        self.text_in_flight = Some(index);
-        let generation = self.document_generation;
+        let path = path.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::page_text(&path, index) });
+            .spawn(async move { pdf::page_text(&path, request.page()) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                if this.document_generation != generation {
+                if !this.selection.finish_text(request, result) {
                     return;
-                }
-                this.text_in_flight = None;
-                match result {
-                    Ok(text) => {
-                        this.text.insert(index, text);
-                    }
-                    Err(_) => {
-                        this.text_failed.insert(index);
-                    }
                 }
                 this.schedule_text(cx);
                 cx.notify();
@@ -1429,71 +1297,16 @@ impl Render for ReaderView {
                         ),
                 );
             }
-            if let (Some(selection), Some(text)) = (self.selection, self.text.get(&index))
-                && selection.start.page == index
-                && selected_text(selection, text).is_some()
-            {
-                for range in selected_ranges(selection, text) {
-                    let glyphs = &text.glyphs[range];
-                    let first = &glyphs[0];
-                    let last = &glyphs[glyphs.len() - 1];
-                    let top = glyphs
-                        .iter()
-                        .map(|glyph| glyph.top)
-                        .fold(f64::NEG_INFINITY, f64::max);
-                    let bottom = glyphs
-                        .iter()
-                        .map(|glyph| glyph.bottom)
-                        .fold(f64::INFINITY, f64::min);
-                    let corners = [
-                        Point {
-                            x: first.start.x,
-                            y: top,
-                        },
-                        Point {
-                            x: last.end.x,
-                            y: top,
-                        },
-                        Point {
-                            x: first.start.x,
-                            y: bottom,
-                        },
-                        Point {
-                            x: last.end.x,
-                            y: bottom,
-                        },
-                    ]
-                    .map(|corner| text.transform.document_to_page(corner));
-                    let left = corners
-                        .iter()
-                        .map(|point| point.x)
-                        .fold(f64::INFINITY, f64::min)
-                        .clamp(0.0, width as f64);
-                    let right = corners
-                        .iter()
-                        .map(|point| point.x)
-                        .fold(f64::NEG_INFINITY, f64::max)
-                        .clamp(0.0, width as f64);
-                    let top = corners
-                        .iter()
-                        .map(|point| point.y)
-                        .fold(f64::INFINITY, f64::min)
-                        .clamp(0.0, self.pages[index].1 as f64);
-                    let bottom = corners
-                        .iter()
-                        .map(|point| point.y)
-                        .fold(f64::NEG_INFINITY, f64::max)
-                        .clamp(0.0, self.pages[index].1 as f64);
-                    page = page.child(
-                        div()
-                            .absolute()
-                            .left(px((left * self.scale as f64) as f32))
-                            .top(px((top * self.scale as f64) as f32))
-                            .w(px(((right - left) * self.scale as f64) as f32))
-                            .h(px(((bottom - top) * self.scale as f64) as f32))
-                            .bg(gpui::rgba(0x278acb70)),
-                    );
-                }
+            for highlight in self.selection.highlights(index, self.pages[index]) {
+                page = page.child(
+                    div()
+                        .absolute()
+                        .left(px((highlight.left * self.scale as f64) as f32))
+                        .top(px((highlight.top * self.scale as f64) as f32))
+                        .w(px((highlight.width * self.scale as f64) as f32))
+                        .h(px((highlight.height * self.scale as f64) as f32))
+                        .bg(gpui::rgba(0x278acb70)),
+                );
             }
             page = page.on_mouse_down(
                 gpui::MouseButton::Left,
@@ -1534,7 +1347,7 @@ impl Render for ReaderView {
             .on_action(cx.listener(Self::on_copy))
             .on_mouse_up(
                 gpui::MouseButton::Left,
-                cx.listener(|this, _, _, _| this.dragging = false),
+                cx.listener(|this, _, _, _| this.selection.finish()),
             )
             .on_action(cx.listener(|this, _: &NextPage, _, cx| {
                 if !this.pages.is_empty() {
@@ -1623,7 +1436,7 @@ impl Render for ReaderView {
                         gpui::MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
                             this.extend_selection(event.position, cx);
-                            this.dragging = false;
+                            this.selection.finish();
                         }),
                     )
                     .on_scroll(cx.listener(|this, _, _, cx| {
@@ -1729,6 +1542,7 @@ mod tests {
 
     mod find;
     mod marks;
+    mod selection;
 
     fn recent_test_window(
         cx: &mut TestAppContext,
@@ -3524,84 +3338,6 @@ mod tests {
             );
         }
         assert!(highest >= 1, "scrolling must reach page two");
-    }
-
-    #[gpui_kit::test]
-    fn dragging_text_and_copying_uses_document_coordinates(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-        });
-        let window = cx.add_window(|window, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                window.scale_factor(),
-                cx,
-            )
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        cx.run_until_parked();
-        let (start, end) = window
-            .read_with(cx, |reader, _| {
-                let text = reader.text.get(&0).expect("page text loaded");
-                let viewport = reader.page_viewport(0).expect("page viewport measured");
-                let screen_point = |index: usize, fraction: f64| {
-                    let glyph = &text.glyphs[index];
-                    let screen = viewport.document_to_screen(Point {
-                        x: glyph.start.x + (glyph.end.x - glyph.start.x) * fraction,
-                        y: glyph.start.y + (glyph.top - glyph.start.y) * 0.4,
-                    });
-                    point(px(screen.x as f32), px(screen.y as f32))
-                };
-                (screen_point(0, 0.1), screen_point(4, 0.8))
-            })
-            .unwrap();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
-                frame.drag(start, end, cx);
-            })
-            .unwrap();
-        });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.selected_text().as_deref(), Some("KVER "));
-            })
-            .unwrap();
-        cx.simulate_keystrokes(window.into(), "cmd-c");
-        assert_eq!(
-            cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
-            Some("KVER ".into())
-        );
-        window
-            .update(cx, |reader, _, cx| {
-                reader.set_reading_mode(ReadingMode::SinglePage, cx)
-            })
-            .unwrap();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.drag(start, end, cx);
-            })
-            .unwrap();
-        });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.selected_text().as_deref(), Some("KVER "));
-            })
-            .unwrap();
-        window
-            .update(cx, |reader, _, cx| reader.next_page(cx))
-            .unwrap();
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
-                assert_eq!(reader.selected_text(), None);
-            })
-            .unwrap();
     }
 
     #[gpui_kit::test]

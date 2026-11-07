@@ -295,8 +295,8 @@ follow-ups.
 
 ## Future state
 
-Reading history, positions, per-document reading modes, and appearance settings
-persist. Marks are separate future work; the SQLite document record is their
-shared deletion boundary. Platform-specific menus, dialogs, and packaging
-belong at the application boundary; PDF and navigation behavior should remain
-portable.
+Navigation history, internal links, and independent named bookmarks remain
+future work. The existing SQLite document record is the shared deletion
+boundary for per-PDF positions, reading-mode overrides, and local marks.
+Platform-specific menus, dialogs, and packaging belong at the application
+boundary; PDF and navigation behavior should remain portable.

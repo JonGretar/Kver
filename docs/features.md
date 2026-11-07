@@ -40,8 +40,9 @@ These capabilities were validated together in
 [reader-experience spec (#33)](https://github.com/JonGretar/Kver/issues/33).
 Selection remains page-local, uses available PDF text mappings, and does not
 include OCR or guaranteed reading order for complex layouts. Find and Contents
-are delivered in the following gate; history and the goals below remain
-deferred. This completed gate does not imply another release version or date.
+are delivered in the following gate; reading history and preferences are
+delivered in the persistence gate below. This completed gate does not imply
+another release version or date.
 
 ## Find and Contents — completed reader gate
 
@@ -61,6 +62,28 @@ scope; [#58](https://github.com/JonGretar/Kver/issues/58) records the combined
 validation and supported limitations. This gate has no assigned release
 version or date. Trackpad pinch-to-zoom may be investigated separately.
 
+## Persistence, Settings, and Single Page — completed reader gate
+
+- Set app-wide appearance, initial zoom, and opening reading mode in Settings.
+  Valid hand edits to TOML apply while Kver runs; invalid edits leave the last
+  valid preferences active until corrected.
+- Search Open Recent across stored PDFs. Resume at the last page-local place
+  when enabled, without automatically restoring old reader windows.
+- Read in Continuous or Single Page mode. Scrolling a single page never turns
+  it; explicit navigation does. A PDF-specific mode can differ from the app
+  default without changing another open reader's live mode.
+- Set and revisit PDF-local `a`–`z` marks using keyboard sequences, the
+  command palette, or a searchable popup. A mark can have an optional display
+  name, but the letter remains its identity.
+- Keep new per-PDF activity session-only when recording is off. Clearing
+  history or forgetting one PDF removes its saved reading data without deleting
+  PDF files. On macOS, closing the last window can leave Kver available via the
+  Dock, menu, and Finder; explicit Quit always exits.
+
+The [spec (#67)](https://github.com/JonGretar/Kver/issues/67) defines the
+scope; [#77](https://github.com/JonGretar/Kver/issues/77) records combined
+validation and supported limits. There is no assigned release version or date.
+
 ## Goals without a fixed release date
 
 ### Visual ruler
@@ -74,11 +97,11 @@ promise for the immediately following release.
 ### More navigation and desktop controls
 
 - Follow internal links.
-- Navigate backward and forward and restore the last reading position.
-  Search-result highlights are not saved annotations.
-- Configurable keybindings and preferences.
-- Vim-style sequences, numeric counts, and named marks.
-- Recent-file search and drag-and-drop.
+- Navigate backward and forward. Search-result highlights are not saved
+  annotations.
+- Configurable keybindings, numeric counts, and general Vim-style commands
+  beyond the built-in local-mark sequences.
+- Independent named bookmarks and drag-and-drop.
 - Password-protected PDFs if deferred from MVP.
 - Link hints and keyboard-driven text selection.
 

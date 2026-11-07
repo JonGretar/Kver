@@ -3971,6 +3971,58 @@ mod tests {
         pdf
     }
 
+    fn image_only_pdf() -> Vec<u8> {
+        let width = 595;
+        let height = 842;
+        let pixels: Vec<u8> = (0..height)
+            .flat_map(|y| {
+                (0..width).map(move |x| if (x / 13 + y / 13) % 2 == 0 { 224 } else { 64 })
+            })
+            .collect();
+        let content = b"q\n595 0 0 842 0 0 cm\n/Im1 Do\nQ\n";
+        let mut image = format!(
+            "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} \
+             /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n",
+            pixels.len()
+        )
+        .into_bytes();
+        image.extend_from_slice(&pixels);
+        image.extend_from_slice(b"\nendstream");
+        let mut page_content = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+        page_content.extend_from_slice(content);
+        page_content.extend_from_slice(b"endstream");
+        let objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>".to_vec(),
+            image,
+            page_content,
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+            pdf.extend_from_slice(object);
+            pdf.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
     #[gpui_kit::test]
     fn mode_override_survives_reopen_but_use_default_follows_new_preference(
         cx: &mut TestAppContext,
@@ -4277,6 +4329,215 @@ mod tests {
             assert_eq!(reader.reading_position().0, position.0);
             assert!((reader.reading_position().1 - position.1).abs() < 2.0);
         });
+    }
+
+    #[gpui_kit::test]
+    fn private_single_page_place_and_mark_follow_the_pdf_across_windows_and_restart(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let file = root.path().join("rotated.pdf");
+        std::fs::write(
+            &file,
+            three_page_pdf_with_boxes(
+                [(600, 1400), (800, 1500), (700, 1300)],
+                ["", "/Rotate 90 /CropBox [40 30 700 1350]", ""],
+            ),
+        )
+        .unwrap();
+        let pdf = RecentStore::normalize(&file).unwrap();
+        let store = RecentStore::new(&paths);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+                frame.dispatch_action(Box::new(NextPage), cx);
+                frame.dispatch_action(Box::new(SetLocalMark('a')), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(store.marks(&pdf).unwrap()[&'a'].position.page, 1);
+
+        // Disabling history keeps the reader usable without writing new state.
+        cx.update(|cx| cx.dispatch_action(&ShowSettings));
+        cx.run_until_parked();
+        let settings_window = cx.update(|cx| *cx.windows().last().unwrap());
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("reading-history", cx);
+                frame.click("remember-reading-history", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(NextPage), cx);
+                frame.dispatch_action(Box::new(SetLocalMark('b')), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| first.read(cx).page_index()), 2);
+        assert_eq!(store.position(&pdf).unwrap().unwrap().page, 1);
+        assert!(!store.marks(&pdf).unwrap().contains_key(&'b'));
+
+        let (other_window, other) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert_eq!(reader.page_index(), 2);
+        });
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(JumpLocalMark('b')), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 2));
+
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("remember-reading-history", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(store.position(&pdf).unwrap().unwrap().page, 2);
+        assert_eq!(store.marks(&pdf).unwrap()[&'b'].position.page, 2);
+
+        // Reinstalling the services represents a fresh app session reading disk.
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, reopened) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert_eq!(reader.page_index(), 2);
+        });
+        reopened.update(cx, |reader, cx| {
+            reader.select_page(0, cx);
+            reader.jump_mark('b', cx);
+        });
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 2));
+    }
+
+    #[gpui_kit::test]
+    fn long_pdf_keeps_single_page_work_bounded_and_restores_its_last_page(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let file = root.path().join("long.pdf");
+        std::fs::write(&file, pdf_with_boxes(&[(612, 792); 500], &[""; 500])).unwrap();
+        let pdf = RecentStore::normalize(&file).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| assert_eq!(reader.page_count(), Some(500)));
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+            })
+            .unwrap();
+        });
+        reader.update(cx, |reader, cx| reader.select_page(499, cx));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 499);
+            assert!(
+                reader.images.len() <= 2,
+                "Single Page eagerly rendered {} pages",
+                reader.images.len()
+            );
+        });
+
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, reopened) = recent_test_window(cx, Some(pdf));
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert_eq!(reader.page_index(), 499);
+            assert!(reader.images.len() <= 2);
+        });
+    }
+
+    #[gpui_kit::test]
+    fn image_only_page_can_scroll_and_keep_a_local_mark_without_text(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let file = root.path().join("image-only.pdf");
+        std::fs::write(&file, image_only_pdf()).unwrap();
+        let pdf = RecentStore::normalize(&file).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        assert!(pdf::page_text(&pdf, 0).unwrap().glyphs.is_empty());
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+                frame.scroll(
+                    "page",
+                    gpui::ScrollDelta::Pixels(point(px(0.0), px(-1200.0))),
+                    cx,
+                );
+                frame.dispatch_action(Box::new(SetLocalMark('s')), cx);
+                frame.dispatch_action(Box::new(NextPage), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_count(), Some(1));
+            assert_eq!(reader.page_index(), 0);
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert!(reader.images.len() <= 1);
+        });
+        let (_, other) = recent_test_window(cx, Some(pdf));
+        cx.run_until_parked();
+        other.update(cx, |reader, cx| reader.jump_mark('s', cx));
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
     }
 
     #[gpui_kit::test]

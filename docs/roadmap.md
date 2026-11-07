@@ -2,8 +2,9 @@
 
 Kver's first job is to read PDFs well. The first downloadable product is an
 Apple silicon macOS MVP, not a replacement for every existing reader.
-The action-driven reader and Find/Contents gates are complete; further goals
-have no fixed release sequence. See [features](features.md) for their scope.
+The action-driven, Find/Contents, and persistence/reading-mode gates are
+complete; further goals have no fixed release sequence. See
+[features](features.md) for their scope.
 
 ## Where we are
 
@@ -13,11 +14,11 @@ have no fixed release sequence. See [features](features.md) for their scope.
 | 1. Ship a macOS MVP | **Complete** | The v0.1.0 Apple silicon app is downloadable; its archive and real-Mac launch and reading behavior have been checked. |
 | 2. Build an action-driven reader | **Complete** | The integrated reader passed headless checks and an Apple silicon native-window check for actions, independent windows, and visible text copy ([#42](https://github.com/JonGretar/Kver/issues/42)). |
 | 3. Find and navigate a document | **Complete** | Find and Contents work together in one sidebar, with headless and real-Mac checks ([#58](https://github.com/JonGretar/Kver/issues/58)); no release version or date is assigned. |
+| 4. Remember and configure reading | **Complete** | Settings, recent files, positions, Single Page, and local marks work together ([#77](https://github.com/JonGretar/Kver/issues/77)); no release version or date is assigned. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** The [persistence and reading-mode gate (#67)](https://github.com/JonGretar/Kver/issues/67)
-is underway; its remaining tickets track the work without a release date.
-Internal links and the other [unscheduled goals](#goals-to-schedule-after-evidence)
+**Next work:** No further reader gate is scheduled. Internal links,
+navigation history, and the other [unscheduled goals](#goals-to-schedule-after-evidence)
 remain deferred. GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
 
@@ -156,6 +157,28 @@ not release requirements. No release version or date is assigned to this gate.
 The combined validation and supported limits are recorded in
 [#58](https://github.com/JonGretar/Kver/issues/58).
 
+## 4. Remember and configure reading
+
+**Outcome:** A reader can set app-wide defaults, find a previously opened PDF,
+resume its place, switch between continuous and single-page reading, and return
+to document-local letter marks. The [spec (#67)](https://github.com/JonGretar/Kver/issues/67)
+defines the scope and dependencies.
+
+Settings stores user-editable app defaults in TOML and applies valid external
+edits while running. SQLite stores recent files, positions, PDF-specific reading
+modes, and local `a`–`z` marks. Turning off history recording keeps new per-PDF
+changes usable in the running app without saving them; explicit clear actions
+remove saved data. Single Page scroll stays on the current page until an explicit
+page turn. On macOS, the last-window quit choice can leave Kver running without
+a reader window; New Window, Dock activation, and Finder file-open still work.
+
+**Gate:** Integrated reader tests cover isolated storage, live configuration,
+privacy controls, reopening, changed PDFs, and independent windows. A native
+Apple silicon check covers Settings, recent files, Single Page input, marks,
+restart, and zero-window recovery. [#77](https://github.com/JonGretar/Kver/issues/77)
+records validation and remaining limits. Linux and Windows delivery remain
+separate gates; this milestone has no assigned release version or date.
+
 ## Separate platform delivery
 
 Linux and Windows remain product targets. Their compatibility is checked
@@ -172,8 +195,8 @@ Keep these visible without implying a date or order:
 - Internal links and back/forward navigation history.
 - Visual ruler: keyboard movement along text lines, a positional fallback on
   scans, and stable placement through zoom/scroll.
-- Configurable keybindings, numeric counts, multi-key commands, named marks,
-  recent-file search, and drag-and-drop.
+- Configurable keybindings, numeric counts, a general multi-key command
+  language, independent named bookmarks, and drag-and-drop.
 - Password-protected PDFs if not shipped in the MVP.
 - Notes, persistent highlights, and annotation interchange.
 - Reload after PDF rebuilds and SyncTeX source/PDF navigation for LaTeX.

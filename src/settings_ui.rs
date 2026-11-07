@@ -70,6 +70,10 @@ impl SettingsState {
         self.settings.remember_reading_history()
     }
 
+    pub fn reopen_at_last_position(&self) -> bool {
+        self.settings.reopen_at_last_position()
+    }
+
     pub fn quit_when_last_window_closes(&self) -> bool {
         self.settings.quit_when_last_window_closes()
     }
@@ -105,6 +109,9 @@ impl SettingsState {
             }
             SettingsChange::RememberReadingHistory(remember) => {
                 self.settings.with_remember_reading_history(remember)
+            }
+            SettingsChange::ReopenAtLastPosition(reopen) => {
+                self.settings.with_reopen_at_last_position(reopen)
             }
         };
         if self.settings == updated && self.pending.is_none() {
@@ -565,6 +572,8 @@ impl Render for SettingsView {
         let reset_focus = self.choice_focus.clone();
         let remember = settings.remember_reading_history();
         let history_state = self.settings.clone();
+        let reopen_position = settings.reopen_at_last_position();
+        let position_state = self.settings.clone();
         let clear_owner = cx.weak_entity();
         let clearing = self.clearing;
         let clear_error = self.clear_error.clone();
@@ -908,6 +917,19 @@ impl Render for SettingsView {
                                     ),
                             ))
                             .children((page == SettingsPage::Persistence).then(||
+                                div().px_4().pb_4().child(preference_row(
+                                    "Reopen at Last Position",
+                                    "Resume a PDF where you stopped. When off, new opens start at the beginning without erasing the saved place.",
+                                    Switch::new("reopen-at-last-position")
+                                        .accessibility_label("Reopen at Last Position")
+                                        .checked(reopen_position)
+                                        .on_change(move |next, _, cx| {
+                                            position_state.update(cx, |settings, cx| settings.choose(SettingsChange::ReopenAtLastPosition(*next), cx));
+                                        }),
+                                    cx,
+                                ))
+                            ))
+                            .children((page == SettingsPage::Persistence).then(||
                                 div()
                                     .p_4()
                                     .flex()
@@ -1237,6 +1259,49 @@ mod tests {
                 );
                 frame.click("application", cx);
                 assert_eq!(frame.find("reopen-last-windows").checked(), Some(false));
+            })
+            .unwrap();
+        });
+    }
+
+    #[gpui_kit::test]
+    fn restore_position_switch_persists_and_tracks_valid_file_edits(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            AppPaths::for_locations(root.path().join("config.toml"), root.path().join("data"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            install_with_paths(cx, Some(paths.clone()));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("reading-history", cx);
+                assert_eq!(frame.find("reopen-at-last-position").checked(), Some(true));
+                frame.click("reopen-at-last-position", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            !settings::load(paths.config())
+                .unwrap()
+                .reopen_at_last_position()
+        );
+        std::fs::write(
+            paths.config(),
+            "[persistence]\nreopen_at_last_position = true\n",
+        )
+        .unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(frame.find("reopen-at-last-position").checked(), Some(true));
             })
             .unwrap();
         });

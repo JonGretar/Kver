@@ -7,7 +7,7 @@ use gpui_kit as gpui;
 use gpui_kit::{
     Context, Entity, EventEmitter, FocusHandle, Subscription, Task, Window,
     assets::IconName,
-    base::{Disableable, FocusTrapElement, TestSupportExt as _},
+    base::{Dialog, DialogPopup, Disableable, TestSupportExt as _},
     component::{
         ActiveTheme, Sizable,
         button::{Button, ButtonVariants},
@@ -141,6 +141,19 @@ impl LocalMarks {
             window.focus(&panel.restore_focus, cx);
         }
         self.hide(cx);
+    }
+
+    fn delete_from_list(&mut self, letter: char, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = &self.panel else { return };
+        if panel.view != MarksView::List {
+            return;
+        }
+        // The clicked button disappears with its row. Keep keyboard input on
+        // the persistent search field, not a removed focus node.
+        panel
+            .command
+            .update(cx, |command, cx| command.focus(window, cx));
+        self.change(letter, None, cx);
     }
 
     fn edit_name(&mut self, letter: char, window: &mut Window, cx: &mut Context<Self>) {
@@ -382,6 +395,7 @@ impl Render for LocalMarks {
             return gpui::Empty.into_any_element();
         };
         let owner = cx.weak_entity();
+        let panel_revision = self.panel_revision;
         let rows: Vec<_> = match panel.view {
             MarksView::Set => ('a'..='z')
                 .map(|letter| (letter, panel.marks.get(&letter).cloned()))
@@ -463,10 +477,10 @@ impl Render for LocalMarks {
                                         .tooltip("Delete mark")
                                         .ghost()
                                         .xsmall()
-                                        .on_click(move |_, _, cx| {
+                                        .on_click(move |_, window, cx| {
                                             cx.stop_propagation();
                                             let _ = owner.update(cx, |marks, cx| {
-                                                marks.change(letter, None, cx)
+                                                marks.delete_from_list(letter, window, cx)
                                             });
                                         }),
                                 ),
@@ -483,35 +497,44 @@ impl Render for LocalMarks {
             MarksView::Name(_) => "Name local mark",
         };
         div()
+            .id("reader-marks-palette")
+            .test_support()
+            .aria_label(title)
             .absolute()
             .inset_0()
-            .child(div().absolute().inset_0().bg(cx.theme().overlay))
             .child(
-                div()
-                    .id("marks-panel")
-                    .test_support()
-                    .role(gpui::Role::Dialog)
-                    .aria_label(title)
-                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "escape"
-                            && this
-                                .panel
-                                .as_ref()
-                                .is_some_and(|panel| matches!(panel.view, MarksView::Name(_)))
-                        {
-                            this.cancel_name(window, cx);
-                        } else {
-                            cx.propagate();
+                Dialog::new(cx)
+                    .focus_handle(self.focus.clone())
+                    .backdrop(div().absolute().inset_0().bg(cx.theme().overlay))
+                    .on_ok(|_, _, _| false)
+                    .on_cancel({
+                        let owner = owner.clone();
+                        move |_, window, cx| {
+                            owner
+                                .update(cx, |this, cx| {
+                                    if this.panel_revision != panel_revision {
+                                        return false;
+                                    }
+                                    if this.panel.as_ref().is_some_and(|panel| {
+                                        matches!(panel.view, MarksView::Name(_))
+                                    }) {
+                                        this.cancel_name(window, cx);
+                                        false
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .unwrap_or(true)
+                        }
+                    })
+                    .on_close(cx.listener(move |this, _, window, cx| {
+                        if this.panel_revision == panel_revision {
+                            this.dismiss(window, cx);
                         }
                     }))
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
                     .p_4()
-                    .child(
-                        div()
+                    .popup(
+                        DialogPopup::new()
                             .w_full()
                             .max_w(gpui::rems(28.))
                             .bg(cx.theme().popover)
@@ -678,8 +701,7 @@ impl Render for LocalMarks {
                                         .child(error),
                                 )
                             }),
-                    )
-                    .focus_trap("reader-marks-palette", &self.focus),
+                    ),
             )
             .into_any_element()
     }

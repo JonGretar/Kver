@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod modal;
 mod persistence;
 
 #[gpui_kit::test]

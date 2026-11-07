@@ -245,6 +245,13 @@ data from the shared worker, not a second per-PDF store. The reader supplies
 the position to save and applies emitted jump destinations after checking the
 source entity, document generation, and page bounds.
 
+The marks surface uses Kit's base `Dialog` and `DialogPopup`, the same modal
+behavior layer used by the styled Recent dialog. Kit owns backdrop dismissal,
+focus trapping, and pointer occlusion; the document still owns whether the marks
+surface exists. Removing a document or superseding the popup therefore removes
+it without closing an unrelated dialog on the window's stack. Row deletion
+returns focus to the persistent search field before its button disappears.
+
 Replacing a document drops its marks owner and subscriptions. Closing or
 reopening the popup cancels reads and invalidates editor replies; a late name
 save cannot finish a new editor for the same letter. Refreshing the list does

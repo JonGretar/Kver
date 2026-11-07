@@ -31,6 +31,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Keep marks search focused after deleting a row, prevent popup clicks from reaching the PDF, and dismiss the marks list when clicking outside it.
 - Keep opening a PDF when its window moves between displays with different pixel densities during loading.
 
 ## [0.3.1] - 2026-11-06

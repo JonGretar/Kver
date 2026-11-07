@@ -13,6 +13,8 @@ pub use contents::ActivateOutline;
 pub(crate) use contents::ContentsPanel;
 pub(crate) use find::FindPanel;
 pub use find::{NextMatch, PreviousMatch};
+// Preserve the former public name while callers adopt the narrowed view.
+pub use ReaderView as Preview;
 use marks::MarksEvent;
 pub use marks::{
     DeleteLocalMark, JumpLocalMark, SetLocalMark, ShowDeleteMark, ShowJumpMark, ShowMarks,
@@ -34,17 +36,15 @@ use gpui_kit::{
     RenderImage, ScrollHandle, Subscription, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
-    base::{Disableable, TestSupportExt as _},
+    base::TestSupportExt as _,
     component::{
-        ActiveTheme, Selectable, Sizable,
-        button::{Button, ButtonVariants},
+        ActiveTheme,
+        button::Button,
         empty::{
             Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
             EmptyTitle,
         },
         spinner::Spinner,
-        status_bar::StatusBar,
-        toolbar::{Toolbar, ToolbarGroup},
     },
 };
 use image::{Frame, RgbaImage};
@@ -52,16 +52,14 @@ use image::{Frame, RgbaImage};
 use crate::{
     coordinates::{PageViewport, Point},
     find_search, pdf,
-    reader_sidebar::{ReaderSidebar, SidebarPanel},
     recent::{self, ReadingPosition, RecentStore},
     settings::{InitialZoom, ReadingView},
-    settings_ui::{self, ShowSettings},
+    settings_ui,
 };
 
 const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
 const PAGE_PADDING: f32 = 16.0;
-const FIT_LABEL_MIN_REMS: f32 = 35.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoomMode {
@@ -89,25 +87,6 @@ fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32)) -> Option<f
         ZoomMode::FitPage => width_scale.min((height - PAGE_PADDING * 2.0) / page.1),
     };
     Some(scale.clamp(0.25, 4.0))
-}
-
-fn reader_button(
-    id: &'static str,
-    label: &'static str,
-    icon: Option<IconName>,
-    action: Box<dyn gpui::Action>,
-    enabled: bool,
-    selected: bool,
-) -> Button {
-    Button::new(id)
-        .accessibility_label(label)
-        .when_some(icon, |button, icon| button.icon(icon))
-        .when(icon.is_none(), |button| button.label(label))
-        .ghost()
-        .selected(selected)
-        .disabled(!enabled)
-        .tooltip(label)
-        .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
 }
 
 fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
@@ -261,7 +240,8 @@ fn hit_boundary(text: &pdf::PageText, at: Point) -> Option<(usize, usize)> {
     })
 }
 
-pub struct Preview {
+/// Central PDF surface and document lifecycle, independent of window chrome.
+pub struct ReaderView {
     path: Option<PathBuf>,
     record_path: Option<PathBuf>,
     position_ready: bool,
@@ -297,8 +277,7 @@ pub struct Preview {
     focus_initialized: bool,
     marks: Option<Entity<LocalMarks>>,
     marks_subscriptions: Vec<Subscription>,
-    sidebar: Option<Entity<ReaderSidebar>>,
-    panel_subscriptions: Vec<Subscription>,
+    find_highlight: Option<(find_search::FindMatch, u64)>,
     status: String,
 }
 
@@ -313,15 +292,15 @@ pub(crate) enum DocumentEvent {
     },
 }
 
-impl gpui::EventEmitter<DocumentEvent> for Preview {}
+impl gpui::EventEmitter<DocumentEvent> for ReaderView {}
 
-impl gpui::Focusable for Preview {
+impl gpui::Focusable for ReaderView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
 
-impl Preview {
+impl ReaderView {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
         let mut reader = Self {
             path,
@@ -355,12 +334,9 @@ impl Preview {
             focus_initialized: false,
             marks: None,
             marks_subscriptions: Vec::new(),
-            sidebar: None,
-            panel_subscriptions: Vec::new(),
+            find_highlight: None,
             status: "Open a PDF to start reading".into(),
         };
-        let settings = settings_ui::state(cx);
-        cx.observe(&settings, |_, _, cx| cx.notify()).detach();
         if reader.path.is_some() {
             reader.status = "Loading document…".into();
             reader.load(cx);
@@ -374,16 +350,7 @@ impl Preview {
         self.document_generation += 1;
         self.marks = None;
         self.marks_subscriptions.clear();
-        if let Some(sidebar) = self.sidebar.as_mut() {
-            sidebar.update(cx, |sidebar, cx| {
-                sidebar.contents().update(cx, |contents, cx| {
-                    contents.set_document(self.document_generation, None, cx);
-                });
-                sidebar.find().update(cx, |find, cx| {
-                    find.set_document(self.document_generation, None, 0, cx);
-                });
-            });
-        }
+        self.find_highlight = None;
         self.text.clear();
         self.text_failed.clear();
         self.text_in_flight = None;
@@ -504,57 +471,19 @@ impl Preview {
         }
     }
 
-    pub(crate) fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(sidebar) = self.sidebar.as_mut()
-            && let Some(panel) = sidebar.read(cx).active()
-        {
-            sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
-        } else {
-            window.focus(&self.focus, cx);
+    pub(crate) fn set_find_highlight(
+        &mut self,
+        generation: u64,
+        highlight: Option<(find_search::FindMatch, u64)>,
+        cx: &mut Context<Self>,
+    ) {
+        if generation == self.document_generation {
+            self.find_highlight = highlight;
+            cx.notify();
         }
-        cx.notify();
     }
 
-    fn show_sidebar(&mut self, panel: SidebarPanel, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sidebar.is_none() {
-            let sidebar = cx.new(|cx| ReaderSidebar::new(window, cx));
-            let contents = sidebar.read(cx).contents().clone();
-            let find = sidebar.read(cx).find().clone();
-            contents.update(cx, |contents, cx| {
-                contents.set_document(self.document_generation, self.path.clone(), cx);
-            });
-            find.update(cx, |find, cx| {
-                find.set_document(
-                    self.document_generation,
-                    self.path.clone(),
-                    self.pages.len(),
-                    cx,
-                );
-            });
-            self.panel_subscriptions = vec![
-                // Sidebar layout changes also change the PDF viewport.
-                cx.observe(&sidebar, |_, _, cx| cx.notify()),
-                cx.observe(&find, |_, _, cx| cx.notify()),
-                cx.subscribe(&find, |reader, find, navigation, cx| {
-                    if navigation.document_generation() == reader.document_generation
-                        && find.read(cx).is_current(navigation)
-                    {
-                        reader.navigate_find(navigation.hit(), cx);
-                    }
-                }),
-                cx.subscribe(&contents, |reader, _, navigation, cx| {
-                    if navigation.generation() == reader.document_generation {
-                        reader.navigate_outline(navigation.destination(), cx);
-                    }
-                }),
-            ];
-            self.sidebar = Some(sidebar);
-        }
-        let sidebar = self.sidebar.as_mut().expect("sidebar initialized above");
-        sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
-    }
-
-    fn navigate_find(&mut self, hit: &find_search::FindMatch, cx: &mut Context<Self>) {
+    pub(crate) fn navigate_find(&mut self, hit: &find_search::FindMatch, cx: &mut Context<Self>) {
         if hit.page >= self.pages.len() {
             return;
         }
@@ -577,39 +506,6 @@ impl Preview {
         );
         self.sync_viewport(cx);
         cx.notify();
-    }
-
-    fn step_match(&mut self, direction: i32, cx: &mut Context<Self>) {
-        if let Some(sidebar) = self.sidebar.as_ref() {
-            let find = sidebar.read(cx).find().clone();
-            find.update(cx, |find, cx| find.step_match(direction, cx));
-        }
-    }
-
-    fn close_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(sidebar) = self.sidebar.as_mut()
-            && sidebar.read(cx).active().is_some()
-        {
-            sidebar.update(cx, |sidebar, cx| sidebar.close(window, &self.focus, cx));
-        }
-    }
-
-    fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sidebar_panel(cx).is_some() {
-            self.close_sidebar(window, cx);
-        } else if !self.pages.is_empty() {
-            let panel = self
-                .sidebar
-                .as_ref()
-                .map_or(SidebarPanel::default(), |sidebar| sidebar.read(cx).last());
-            self.show_sidebar(panel, window, cx);
-        }
-    }
-
-    pub fn sidebar_panel(&self, cx: &App) -> Option<SidebarPanel> {
-        self.sidebar
-            .as_ref()
-            .and_then(|sidebar| sidebar.read(cx).active())
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
@@ -683,7 +579,7 @@ impl Preview {
                             };
                             this.mode_override = Some(this.reading_mode);
                         }
-                        self::Preview::install_pages(this, pages, cx);
+                        this.install_pages(pages, cx);
                         if let Err(error) = saved_mode {
                             this.status = format!("Reading mode could not be loaded: {error}");
                         }
@@ -744,24 +640,6 @@ impl Preview {
         self.pages = pages;
         self.selected_page = Some(0);
         self.status = self.ready_status();
-        if let Some(sidebar) = self.sidebar.as_ref() {
-            sidebar.update(cx, |sidebar, cx| {
-                sidebar.contents().update(cx, |contents, cx| {
-                    contents.set_document(self.document_generation, self.path.clone(), cx);
-                    if sidebar.active() == Some(SidebarPanel::Contents) {
-                        contents.ensure_loaded(cx);
-                    }
-                });
-                sidebar.find().update(cx, |find, cx| {
-                    find.set_document(
-                        self.document_generation,
-                        self.path.clone(),
-                        self.pages.len(),
-                        cx,
-                    );
-                });
-            });
-        }
         self.sync_viewport(cx);
     }
 
@@ -810,11 +688,6 @@ impl Preview {
 
     pub fn status(&self) -> &str {
         &self.status
-    }
-    pub(crate) fn has_matches(&self, cx: &App) -> bool {
-        self.sidebar
-            .as_ref()
-            .is_some_and(|sidebar| sidebar.read(cx).find().read(cx).has_matches())
     }
     pub fn page_index(&self) -> usize {
         self.page_index
@@ -1128,7 +1001,7 @@ impl Preview {
         (top, width, height)
     }
 
-    fn sync_viewport(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sync_viewport(&mut self, cx: &mut Context<Self>) {
         if self.pages.is_empty() {
             return;
         }
@@ -1285,7 +1158,11 @@ impl Preview {
         self.schedule_text(cx);
         cx.notify();
     }
-    fn navigate_outline(&mut self, destination: pdf::OutlineDestination, cx: &mut Context<Self>) {
+    pub(crate) fn navigate_outline(
+        &mut self,
+        destination: pdf::OutlineDestination,
+        cx: &mut Context<Self>,
+    ) {
         let page = destination.page();
         if page >= self.pages.len() {
             return;
@@ -1445,11 +1322,8 @@ impl Preview {
     }
 }
 
-impl Render for Preview {
+impl Render for ReaderView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let settings = settings_ui::state(cx);
-        let show_toolbar = settings.read(cx).show_toolbar();
-        let show_statusbar = settings.read(cx).show_statusbar();
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
             cx.observe_window_bounds(window, |_, window, cx| {
@@ -1480,9 +1354,6 @@ impl Render for Preview {
         } else {
             0..0
         };
-        let has_document = !self.pages.is_empty();
-        let show_fit_labels = f32::from(window.bounds().size.width)
-            >= FIT_LABEL_MIN_REMS * f32::from(window.rem_size());
         let top_space = if self.reading_mode == ReadingMode::SinglePage {
             0.0
         } else {
@@ -1499,14 +1370,7 @@ impl Render for Preview {
             .flex()
             .flex_col()
             .child(div().h(px(top_space)).flex_shrink_0());
-        let find_highlight = self.sidebar.as_ref().and_then(|sidebar| {
-            sidebar
-                .read(cx)
-                .find()
-                .read(cx)
-                .highlight()
-                .map(|(hit, pulse)| (hit.clone(), pulse))
-        });
+        let find_highlight = self.find_highlight.as_ref();
         for index in range {
             let (width, page_height) = self.pages[index];
             let page_width = px(width * self.scale);
@@ -1661,22 +1525,11 @@ impl Render for Preview {
                     this.change_mark(action.0, Some(this.position_to_save()), cx);
                 }
             }))
-            .on_action(cx.listener(|this, action: &JumpLocalMark, _, cx| this.jump_mark(action.0, cx)))
-            .on_action(cx.listener(|this, action: &DeleteLocalMark, _, cx| this.change_mark(action.0, None, cx)))
-            .on_action(cx.listener(|this, _: &ShowFind, window, cx| {
-                if !this.pages.is_empty() {
-                    this.show_sidebar(SidebarPanel::Find, window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &NextMatch, _, cx| this.step_match(1, cx)))
-            .on_action(cx.listener(|this, _: &PreviousMatch, _, cx| this.step_match(-1, cx)))
-            .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
-                if !this.pages.is_empty() {
-                    this.show_sidebar(SidebarPanel::Contents, window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
-                this.toggle_sidebar(window, cx);
+            .on_action(
+                cx.listener(|this, action: &JumpLocalMark, _, cx| this.jump_mark(action.0, cx)),
+            )
+            .on_action(cx.listener(|this, action: &DeleteLocalMark, _, cx| {
+                this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
             .on_mouse_up(
@@ -1727,8 +1580,7 @@ impl Render for Preview {
                 this.choose_reading_mode(None, cx);
             }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if this.marks_open(cx) || !this.focus.is_focused(window)
-                {
+                if this.marks_open(cx) || !this.focus.is_focused(window) {
                     cx.propagate();
                     return;
                 }
@@ -1748,316 +1600,109 @@ impl Render for Preview {
             .text_color(cx.theme().foreground)
             .child(
                 div()
-                    .flex()
-                    .items_stretch()
+                    .id("page")
+                    .test_support()
                     .flex_1()
+                    .min_w_0()
                     .min_h_0()
-                    .when_some(
-                        self.sidebar
-                            .as_ref()
-                            .filter(|sidebar| sidebar.read(cx).active().is_some()),
-                        |row, sidebar| row.child(sidebar.clone()),
+                    .overflow_y_scroll()
+                    .overflow_x_scroll()
+                    .track_scroll(&self.scroll)
+                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                        if event.pressed_button == Some(gpui::MouseButton::Left) {
+                            this.extend_selection(event.position, cx);
+                        }
+                    }))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            window.focus(&this.focus, cx);
+                        }),
                     )
-                    .child(
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                            this.extend_selection(event.position, cx);
+                            this.dragging = false;
+                        }),
+                    )
+                    .on_scroll(cx.listener(|this, _, _, cx| {
+                        if this.viewport().0 != this.last_viewport.0 {
+                            this.position_touched = true;
+                            this.selected_page = None;
+                        }
+                        this.sync_viewport(cx);
+                    }))
+                    .bg(cx.theme().muted)
+                    .p_4()
+                    .child(if self.path.is_none() || self.pages.is_empty() {
+                        let loading = self.status == "Loading document…";
                         div()
+                            .size_full()
                             .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .children(show_toolbar.then(|| {
-                                Toolbar::new("reading-toolbar")
-                                    .px_3()
-                                    .content(reader_button(
-                                        "toggle-sidebar",
-                                        if self.sidebar_panel(cx).is_some() {
-                                            "Hide sidebar"
-                                        } else {
-                                            "Show sidebar"
-                                        },
-                                        Some(IconName::PanelLeft),
-                                        Box::new(ToggleSidebar),
-                                        has_document,
-                                        self.sidebar_panel(cx).is_some(),
-                                    ))
-                                    .content(
-                                        gpui_kit::component::separator::Separator::vertical().h_5(),
-                                    )
-                                    .content(
-                                        ToolbarGroup::new("page-controls")
-                                            .label("Page navigation")
-                                            .child(reader_button(
-                                                "previous-page",
-                                                "Previous page",
-                                                Some(IconName::ArrowUp),
-                                                Box::new(PreviousPage),
-                                                has_document && self.page_index > 0,
-                                                false,
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Empty::new()
+                                    .flex_none()
+                                    .max_w(gpui::rems(28.))
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().background)
+                                    .header(
+                                        EmptyHeader::new()
+                                            .media(
+                                                EmptyMedia::new()
+                                                    .with_variant(EmptyMediaVariant::Icon)
+                                                    .child(if loading {
+                                                        Spinner::new().into_any_element()
+                                                    } else {
+                                                        gpui_kit::component::Icon::new(
+                                                            IconName::FileText,
+                                                        )
+                                                        .into_any_element()
+                                                    }),
+                                            )
+                                            .title(EmptyTitle::new().child(
+                                                if self.path.is_none() {
+                                                    "Open a PDF to start reading"
+                                                } else if loading {
+                                                    "Opening document…"
+                                                } else {
+                                                    "Couldn’t open this PDF"
+                                                },
                                             ))
-                                            .child(reader_button(
-                                                "next-page",
-                                                "Next page",
-                                                Some(IconName::ArrowDown),
-                                                Box::new(NextPage),
-                                                has_document
-                                                    && self.page_index + 1 < self.pages.len(),
-                                                false,
+                                            .description(EmptyDescription::new().child(
+                                                if self.path.is_none() {
+                                                    "Choose a document to begin.".to_owned()
+                                                } else {
+                                                    self.status.clone()
+                                                },
                                             )),
                                     )
                                     .content(
-                                        gpui_kit::component::separator::Separator::vertical().h_5(),
-                                    )
-                                    .content(
-                                        reader_button(
-                                            "reading-mode",
-                                            match (self.reading_mode, self.mode_override) {
-                                                (ReadingMode::SinglePage, Some(_)) => "Single page for this PDF · switch to continuous",
-                                                (ReadingMode::SinglePage, None) => "Single page (default) · switch to continuous",
-                                                (ReadingMode::Continuous, Some(_)) => "Continuous for this PDF · switch to single page",
-                                                (ReadingMode::Continuous, None) => "Continuous (default) · switch to single page",
-                                            },
-                                            Some(IconName::FileText),
-                                            if self.reading_mode == ReadingMode::SinglePage {
-                                                Box::new(Continuous)
-                                            } else {
-                                                Box::new(SinglePage)
-                                            },
-                                            has_document,
-                                            self.reading_mode == ReadingMode::SinglePage,
-                                        )
-                                        .small()
-                                        .when(
-                                            show_fit_labels,
-                                            |button| {
-                                                button.label(
-                                                    if self.reading_mode == ReadingMode::SinglePage
-                                                    {
-                                                        "Single page"
-                                                    } else {
-                                                        "Continuous"
-                                                    },
-                                                )
-                                            },
+                                        EmptyContent::new().child(
+                                            Button::new("open-pdf-center")
+                                                .label(if self.path.is_none() {
+                                                    "Open PDF…"
+                                                } else {
+                                                    "Choose another PDF…"
+                                                })
+                                                .on_click(|_, window, cx| {
+                                                    window.dispatch_action(Box::new(OpenPdf), cx)
+                                                }),
                                         ),
-                                    )
-                                    .content(
-                                        gpui_kit::component::separator::Separator::vertical().h_5(),
-                                    )
-                                    .content(
-                                        ToolbarGroup::new("zoom-controls")
-                                            .label("Zoom and fit")
-                                            .child(reader_button(
-                                                "zoom-out",
-                                                "Zoom out",
-                                                Some(IconName::ZoomOut),
-                                                Box::new(ZoomOut),
-                                                has_document,
-                                                false,
-                                            ))
-                                            .child(reader_button(
-                                                "zoom-in",
-                                                "Zoom in",
-                                                Some(IconName::ZoomIn),
-                                                Box::new(ZoomIn),
-                                                has_document,
-                                                false,
-                                            ))
-                                            .child(
-                                                reader_button(
-                                                    "fit-width",
-                                                    "Fit width",
-                                                    Some(IconName::MoveHorizontal),
-                                                    Box::new(FitWidth),
-                                                    has_document,
-                                                    has_document
-                                                        && self.zoom_mode == ZoomMode::FitWidth,
-                                                )
-                                                .when(show_fit_labels, |button| {
-                                                    button.label("Fit width")
-                                                }),
-                                            )
-                                            .child(
-                                                reader_button(
-                                                    "fit-page",
-                                                    "Fit page",
-                                                    Some(IconName::Expand),
-                                                    Box::new(FitPage),
-                                                    has_document,
-                                                    has_document
-                                                        && self.zoom_mode == ZoomMode::FitPage,
-                                                )
-                                                .when(show_fit_labels, |button| {
-                                                    button.label("Fit page")
-                                                }),
-                                            ),
-                                    )
-                                    .content(div().flex_1())
-                                    .content(
-                                        reader_button(
-                                            "settings-button",
-                                            "Settings…",
-                                            Some(IconName::Settings),
-                                            Box::new(ShowSettings),
-                                            true,
-                                            false,
-                                        )
-                                        .small(),
-                                    )
-                            }))
-                            .child(
-                                div()
-                                    .id("page")
-                                    .test_support()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .min_h_0()
-                                    .overflow_y_scroll()
-                                    .overflow_x_scroll()
-                                    .track_scroll(&self.scroll)
-                                    .on_mouse_move(cx.listener(
-                                        |this, event: &gpui::MouseMoveEvent, _, cx| {
-                                            if event.pressed_button == Some(gpui::MouseButton::Left)
-                                            {
-                                                this.extend_selection(event.position, cx);
-                                            }
-                                        },
-                                    ))
-                                    .on_mouse_down(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|this, _, window, cx| {
-                                            window.focus(&this.focus, cx);
-                                        }),
-                                    )
-                                    .on_mouse_up(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
-                                            this.extend_selection(event.position, cx);
-                                            this.dragging = false;
-                                        }),
-                                    )
-                                    .on_scroll(cx.listener(|this, _, _, cx| {
-                                        if this.viewport().0 != this.last_viewport.0 {
-                                            this.position_touched = true;
-                                            this.selected_page = None;
-                                        }
-                                        this.sync_viewport(cx);
-                                    }))
-                                    .bg(cx.theme().muted)
-                                    .p_4()
-                                    .child(if self.path.is_none() || self.pages.is_empty() {
-                                        let loading = self.status == "Loading document…";
-                                        div()
-                                    .size_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(
-                                        Empty::new()
-                                            .flex_none()
-                                            .max_w(gpui::rems(28.))
-                                            .border_1()
-                                            .border_color(cx.theme().border)
-                                            .bg(cx.theme().background)
-                                            .header(
-                                                EmptyHeader::new()
-                                                    .media(
-                                                        EmptyMedia::new()
-                                                            .with_variant(EmptyMediaVariant::Icon)
-                                                            .child(if loading {
-                                                                Spinner::new().into_any_element()
-                                                            } else {
-                                                                gpui_kit::component::Icon::new(
-                                                                    IconName::FileText,
-                                                                )
-                                                                .into_any_element()
-                                                            }),
-                                                    )
-                                                    .title(EmptyTitle::new().child(
-                                                        if self.path.is_none() {
-                                                            "Open a PDF to start reading"
-                                                        } else if loading {
-                                                            "Opening document…"
-                                                        } else {
-                                                            "Couldn’t open this PDF"
-                                                        },
-                                                    ))
-                                                    .description(EmptyDescription::new().child(
-                                                        if self.path.is_none() {
-                                                            "Choose a document to begin.".to_owned()
-                                                        } else {
-                                                            self.status.clone()
-                                                        },
-                                                    )),
-                                            )
-                                            .content(
-                                                EmptyContent::new().child(
-                                                    Button::new("open-pdf-center")
-                                                        .label(if self.path.is_none() {
-                                                            "Open PDF…"
-                                                        } else {
-                                                            "Choose another PDF…"
-                                                        })
-                                                        .on_click(|_, window, cx| {
-                                                            window.dispatch_action(
-                                                                Box::new(OpenPdf),
-                                                                cx,
-                                                            )
-                                                        }),
-                                                ),
-                                            ),
-                                    )
-                                    .into_any_element()
-                                    } else {
-                                        content.into_any_element()
-                                    }),
+                                    ),
                             )
-                            .children(show_statusbar.then(|| {
-                                StatusBar::new()
-                                    .left(
-                                        div()
-                                            .id("reader-status")
-                                            .test_support()
-                                            .min_w(px(0.0))
-                                            .truncate()
-                                            .child(if has_document {
-                                                format!(
-                                                    "PAGE {} / {}",
-                                                    self.page_index + 1,
-                                                    self.pages.len()
-                                                )
-                                            } else {
-                                                self.status.clone()
-                                            }),
-                                    )
-                                    .when(
-                                        has_document && !self.status.starts_with("Page "),
-                                        |bar| {
-                                            bar.child(
-                                                div()
-                                                    .min_w(px(0.0))
-                                                    .truncate()
-                                                    .child(self.status.clone()),
-                                            )
-                                        },
-                                    )
-                                    .when(has_document, |bar| {
-                                        bar.right(div().child(format!(
-                                            "{}%{}",
-                                            (self.scale * 100.0).round(),
-                                            match self.zoom_mode {
-                                                ZoomMode::Fixed => "",
-                                                ZoomMode::FitWidth => " · Fit width",
-                                                ZoomMode::FitPage => " · Fit page",
-                                            }
-                                        )))
-                                    })
-                            })),
-                    ),
+                            .into_any_element()
+                    } else {
+                        content.into_any_element()
+                    }),
             )
     }
 }
 
-impl Preview {
+impl ReaderView {
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
         if self.pages.is_empty() {
@@ -2078,16 +1723,12 @@ mod tests {
     use super::*;
     use crate::app::keymap::install as bind_reader_keys;
     use crate::reading_history::LocalMark;
-    use gpui_kit::{
-        AnyWindowHandle, TestAppContext, point, size,
-        test::{TestEventExt as _, TestWindowExt},
-    };
+    use crate::settings_ui::ShowSettings;
+    use gpui_kit::{AnyWindowHandle, TestAppContext, point, size, test::TestWindowExt};
     use std::collections::BTreeMap;
 
-    mod contents;
     mod find;
     mod marks;
-    mod sidebar;
 
     fn recent_test_window(
         cx: &mut TestAppContext,
@@ -3424,30 +3065,26 @@ mod tests {
             gpui_kit::init(cx);
             bind_reader_keys(cx);
         });
-        let window = cx.add_window(|frame, cx| Preview::new(Some(path), frame.scale_factor(), cx));
+        let (window, reader) = recent_test_window(cx, Some(path));
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+            cx.update_window(window, |_, frame, cx| frame.render_frame(cx))
                 .unwrap();
         });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(
-                    reader.pages,
-                    vec![(360.0, 300.0), (560.0, 1500.0), (940.0, 500.0)]
-                );
-            })
-            .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.pages,
+                vec![(360.0, 300.0), (560.0, 1500.0), (940.0, 500.0)]
+            );
+        });
 
-        cx.simulate_keystrokes(window.into(), "s");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
-                assert_eq!(reader.visible_pages(0.0, 700.0), 0..1);
-            })
-            .unwrap();
+        cx.simulate_keystrokes(window, "s");
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert_eq!(reader.visible_pages(0.0, 700.0), 0..1);
+        });
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
+            cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
                 for _ in 0..4 {
                     frame.scroll(
@@ -3459,21 +3096,17 @@ mod tests {
             })
             .unwrap();
         });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 0);
-                assert_eq!(reader.reading_position(), (0, 0.0));
-            })
-            .unwrap();
-        cx.simulate_keystrokes(window.into(), "right");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert_eq!(reader.reading_position().0, 1);
-            })
-            .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 0);
+            assert_eq!(reader.reading_position(), (0, 0.0));
+        });
+        cx.simulate_keystrokes(window, "right");
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert_eq!(reader.reading_position().0, 1);
+        });
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
+            cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
                 frame.scroll(
                     "page",
@@ -3483,21 +3116,15 @@ mod tests {
             })
             .unwrap();
         });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert!(reader.reading_position().1 > 0.0);
-            })
-            .unwrap();
-        window
-            .update(cx, |reader, _, cx| reader.scroll_by(10000.0, cx))
-            .unwrap();
-        let bottom = window
-            .read_with(cx, |reader, _| reader.reading_position().1)
-            .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert!(reader.reading_position().1 > 0.0);
+        });
+        reader.update(cx, |reader, cx| reader.scroll_by(10000.0, cx));
+        let bottom = reader.read_with(cx, |reader, _| reader.reading_position().1);
         assert!(bottom > 500.0);
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| {
+            cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
                 for _ in 0..4 {
                     frame.scroll(
@@ -3509,61 +3136,42 @@ mod tests {
             })
             .unwrap();
         });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert!((reader.reading_position().1 - bottom).abs() < 1.0);
-                assert_eq!(reader.visible_pages(0.0, 700.0), 1..2);
-            })
-            .unwrap();
-        window
-            .update(cx, |reader, _, cx| reader.zoom_in(cx))
-            .unwrap();
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert!((reader.reading_position().1 - bottom).abs() < 1.0);
-            })
-            .unwrap();
-        window
-            .update(cx, |reader, _, cx| reader.fit_width(cx))
-            .unwrap();
-        let before_resize = window.read_with(cx, |reader, _| reader.scale()).unwrap();
-        cx.simulate_window_resize(window.into(), size(px(600.0), px(700.0)));
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert!((reader.reading_position().1 - bottom).abs() < 1.0);
+            assert_eq!(reader.visible_pages(0.0, 700.0), 1..2);
+        });
+        reader.update(cx, |reader, cx| reader.zoom_in(cx));
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert!((reader.reading_position().1 - bottom).abs() < 1.0);
+        });
+        reader.update(cx, |reader, cx| reader.fit_width(cx));
+        let before_resize = reader.read_with(cx, |reader, _| reader.scale());
+        cx.simulate_window_resize(window, size(px(600.0), px(700.0)));
         cx.run_until_parked();
         cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
+            cx.update_window(window, |_, frame, cx| frame.render_frame(cx))
                 .unwrap();
         });
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert!(reader.scale() < before_resize);
-                assert!(reader.reading_position().1 <= reader.pages[1].1);
-            })
-            .unwrap();
-        cx.simulate_keystrokes(window.into(), "right");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 2);
-                assert_eq!(reader.reading_position().0, 2);
-            })
-            .unwrap();
-        cx.simulate_keystrokes(window.into(), "right");
-        assert_eq!(
-            window
-                .read_with(cx, |reader, _| reader.page_index())
-                .unwrap(),
-            2
-        );
-        cx.simulate_keystrokes(window.into(), "left c");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
-                assert_eq!(reader.reading_position().0, 1);
-            })
-            .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert!(reader.scale() < before_resize);
+            assert!(reader.reading_position().1 <= reader.pages[1].1);
+        });
+        cx.simulate_keystrokes(window, "right");
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 2);
+            assert_eq!(reader.reading_position().0, 2);
+        });
+        cx.simulate_keystrokes(window, "right");
+        assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 2);
+        cx.simulate_keystrokes(window, "left c");
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
+            assert_eq!(reader.reading_position().0, 1);
+        });
     }
 
     #[gpui_kit::test]

@@ -1034,10 +1034,7 @@ fn preference_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        reader::{Preview, ShowRecent},
-        recent::RecentStore,
-    };
+    use crate::{app::document_window::DocumentWindow, reader::ShowRecent, recent::RecentStore};
     use gpui_kit::{TestAppContext, test::TestWindowExt as _};
 
     fn choose(cx: &mut TestAppContext, window: AnyWindowHandle, option: usize) {
@@ -1136,7 +1133,7 @@ mod tests {
             (0..2)
                 .map(|_| {
                     gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+                        cx.new(|cx| DocumentWindow::new(None, window, cx))
                     })
                     .unwrap()
                     .0
@@ -1805,8 +1802,7 @@ mod tests {
                 )),
             );
         });
-        let reader = cx
-            .add_window(|window, cx| crate::reader::Preview::new(None, window.scale_factor(), cx));
+        let reader = cx.add_window(|window, cx| DocumentWindow::new(None, window, cx));
         cx.update(|cx| {
             cx.update_window(reader.into(), |_, frame, cx| {
                 frame.render_frame(cx);

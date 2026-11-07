@@ -158,6 +158,10 @@ impl FindPanel {
         !self.results.is_empty()
     }
 
+    pub(crate) fn generation(&self) -> u64 {
+        self.document_generation
+    }
+
     pub(crate) fn highlight(&self) -> Option<(&FindMatch, u64)> {
         self.active
             .and_then(|ix| self.results.get(ix))

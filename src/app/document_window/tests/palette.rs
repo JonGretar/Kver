@@ -82,7 +82,7 @@ fn palette_runs_reader_action_then_returns_focus_to_the_open_sidebar(cx: &mut Te
         assert!(!document.palette_open());
         let reader = document.reader().read(cx);
         assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
-        assert_eq!(reader.sidebar_panel(cx), Some(SidebarPanel::Find));
+        assert_eq!(document.sidebar_panel(cx), Some(SidebarPanel::Find));
     });
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);

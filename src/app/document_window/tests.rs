@@ -1,9 +1,12 @@
 use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
+mod contents;
+mod find;
 mod palette;
 mod recent_history;
 mod recent_picker;
+mod sidebar;
 
 fn setup(cx: &mut TestAppContext) {
     cx.update(|cx| {
@@ -23,6 +26,15 @@ fn open(
         })
         .unwrap()
     })
+}
+
+fn reader_window(
+    cx: &mut TestAppContext,
+    path: Option<PathBuf>,
+) -> (AnyWindowHandle, Entity<ReaderView>) {
+    let (window, document) = open(cx, path);
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    (window, reader)
 }
 
 #[gpui_kit::test]

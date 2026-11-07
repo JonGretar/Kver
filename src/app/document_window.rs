@@ -21,7 +21,7 @@ use super::windows::{self, CloseWindow, NextWindow, PreviousWindow};
 use crate::{
     reader::{
         Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpLocalMark,
-        MarksView, NextMatch, NextPage, Preview, PreviousMatch, PreviousPage, SetLocalMark,
+        MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView, SetLocalMark,
         ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage,
         ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
@@ -35,17 +35,21 @@ use crate::{
 use command_palette::{
     CommandAvailability, CommandPalette, DismissCommandPalette, ShowCommandPalette,
 };
+use sidebar::{ReaderSidebar, SidebarPanel};
 
 gpui_kit::actions!(kver, [OpenPdf]);
 
 pub struct DocumentWindow {
-    reader: Entity<Preview>,
+    reader: Entity<ReaderView>,
     file_picker: Option<Task<()>>,
     recent: Option<Entity<RecentPicker>>,
     recent_subscription: Option<Subscription>,
     recent_open: Option<PendingRecentOpen>,
     palette: Option<CommandPalette>,
+    sidebar: Option<Entity<ReaderSidebar>>,
+    panel_subscriptions: Vec<Subscription>,
     _reader_observation: Subscription,
+    _settings_observation: Subscription,
     _document_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
@@ -64,12 +68,16 @@ impl DocumentWindow {
             }
             cx.notify();
         });
-        let reader = cx.new(|cx| Preview::new(path, window.scale_factor(), cx));
+        let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
         let document_subscription =
             cx.subscribe_in(&reader, window, |this, _, event, window, cx| {
                 this.on_document_event(event, window, cx);
             });
         let reader_observation = cx.observe(&reader, |_, _, cx| cx.notify());
+        let settings = settings_ui::state(cx);
+        let settings_observation = cx.observe_in(&settings, window, |this, _, window, cx| {
+            this.schedule_refit(window, cx);
+        });
         Self {
             reader,
             file_picker: None,
@@ -77,7 +85,10 @@ impl DocumentWindow {
             recent_subscription: None,
             recent_open: None,
             palette: None,
+            sidebar: None,
+            panel_subscriptions: Vec::new(),
             _reader_observation: reader_observation,
+            _settings_observation: settings_observation,
             _document_subscription: document_subscription,
             _appearance_subscription: appearance_subscription,
         }
@@ -85,7 +96,7 @@ impl DocumentWindow {
 
     /// The window owns the reader; callers use its existing navigation and
     /// diagnostic interface rather than a second copy of document state.
-    pub fn reader(&self) -> &Entity<Preview> {
+    pub fn reader(&self) -> &Entity<ReaderView> {
         &self.reader
     }
 
@@ -110,10 +121,128 @@ impl DocumentWindow {
         // The selected action may already have replaced the palette with marks
         // or Recent before Command's deferred confirmation runs.
         if self.palette.take().is_some() {
-            self.reader
-                .update(cx, |reader, cx| reader.restore_focus(window, cx));
+            self.restore_focus(window, cx);
             cx.notify();
         }
+    }
+
+    fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(sidebar) = &self.sidebar
+            && let Some(panel) = sidebar.read(cx).active()
+        {
+            sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
+        } else {
+            window.focus(&self.reader.read(cx).focus_handle(cx), cx);
+        }
+    }
+
+    fn schedule_refit(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let reader = self.reader.downgrade();
+        window.on_next_frame(move |_, cx| {
+            let _ = reader.update(cx, |reader, cx| reader.sync_viewport(cx));
+        });
+        cx.notify();
+    }
+
+    pub fn sidebar_panel(&self, cx: &App) -> Option<SidebarPanel> {
+        self.sidebar
+            .as_ref()
+            .and_then(|sidebar| sidebar.read(cx).active())
+    }
+
+    fn show_sidebar(&mut self, panel: SidebarPanel, window: &mut Window, cx: &mut Context<Self>) {
+        if self.reader.read(cx).page_count().is_none() {
+            return;
+        }
+        if self.sidebar.is_none() {
+            let sidebar = cx.new(|cx| ReaderSidebar::new(window, cx));
+            let contents = sidebar.read(cx).contents().clone();
+            let find = sidebar.read(cx).find().clone();
+            self.panel_subscriptions = vec![
+                cx.observe_in(&sidebar, window, |this, _, window, cx| {
+                    this.schedule_refit(window, cx)
+                }),
+                cx.observe(&find, |this, find, cx| {
+                    let find = find.read(cx);
+                    let generation = find.generation();
+                    let highlight = find.highlight().map(|(hit, pulse)| (hit.clone(), pulse));
+                    this.reader.update(cx, |reader, cx| {
+                        reader.set_find_highlight(generation, highlight, cx)
+                    });
+                    cx.notify();
+                }),
+                cx.subscribe(&find, |this, find, navigation, cx| {
+                    if navigation.document_generation()
+                        == this.reader.read(cx).document_generation()
+                        && find.read(cx).is_current(navigation)
+                    {
+                        this.reader
+                            .update(cx, |reader, cx| reader.navigate_find(navigation.hit(), cx));
+                    }
+                }),
+                cx.subscribe(&contents, |this, _, navigation, cx| {
+                    if navigation.generation() == this.reader.read(cx).document_generation() {
+                        this.reader.update(cx, |reader, cx| {
+                            reader.navigate_outline(navigation.destination(), cx)
+                        });
+                    }
+                }),
+            ];
+            self.sidebar = Some(sidebar);
+            self.sync_sidebar_document(cx);
+        }
+        if let Some(sidebar) = &self.sidebar {
+            sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
+        }
+    }
+
+    fn sync_sidebar_document(&self, cx: &mut Context<Self>) {
+        let Some(sidebar) = &self.sidebar else { return };
+        let reader = self.reader.read(cx);
+        let generation = reader.document_generation();
+        let count = reader.page_count().unwrap_or(0);
+        let path = (count > 0)
+            .then(|| reader.path().map(ToOwned::to_owned))
+            .flatten();
+        sidebar.update(cx, |sidebar, cx| {
+            sidebar.contents().update(cx, |contents, cx| {
+                contents.set_document(generation, path.clone(), cx);
+                if sidebar.active() == Some(SidebarPanel::Contents) {
+                    contents.ensure_loaded(cx);
+                }
+            });
+            sidebar.find().update(cx, |find, cx| {
+                find.set_document(generation, path, count, cx)
+            });
+        });
+    }
+
+    fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sidebar_panel(cx).is_some() {
+            let focus = self.reader.read(cx).focus_handle(cx);
+            if let Some(sidebar) = &self.sidebar {
+                sidebar.update(cx, |sidebar, cx| sidebar.close(window, &focus, cx));
+            }
+        } else {
+            let panel = self
+                .sidebar
+                .as_ref()
+                .map_or(SidebarPanel::default(), |sidebar| sidebar.read(cx).last());
+            self.show_sidebar(panel, window, cx);
+        }
+    }
+
+    fn step_match(&mut self, direction: i32, cx: &mut Context<Self>) {
+        if let Some(sidebar) = &self.sidebar {
+            let find = sidebar.read(cx).find().clone();
+            find.update(cx, |find, cx| find.step_match(direction, cx));
+        }
+    }
+
+    fn has_matches(&self, cx: &App) -> bool {
+        self.sidebar
+            .as_ref()
+            .is_some_and(|sidebar| sidebar.read(cx).find().read(cx).has_matches())
     }
 
     fn show_marks(&mut self, view: MarksView, window: &mut Window, cx: &mut Context<Self>) {
@@ -227,6 +356,7 @@ impl DocumentWindow {
         if generation != self.reader.read(cx).document_generation() {
             return;
         }
+        self.sync_sidebar_document(cx);
         if self
             .recent_open
             .as_ref()
@@ -254,10 +384,19 @@ impl DocumentWindow {
 }
 
 impl Render for DocumentWindow {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let settings = settings_ui::state(cx);
         let reader = self.reader.read(cx);
         let title = chrome::title_bar(reader.path(), cx);
         let marks = reader.marks_overlay();
+        let toolbar = settings
+            .read(cx)
+            .show_toolbar()
+            .then(|| chrome::reading_toolbar(reader, self.sidebar_panel(cx).is_some(), window));
+        let statusbar = settings
+            .read(cx)
+            .show_statusbar()
+            .then(|| chrome::status_bar(reader));
         div()
             .id("document-window")
             .test_support()
@@ -298,11 +437,17 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<Continuous>))
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
-            .on_action(cx.listener(Self::route_reader_action::<ShowContents>))
-            .on_action(cx.listener(Self::route_reader_action::<ShowFind>))
-            .on_action(cx.listener(Self::route_reader_action::<ToggleSidebar>))
-            .on_action(cx.listener(Self::route_reader_action::<NextMatch>))
-            .on_action(cx.listener(Self::route_reader_action::<PreviousMatch>))
+            .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
+                this.show_sidebar(SidebarPanel::Contents, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowFind, window, cx| {
+                this.show_sidebar(SidebarPanel::Find, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &ToggleSidebar, window, cx| this.toggle_sidebar(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &NextMatch, _, cx| this.step_match(1, cx)))
+            .on_action(cx.listener(|this, _: &PreviousMatch, _, cx| this.step_match(-1, cx)))
             .on_action(cx.listener(Self::route_reader_action::<SetLocalMark>))
             .on_action(cx.listener(Self::route_reader_action::<JumpLocalMark>))
             .on_action(cx.listener(Self::route_reader_action::<DeleteLocalMark>))
@@ -317,7 +462,31 @@ impl Render for DocumentWindow {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .child(self.reader.clone()),
+                    .flex()
+                    .items_stretch()
+                    .children(
+                        self.sidebar
+                            .as_ref()
+                            .filter(|sidebar| sidebar.read(cx).active().is_some())
+                            .cloned(),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .children(toolbar)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .min_w_0()
+                                    .child(self.reader.clone()),
+                            )
+                            .children(statusbar),
+                    ),
             )
             .when_some(self.palette.clone(), |root, palette| {
                 let reader = self.reader.read(cx);
@@ -327,7 +496,7 @@ impl Render for DocumentWindow {
                         page_count: reader.page_count().unwrap_or(0),
                         mode_override: reader.mode_override(),
                         has_selection: reader.selected_text().is_some(),
-                        has_matches: reader.has_matches(cx),
+                        has_matches: self.has_matches(cx),
                     },
                     cx,
                 ))

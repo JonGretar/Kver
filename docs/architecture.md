@@ -46,21 +46,25 @@ replacement document invalidates it but an intervening zoom does not.
 The native picker task belongs to the window lifetime. Deferred reader resize
 work uses a weak handle so a queued frame does not retain a closed reader.
 
-`DocumentWindow` composes the title bar, reader workspace, and full-window
-inline overlay layer. `document_window/chrome.rs` renders the title from the
-reader's path; it retains no separate document identity. The window observes
-its reader so title and command availability follow document and viewport
-changes. The palette belongs to the window. Marks remain document-owned, but
-the window mounts their popup alongside the palette so neither is positioned
+`DocumentWindow` composes the title bar, sidebar, reading toolbar, central
+PDF surface, status bar, and full-window inline overlay layer.
+`document_window/chrome.rs` renders value-like controls from the reader's
+public state; it retains no separate document identity or viewport.
+The window observes its reader and shared settings so chrome and command
+availability follow changes. Sidebar resizing and chrome visibility changes
+request a reader refit after the new layout has been measured.
+The palette belongs to the window. Marks remain document-owned, but the
+window mounts their popup alongside the palette so neither is positioned
 relative to the smaller workspace below the title bar.
 
-The layout migration is not complete: `Preview` still composes the toolbar,
-sidebar, PDF surface, and status bar and coordinates the document-owned marks.
-`ReaderView` will name the narrowed PDF surface, not this transitional workspace.
-
-`src/reader.rs` owns the viewport, document identity, navigation state,
-render scheduling, and window-local action handling. `src/reader/commands.rs`
-declares its document commands independently of physical bindings.
+`src/reader.rs` implements `ReaderView`: the central PDF surface, document
+identity and loading/restoration, navigation, selection, rendering, and
+document-owned marks coordination. It does not retain the sidebar or its
+panels, window chrome, the palette, or Recent dialogs. The former public
+`Preview` name remains an alias for callers adopting the narrower interface.
+`src/reader/commands.rs` declares document commands independently of physical
+bindings. Navigation and raster rules still share the reader implementation;
+their deeper separation is the remaining modularization work.
 `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
 entries and destinations, and premultiplied BGRA pixels, not Hayro types, to
@@ -288,9 +292,9 @@ resolves shortcut hints from active keybindings. Bare reading keys apply only
 while the reader has focus; text entry in the palette does not navigate the
 PDF.
 
-The current reader composition owns one `ReaderSidebar` entity per window,
+`DocumentWindow` owns one `ReaderSidebar` entity per window,
 implemented in `src/app/document_window/sidebar.rs`. The host has no
-`Preview` back-reference: resizing, panel selection, and focus transfer use
+`ReaderView` back-reference: resizing, panel selection, and focus transfer use
 its own entity context. Its owner observes layout changes so PDF fit modes
 follow the resized viewport. The host selects one panel and reserves a bounded
 side of the window's reading area
@@ -311,8 +315,8 @@ is clicked or confirmed. Only the chevron toggles disclosure by pointer;
 clicking the rest of a parent row navigates without folding it. Both panels
 supply content to the same host; search and outline state remain separate.
 The sidebar remains attached across document changes, preserving its width
-and last panel. Both panels receive document snapshots from the reader's
-single document-generation owner. Contents cancels pending extraction and
+and last panel. The window supplies both panels with document snapshots from
+the reader's single document-generation owner. Contents cancels pending extraction and
 clears its tree on replacement; it loads only when opened or when a new
 document arrives while Contents is open. Its own activation Action and pointer
 handlers emit generation-tagged destinations, and load completion transfers
@@ -321,11 +325,16 @@ or query cancels Find's search task and invalidates
 obsolete batches and queued navigation events. Closing the sidebar preserves
 the query and results; replacing the document clears them. Find emits a
 document-space match destination for the reader to apply and exposes the
-active highlight without exposing mutable result state. The reader retains
-the subscription handles and handles viewport placement; Find has no reader
-back-reference. Search and outline lifecycle tests live beside their features;
-composed navigation, focus, and sidebar-resize workflows live under
-`src/reader/tests/`.
+active highlight without exposing mutable result state. The window retains
+the subscription handles, checks document/query revisions, and routes
+destinations to `ReaderView` for viewport placement. It supplies the selected
+highlight as a read-only document-space snapshot; the reader clears it on
+replacement and rejects snapshots for an old document. The surface does not
+reach through the sidebar to read Find state. Find has no reader back-reference.
+Search and outline lifecycle tests live beside their features; composed
+navigation, focus, and sidebar-resize workflows live under
+`src/app/document_window/tests/`. Reader geometry, raster bounds, and stale
+highlight coverage remain under `src/reader/tests/`.
 
 Hayro 0.8 exposes the PDF catalog through `xref.root_id()` and `xref.get`,
 and individual page dictionaries through `page.raw()`. The PDF adapter

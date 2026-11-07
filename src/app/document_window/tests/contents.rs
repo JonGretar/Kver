@@ -1,6 +1,8 @@
 //! Contents navigation through the composed document window.
 
+use super::super::sidebar::SidebarPanel;
 use super::*;
+use crate::app::keymap::install as bind_reader_keys;
 
 #[gpui_kit::test]
 fn outline_pointer_and_keyboard_activation_share_document_navigation(cx: &mut TestAppContext) {
@@ -8,7 +10,7 @@ fn outline_pointer_and_keyboard_activation_share_document_navigation(cx: &mut Te
         gpui_kit::init(cx);
         bind_reader_keys(cx);
     });
-    let (handle, reader) = recent_test_window(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    let (handle, reader) = reader_window(cx, Some(PathBuf::from("examples/field-guide.pdf")));
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
@@ -39,7 +41,8 @@ fn document_replacement_discards_outline_and_keeps_the_sidebar_open(cx: &mut Tes
         gpui_kit::init(cx);
         bind_reader_keys(cx);
     });
-    let (handle, reader) = recent_test_window(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
@@ -58,7 +61,10 @@ fn document_replacement_discards_outline_and_keeps_the_sidebar_open(cx: &mut Tes
     })
     .unwrap();
     reader.read_with(cx, |reader, cx| {
-        assert_eq!(reader.sidebar_panel(cx), Some(SidebarPanel::Contents));
+        assert_eq!(
+            document.read(cx).sidebar_panel(cx),
+            Some(SidebarPanel::Contents)
+        );
         assert_eq!(reader.page_index(), 0);
         assert_eq!(reader.page_count(), Some(100));
     });
@@ -70,7 +76,7 @@ fn outline_completion_does_not_steal_find_focus(cx: &mut TestAppContext) {
         gpui_kit::init(cx);
         bind_reader_keys(cx);
     });
-    let (handle, _) = recent_test_window(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    let (handle, _) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);

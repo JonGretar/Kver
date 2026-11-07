@@ -1149,21 +1149,8 @@ impl Render for ReaderView {
             .on_action(cx.listener(|this, _: &UseDefaultReadingMode, _, cx| {
                 this.choose_reading_mode(None, cx);
             }))
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if this.marks_open(cx) || !this.focus.is_focused(window) {
-                    cx.propagate();
-                    return;
-                }
-                if event.keystroke.modifiers == gpui::Modifiers::default() {
-                    match event.keystroke.key.as_str() {
-                        "down" | "j" => this.scroll_by(100.0, cx),
-                        "up" | "k" => this.scroll_by(-100.0, cx),
-                        _ => cx.propagate(),
-                    }
-                } else {
-                    cx.propagate();
-                }
-            }))
+            .on_action(cx.listener(|this, _: &ScrollDown, _, cx| this.scroll_by(100.0, cx)))
+            .on_action(cx.listener(|this, _: &ScrollUp, _, cx| this.scroll_by(-100.0, cx)))
             .flex()
             .flex_col()
             .bg(cx.theme().background)

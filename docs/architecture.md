@@ -11,6 +11,9 @@ The reader keeps PDF processing behind an internal adapter and schedules
 expensive work off the UI thread. Navigation state and page positions do not
 depend on the PDF engine or physical keybindings.
 
+See the [reader ownership decision](adr/0001-capability-owned-reader.md) for the
+module trade-offs and the [glossary](../GLOSSARY.md) for reading-domain terms.
+
 ## Application boundaries
 
 `src/main.rs` parses the command line and calls `app::run`. `src/app.rs`
@@ -21,7 +24,10 @@ receive the same resolved application paths.
 menus snapshot their shortcuts. It owns physical keys and context expressions;
 features still declare Actions and attach handlers to their focused regions.
 GPUI owns dispatch and pending multi-keystroke sequences. User overrides and
-keymap reloads are not implemented.
+keymap reloads are not implemented. Line scrolling uses the reader's
+`ScrollDown`/`ScrollUp` Actions; the application keymap binds Down/J and Up/K
+only in the focused Reader context, rather than interpreting those keys in
+the view.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
 `src/app/windows.rs` creates document windows, cycles focus, and owns

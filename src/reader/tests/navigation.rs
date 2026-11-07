@@ -3,6 +3,62 @@ use super::*;
 mod single_page;
 
 #[gpui_kit::test]
+fn scroll_actions_share_keybindings_without_intercepting_find_input(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let (window, reader) =
+        recent_test_window(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.simulate_keystrokes(window, "j down");
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        (0, 200.0)
+    );
+    cx.simulate_keystrokes(window, "k up");
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        (0, 0.0)
+    );
+
+    cx.simulate_keystrokes(window, "cmd-f");
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("jk", cx);
+        window.press("down", cx);
+        window.press("up", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        (0, 0.0)
+    );
+    // Explicit commands remain window-local and can reach the reader from a
+    // sibling region, without giving that region bare reader keybindings.
+    cx.update_window(window, |_, window, cx| {
+        window.dispatch_action(Box::new(ScrollDown), cx)
+    })
+    .unwrap();
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        (0, 100.0)
+    );
+    cx.update_window(window, |_, window, cx| {
+        window.dispatch_action(Box::new(ScrollUp), cx)
+    })
+    .unwrap();
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        (0, 0.0)
+    );
+}
+
+#[gpui_kit::test]
 fn reading_keys_navigate_and_zoom_without_screenshots(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);

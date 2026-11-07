@@ -46,11 +46,17 @@ replacement document invalidates it but an intervening zoom does not.
 The native picker task belongs to the window lifetime. Deferred reader resize
 work uses a weak handle so a queued frame does not retain a closed reader.
 
-The layout migration is not complete: `Preview` still composes the title bar,
-toolbar, sidebar, status bar, and inline overlays. These remain together until
-the next ownership slice can move chrome and overlays without changing their
-geometry or action ancestry. `ReaderView` will name the narrowed PDF surface,
-not this transitional workspace.
+`DocumentWindow` composes the title bar, reader workspace, and full-window
+inline overlay layer. `document_window/chrome.rs` renders the title from the
+reader's path; it retains no separate document identity. The window observes
+its reader so title and command availability follow document and viewport
+changes. The palette belongs to the window. Marks remain document-owned, but
+the window mounts their popup alongside the palette so neither is positioned
+relative to the smaller workspace below the title bar.
+
+The layout migration is not complete: `Preview` still composes the toolbar,
+sidebar, PDF surface, and status bar and coordinates the document-owned marks.
+`ReaderView` will name the narrowed PDF surface, not this transitional workspace.
 
 `src/reader.rs` owns the viewport, document identity, navigation state,
 render scheduling, and window-local action handling. `src/reader/commands.rs`
@@ -264,15 +270,20 @@ states rather than a reader-specific palette.
 
 `src/app/document_window/command_palette.rs` owns the command palette's
 catalogue, retained `CommandState`, focus trap, and overlay presentation.
-Its host supplies a read-only availability snapshot instead of a reader
-back-reference. It remains an inline overlay in the document's Action dispatch
-path, rather than relying on a global handler that could affect another window.
+`DocumentWindow` retains the palette and supplies a read-only availability
+snapshot instead of a reader back-reference. The palette is a sibling of the
+reader workspace, not its child. Window-local routing sends reader Actions
+through GPUI's `FocusHandle::dispatch_action` to the existing reader handlers,
+without moving focus or duplicating navigation policy. Actions already handled
+inside the reader do not run again at the window. No application-global handler
+chooses a reader on the palette's behalf.
 Kit's `Command` owns search and selection;
 `Root` handles the overlay's focus trap through Kit's `FocusTrapElement`.
 The overlay has a dialog role and a rem-based maximum width so it remains
 usable in narrow windows. A dismissal Action lets the host restore focus
 without exposing itself to palette callbacks. Dismissing it restores the active sidebar panel's
-focus when one is open, otherwise reader focus. GPUI Kit
+focus when one is open, otherwise reader focus. A deferred palette dismissal
+does not steal focus from a replacement Marks or Recent overlay. GPUI Kit
 resolves shortcut hints from active keybindings. Bare reading keys apply only
 while the reader has focus; text entry in the palette does not navigate the
 PDF.

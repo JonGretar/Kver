@@ -13,11 +13,12 @@ pub use contents::ActivateOutline;
 pub(crate) use contents::ContentsPanel;
 pub(crate) use find::FindPanel;
 pub use find::{NextMatch, PreviousMatch};
+use marks::MarksEvent;
 pub use marks::{
     DeleteLocalMark, JumpLocalMark, SetLocalMark, ShowDeleteMark, ShowJumpMark, ShowMarks,
     ShowSetMark,
 };
-use marks::{LocalMarks, MarksEvent, MarksView};
+pub(crate) use marks::{LocalMarks, MarksView};
 
 use std::{
     collections::HashMap,
@@ -35,7 +36,7 @@ use gpui_kit::{
 use gpui_kit::{
     base::{Disableable, TestSupportExt as _},
     component::{
-        ActiveTheme, Selectable, Sizable, TitleBar,
+        ActiveTheme, Selectable, Sizable,
         button::{Button, ButtonVariants},
         empty::{
             Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
@@ -44,15 +45,11 @@ use gpui_kit::{
         spinner::Spinner,
         status_bar::StatusBar,
         toolbar::{Toolbar, ToolbarGroup},
-        tooltip::Tooltip,
     },
 };
 use image::{Frame, RgbaImage};
 
 use crate::{
-    app::document_window::command_palette::{
-        CommandAvailability, CommandPalette, DismissCommandPalette,
-    },
     coordinates::{PageViewport, Point},
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
@@ -92,12 +89,6 @@ fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32)) -> Option<f
         ZoomMode::FitPage => width_scale.min((height - PAGE_PADDING * 2.0) / page.1),
     };
     Some(scale.clamp(0.25, 4.0))
-}
-
-fn document_name(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn reader_button(
@@ -304,7 +295,6 @@ pub struct Preview {
     scroll: ScrollHandle,
     focus: FocusHandle,
     focus_initialized: bool,
-    palette: Option<CommandPalette>,
     marks: Option<Entity<LocalMarks>>,
     marks_subscriptions: Vec<Subscription>,
     sidebar: Option<Entity<ReaderSidebar>>,
@@ -363,7 +353,6 @@ impl Preview {
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
-            palette: None,
             marks: None,
             marks_subscriptions: Vec::new(),
             sidebar: None,
@@ -425,35 +414,31 @@ impl Preview {
         cx.notify();
     }
 
-    fn show_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.palette.is_some() {
-            return;
-        }
+    pub(crate) fn hide_marks(&mut self, cx: &mut Context<Self>) {
         if let Some(marks) = &self.marks {
             marks.update(cx, |marks, cx| marks.hide(cx));
         }
-        self.palette = Some(CommandPalette::new(window, cx));
-        cx.notify();
     }
 
-    fn on_show_palette(
+    /// The window mounts this document-owned feature in its full-window layer.
+    pub(crate) fn marks_overlay(&self) -> Option<Entity<LocalMarks>> {
+        self.marks.clone()
+    }
+
+    pub(crate) fn show_marks(
         &mut self,
-        _: &ShowCommandPalette,
+        view: MarksView,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        self.show_palette(window, cx);
-    }
-
-    fn show_marks(&mut self, view: MarksView, window: &mut Window, cx: &mut Context<Self>) {
+    ) -> bool {
         let Some(marks) = self.ensure_marks(cx) else {
-            return;
+            return false;
         };
-        self.palette = None;
         marks.update(cx, |marks, cx| {
             marks.show(view, self.focus.clone(), window, cx)
         });
         cx.notify();
+        true
     }
 
     fn marks_open(&self, cx: &App) -> bool {
@@ -519,14 +504,7 @@ impl Preview {
         }
     }
 
-    /// A window overlay supersedes the palette and supplies its own focus.
-    pub(crate) fn hide_palette(&mut self, cx: &mut Context<Self>) {
-        self.palette = None;
-        cx.notify();
-    }
-
-    fn dismiss_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.palette = None;
+    pub(crate) fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(sidebar) = self.sidebar.as_mut()
             && let Some(panel) = sidebar.read(cx).active()
         {
@@ -833,11 +811,10 @@ impl Preview {
     pub fn status(&self) -> &str {
         &self.status
     }
-    pub fn palette_open(&self) -> bool {
-        self.palette.is_some()
-    }
-    pub fn palette_query(&self, cx: &gpui::App) -> Option<gpui::SharedString> {
-        self.palette.as_ref().map(|palette| palette.query(cx))
+    pub(crate) fn has_matches(&self, cx: &App) -> bool {
+        self.sidebar
+            .as_ref()
+            .is_some_and(|sidebar| sidebar.read(cx).find().read(cx).has_matches())
     }
     pub fn page_index(&self) -> usize {
         self.page_index
@@ -1506,11 +1483,6 @@ impl Render for Preview {
         let has_document = !self.pages.is_empty();
         let show_fit_labels = f32::from(window.bounds().size.width)
             >= FIT_LABEL_MIN_REMS * f32::from(window.rem_size());
-        let filename = self
-            .path
-            .as_deref()
-            .map(document_name)
-            .map(gpui::SharedString::from);
         let top_space = if self.reading_mode == ReadingMode::SinglePage {
             0.0
         } else {
@@ -1681,21 +1653,9 @@ impl Render for Preview {
             .size_full()
             .track_focus(&self.focus)
             .when(
-                self.palette.is_none() && !self.marks_open(cx) && self.focus.is_focused(window),
+                !self.marks_open(cx) && self.focus.is_focused(window),
                 |reader| reader.key_context("Reader"),
             )
-            .on_action(cx.listener(Self::on_show_palette))
-            .on_action(cx.listener(|this, _: &DismissCommandPalette, window, cx| {
-                // A selected action may already have replaced the palette with
-                // marks or another modal before the deferred confirmation.
-                if this.palette.is_some() {
-                    this.dismiss_palette(window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ShowMarks, window, cx| this.show_marks(MarksView::List, window, cx)))
-            .on_action(cx.listener(|this, _: &ShowSetMark, window, cx| this.show_marks(MarksView::Set, window, cx)))
-            .on_action(cx.listener(|this, _: &ShowJumpMark, window, cx| this.show_marks(MarksView::Jump, window, cx)))
-            .on_action(cx.listener(|this, _: &ShowDeleteMark, window, cx| this.show_marks(MarksView::Delete, window, cx)))
             .on_action(cx.listener(|this, action: &SetLocalMark, _, cx| {
                 if !this.pages.is_empty() {
                     this.change_mark(action.0, Some(this.position_to_save()), cx);
@@ -1767,7 +1727,7 @@ impl Render for Preview {
                 this.choose_reading_mode(None, cx);
             }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if this.palette.is_some() || this.marks_open(cx) || !this.focus.is_focused(window)
+                if this.marks_open(cx) || !this.focus.is_focused(window)
                 {
                     cx.propagate();
                     return;
@@ -1786,54 +1746,6 @@ impl Render for Preview {
             .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(
-                TitleBar::new()
-                    .pr_3()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            // TitleBar's inner bar does not shrink; give the
-                            // filename a zero basis so Open PDF stays visible.
-                            .w_0()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(
-                                div()
-                                    .text_color(cx.theme().primary)
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .child("K /"),
-                            )
-                            .child(
-                                div()
-                                    .id("document-name")
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .truncate()
-                                    .text_sm()
-                                    .when_some(filename.clone(), |title, name| {
-                                        title.tooltip(move |window, cx| {
-                                            Tooltip::new(name.clone()).build(window, cx)
-                                        })
-                                    })
-                                    .child(
-                                        filename.unwrap_or_else(|| "A quiet place to read".into()),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        Button::new("open-pdf")
-                            .label("Open PDF…")
-                            .icon(IconName::FolderOpen)
-                            .ghost()
-                            .small()
-                            .tooltip_with_action("Choose a PDF", &OpenPdf, None)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(OpenPdf), cx)
-                            }),
-                    ),
-            )
             .child(
                 div()
                     .flex()
@@ -2142,18 +2054,6 @@ impl Render for Preview {
                             })),
                     ),
             )
-            .when_some(self.palette.clone(), |reader, palette| {
-                reader.children(palette.render(CommandAvailability {
-                    page_ix: self.page_index,
-                    page_count: self.pages.len(),
-                    mode_override: self.mode_override,
-                    has_selection: self.selected_text().is_some(),
-                    has_matches: self.sidebar.as_ref().is_some_and(|sidebar| {
-                        sidebar.read(cx).find().read(cx).has_matches()
-                    }),
-                }, cx))
-            })
-            .children(self.marks.clone())
     }
 }
 
@@ -2187,7 +2087,6 @@ mod tests {
     mod contents;
     mod find;
     mod marks;
-    mod palette;
     mod sidebar;
 
     fn recent_test_window(
@@ -2301,10 +2200,11 @@ mod tests {
             .unwrap()
         });
         cx.run_until_parked();
-        other.read_with(cx, |reader, cx| {
-            let palette = reader.palette.as_ref().expect("command palette opened");
-            assert_eq!(palette.query(cx), "Open marks");
-        });
+        cx.update_window(other_window, |_, frame, cx| {
+            frame.render_frame(cx);
+            assert_eq!(frame.find("input-state").value(), Some("Open marks"));
+        })
+        .unwrap();
         cx.update(|cx| {
             cx.update_window(other_window, |_, frame, cx| frame.press("enter", cx))
                 .unwrap()
@@ -4121,18 +4021,6 @@ mod tests {
             );
             assert_eq!(reader.page_count(), None);
         });
-    }
-
-    #[test]
-    fn toolbar_uses_filename_instead_of_parent_directories() {
-        assert_eq!(
-            document_name(Path::new("/long/parent/directory/report.pdf")),
-            "report.pdf"
-        );
-        assert_eq!(
-            document_name(Path::new("/long/parent/directory/very-long-file-name.pdf")),
-            "very-long-file-name.pdf"
-        );
     }
 
     #[test]

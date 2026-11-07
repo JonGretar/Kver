@@ -6,7 +6,7 @@ use crate::{
     reading_history::{self as recent, RecentStore},
     settings_ui::ShowSettings,
 };
-use gpui_kit::{Focusable as _, point, px, test::TestEventExt as _};
+use gpui_kit::{point, px, test::TestEventExt as _};
 use std::path::Path;
 
 #[gpui_kit::test]

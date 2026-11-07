@@ -1,6 +1,7 @@
 use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
+mod palette;
 mod recent_history;
 mod recent_picker;
 

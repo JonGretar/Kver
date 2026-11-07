@@ -38,16 +38,16 @@ fn command_palette_opens_recent_with_search_focus(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     document.read_with(cx, |document, cx| {
-        let reader = document.reader().read(cx);
-        assert_eq!(reader.palette_query(cx).as_deref(), Some("Open Recent"));
+        assert_eq!(document.palette_query(cx).as_deref(), Some("Open Recent"));
+        assert!(document.palette.as_ref().unwrap().has_selection(cx));
     });
     cx.update(|cx| {
         cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
             .unwrap();
     });
     cx.run_until_parked();
-    document.read_with(cx, |document, cx| {
-        assert!(!document.reader().read(cx).palette_open());
+    document.read_with(cx, |document, _| {
+        assert!(!document.palette_open());
         assert!(document.recent.is_some());
     });
     cx.update(|cx| {

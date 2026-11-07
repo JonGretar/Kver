@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Show or hide the toolbar and statusbar in Application → UI Elements settings; both are shown by default.
 - Choose whether Kver remembers reading history; while off, new opens stay available during the session without being saved. Clear all saved reading data from Settings with confirmation, or forget one PDF from Open Recent without deleting PDF files.
 - Find previously opened PDFs with Open Recent from the command palette, File menu, or Command-Shift-O; search older entries.
 - Read one PDF page at a time in Single Page mode; scroll within that page without turning it, and switch modes or turn pages with reader controls, shortcuts, menus, or the command palette.

@@ -58,6 +58,14 @@ impl SettingsState {
         self.settings.appearance()
     }
 
+    pub fn show_toolbar(&self) -> bool {
+        self.settings.show_toolbar()
+    }
+
+    pub fn show_statusbar(&self) -> bool {
+        self.settings.show_statusbar()
+    }
+
     pub fn remember_reading_history(&self) -> bool {
         self.settings.remember_reading_history()
     }
@@ -85,6 +93,8 @@ impl SettingsState {
     fn choose(&mut self, change: SettingsChange, cx: &mut Context<Self>) {
         let updated = match change {
             SettingsChange::Appearance(choice) => self.settings.with_appearance(choice),
+            SettingsChange::ShowToolbar(show) => self.settings.with_show_toolbar(show),
+            SettingsChange::ShowStatusbar(show) => self.settings.with_show_statusbar(show),
             SettingsChange::InitialZoom(choice) => self.settings.with_initial_zoom(choice),
             SettingsChange::ReadingView(choice) => self.settings.with_reading_view(choice),
             SettingsChange::ReopenLastWindowsOnStartup(reopen) => {
@@ -365,6 +375,7 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
                             .expanded(true)
                             .children([
                                 TreeItem::new("theme", "Theme"),
+                                TreeItem::new("ui-elements", "UI Elements"),
                                 TreeItem::new("windows", "Windows"),
                             ]),
                         TreeItem::new("reader", "Reader")
@@ -532,7 +543,7 @@ impl SettingsPage {
 }
 
 impl Render for SettingsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let page = self.page(cx);
         let settings = self.settings.read(cx);
         let selected = settings.appearance();
@@ -546,6 +557,10 @@ impl Render for SettingsView {
         let view_state = self.settings.clone();
         let reopen = settings.settings.reopen_last_windows_on_startup();
         let reopen_state = self.settings.clone();
+        let show_toolbar = settings.show_toolbar();
+        let show_statusbar = settings.show_statusbar();
+        let toolbar_state = self.settings.clone();
+        let statusbar_state = self.settings.clone();
         let reset_state = self.settings.clone();
         let reset_focus = self.choice_focus.clone();
         let remember = settings.remember_reading_history();
@@ -562,7 +577,24 @@ impl Render for SettingsView {
             .key_context("KverSettings")
             .on_action(|_: &CloseSettings, window, _| window.remove_window())
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
-            .child(TitleBar::new().child(div().pl_16().font_medium().child("Settings")))
+            .child(
+                TitleBar::new().pl_0().relative().child(
+                    div()
+                        .id("settings-window-title")
+                        .test_support()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        // Center on the window, not the lane beside native controls.
+                        .w(window.viewport_size().width)
+                        .h(gpui_kit::component::TITLE_BAR_HEIGHT)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .font_medium()
+                        .child("Settings"),
+                ),
+            )
             .child(
                 div()
                     .flex_1()
@@ -753,6 +785,41 @@ impl Render for SettingsView {
                                             cx,
                                         )
                                     )),
+                            ))
+                            .children((page == SettingsPage::Application).then(||
+                                div()
+                                    .mx_4()
+                                    .pb_2()
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("UI Elements"),
+                            ))
+                            .children((page == SettingsPage::Application).then(||
+                                div().p_4().flex().flex_col().gap_4()
+                                    .child(preference_row(
+                                        "Show Toolbar",
+                                        "Show navigation and zoom controls in reader windows.",
+                                        Switch::new("show-toolbar")
+                                            .accessibility_label("Show Toolbar")
+                                            .checked(show_toolbar)
+                                            .on_change(move |show, _, cx| {
+                                                toolbar_state.update(cx, |settings, cx| settings.choose(SettingsChange::ShowToolbar(*show), cx));
+                                            }),
+                                        cx,
+                                    ))
+                                    .child(preference_row(
+                                        "Show Statusbar",
+                                        "Show page and zoom information at the bottom of reader windows.",
+                                        Switch::new("show-statusbar")
+                                            .accessibility_label("Show Statusbar")
+                                            .checked(show_statusbar)
+                                            .on_change(move |show, _, cx| {
+                                                statusbar_state.update(cx, |settings, cx| settings.choose(SettingsChange::ShowStatusbar(*show), cx));
+                                            }),
+                                        cx,
+                                    ))
                             ))
                             .children((page == SettingsPage::Application).then(||
                                 div()
@@ -992,6 +1059,9 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
+                let title = frame.find("settings-window-title").bounds();
+                let titlebar = frame.find("title-bar").bounds();
+                assert_eq!(title.center().x, titlebar.center().x);
                 assert!(frame.try_find("appearance-choice").is_some());
                 assert!(frame.try_find("initial-zoom-choice").is_none());
                 assert!(frame.try_find("remember-reading-history").is_none());
@@ -1008,9 +1078,11 @@ mod tests {
                     assert!(frame.try_find("initial-zoom-choice").is_none());
                     assert!(frame.try_find("remember-reading-history").is_some());
                 }
-                for target in ["application", "theme", "windows"] {
+                for target in ["application", "theme", "ui-elements", "windows"] {
                     frame.click(target, cx);
                     assert!(frame.try_find("appearance-choice").is_some());
+                    assert!(frame.try_find("show-toolbar").is_some());
+                    assert!(frame.try_find("show-statusbar").is_some());
                     assert!(frame.try_find("quit-on-last-close").is_some());
                     assert!(frame.try_find("initial-zoom-choice").is_none());
                 }
@@ -1023,6 +1095,85 @@ mod tests {
             })
             .unwrap();
         });
+    }
+
+    #[gpui_kit::test]
+    fn ui_elements_update_all_readers_and_follow_file_edits(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(
+                cx,
+                Some(AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let settings_window = cx.update(|cx| cx.windows()[0]);
+        let readers = cx.update(|cx| {
+            (0..2)
+                .map(|_| {
+                    gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+                    })
+                    .unwrap()
+                    .0
+                })
+                .collect::<Vec<_>>()
+        });
+        cx.run_until_parked();
+        for (toolbar, statusbar, toggle) in [
+            (true, true, None),
+            (false, true, Some("show-toolbar")),
+            (false, false, Some("show-statusbar")),
+            (true, false, Some("show-toolbar")),
+            (true, true, Some("show-statusbar")),
+        ] {
+            if let Some(toggle) = toggle {
+                cx.update(|cx| {
+                    cx.update_window(settings_window, |_, frame, cx| {
+                        frame.render_frame(cx);
+                        frame.click(toggle, cx);
+                    })
+                    .unwrap();
+                });
+                cx.run_until_parked();
+                let saved = settings::load(&config).unwrap();
+                assert_eq!(saved.show_toolbar(), toolbar);
+                assert_eq!(saved.show_statusbar(), statusbar);
+            }
+            for reader in &readers {
+                cx.update(|cx| {
+                    cx.update_window(*reader, |_, frame, cx| {
+                        frame.render_frame(cx);
+                        assert_eq!(frame.try_find("settings-button").is_some(), toolbar);
+                        assert_eq!(frame.try_find("reader-status").is_some(), statusbar);
+                        assert!(frame.find("page").visible());
+                    })
+                    .unwrap();
+                });
+            }
+        }
+        std::fs::write(
+            &config,
+            "[application]\nshow_toolbar = false\nshow_statusbar = false\n",
+        )
+        .unwrap();
+        poll(cx);
+        for reader in readers {
+            cx.update(|cx| {
+                cx.update_window(reader, |_, frame, cx| {
+                    frame.render_frame(cx);
+                    assert!(frame.try_find("settings-button").is_none());
+                    assert!(frame.try_find("reader-status").is_none());
+                })
+                .unwrap();
+            });
+        }
     }
 
     #[gpui_kit::test]
@@ -1045,6 +1196,11 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
+                frame.scroll(
+                    "show-statusbar",
+                    gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-400.))),
+                    cx,
+                );
                 frame.click("reopen-last-windows", cx);
             })
             .unwrap();
@@ -1241,6 +1397,11 @@ mod tests {
             assert!(state(cx).read(cx).quit_when_last_window_closes());
             cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
+                frame.scroll(
+                    "show-statusbar",
+                    gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-400.))),
+                    cx,
+                );
                 frame.click("quit-on-last-close", cx);
             })
             .unwrap();

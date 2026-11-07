@@ -54,6 +54,14 @@ impl<'a> PageLayout<'a> {
         }
     }
 
+    pub(super) fn page_dimensions(&self, page: usize) -> Option<(f32, f32)> {
+        self.pages.get(page).copied()
+    }
+
+    pub(super) fn scale(&self) -> f32 {
+        self.zoom
+    }
+
     pub(super) fn page_top(&self, page: usize) -> f32 {
         match self.mode {
             ReadingMode::Continuous => page_top(self.pages, self.zoom, page),

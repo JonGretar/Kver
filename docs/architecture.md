@@ -66,8 +66,9 @@ panels, window chrome, the palette, or Recent dialogs. The former public
 bindings. `src/reader/selection.rs` owns text selection and its page-text cache
 as ordinary Rust state, without a separate entity or view back-reference.
 `src/reader/navigation.rs` owns shared layout and navigation-coordinate rules.
-The reader still coordinates navigation commands, restoration, and raster work;
-raster scheduling and cache ownership remain in the view.
+`src/reader/rendering.rs` owns raster request selection, reply validation, and
+visible bitmap retention. The reader coordinates navigation commands,
+restoration, background execution, and presentation.
 `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
 entries and destinations, and premultiplied BGRA pixels, not Hayro types, to
@@ -90,6 +91,23 @@ placement policies while using the same page-local-to-scroll conversion.
 when scale changes, and coordinates selection and persistence.
 Pure rules are tested under `src/reader/navigation/`; reader integration
 tests exercise the real input, rendering, and history paths.
+
+`PageRasters` retains GPUI image resources but has no entity, window, PDF path,
+or background executor. The view supplies a borrowed `PageLayout` and measured
+viewport, executes the chosen request through the PDF adapter, and returns its
+reply with the current visible range. Each request has a unique ticket;
+obsolete replies cannot install pixels or retire a newer request, even when
+the page and scale match again. Document replacement, logical zoom, and display
+density changes invalidate pixels, pending tickets, and old failures together.
+An already-running backend call may finish after invalidation; it no longer
+owns the current request slot.
+
+Document loading and reading-mode save replies use the reader's document
+generation, not a raster ticket. Moving between displays while a PDF opens
+therefore cannot discard the document load. Raster scheduling, cache bounds,
+and reply ordering have direct tests under `src/reader/rendering/`; composed
+loading, zoom, density, and replacement tests live in
+`src/reader/tests/rendering.rs`.
 
 The reader loads page dimensions in background work. Continuous mode lays out
 the document with spacers around visible pages; Single Page mode lays out only

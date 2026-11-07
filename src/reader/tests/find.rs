@@ -102,7 +102,7 @@ fn single_page_find_jump_and_window_modes_are_local(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     first.read_with(cx, |reader, _| {
-        assert!(reader.images.keys().all(|page| *page == 2));
+        assert!(cached_pages(reader).all(|page| page == 2));
         assert!(reader.retained_bitmap_bytes() <= BITMAP_BUDGET);
     });
 }

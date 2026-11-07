@@ -5,6 +5,7 @@ mod contents;
 mod find;
 mod marks;
 mod navigation;
+mod rendering;
 mod selection;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
@@ -25,20 +26,26 @@ pub use marks::{
 pub(crate) use marks::{LocalMarks, MarksView};
 use navigation::{GAP, PAGE_PADDING, PageLayout, Position};
 pub use navigation::{ReadingMode, ZoomMode};
+use rendering::{Completion, PageRasters, Schedule};
 use selection::Selection;
 
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
     time::Duration,
 };
 
+use crate::{
+    coordinates::{PageViewport, Point},
+    find_search, pdf,
+    recent::{self, ReadingPosition, RecentStore},
+    settings::{InitialZoom, ReadingView},
+    settings_ui,
+};
 use gpui_kit as gpui;
 use gpui_kit::assets::IconName;
 use gpui_kit::{
     Animation, AnimationExt, App, BoxShadow, ClipboardItem, Context, Entity, FocusHandle,
-    RenderImage, ScrollHandle, Subscription, Window, div, img, point, prelude::*, px, rgb,
+    ScrollHandle, Subscription, Window, div, img, point, prelude::*, px, rgb,
 };
 use gpui_kit::{
     base::TestSupportExt as _,
@@ -52,30 +59,6 @@ use gpui_kit::{
         spinner::Spinner,
     },
 };
-use image::{Frame, RgbaImage};
-
-use crate::{
-    coordinates::{PageViewport, Point},
-    find_search, pdf,
-    recent::{self, ReadingPosition, RecentStore},
-    settings::{InitialZoom, ReadingView},
-    settings_ui,
-};
-
-const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
-
-fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
-    let max_scale = (32_000_000.0 / (width * height))
-        .sqrt()
-        .min(8192.0 / width)
-        .min(8192.0 / height);
-    (zoom * density).clamp(0.25, 8.0).min(max_scale)
-}
-
-struct Bitmap {
-    image: Arc<RenderImage>,
-    bytes: usize,
-}
 
 /// Central PDF surface and document lifecycle, independent of window chrome.
 pub struct ReaderView {
@@ -92,14 +75,9 @@ pub struct ReaderView {
     mode_override: Option<ReadingMode>,
     display_scale: f32,
     pages: Vec<(f32, f32)>,
-    images: HashMap<usize, Bitmap>,
-    // Only one rasterization runs at once; the next job is chosen from the
-    // *current* viewport, rather than queued ahead of a later jump.
-    in_flight: Option<(usize, u64)>,
-    generation: u64,
+    rasters: PageRasters,
     document_generation: u64,
     selection: Selection,
-    failed: Option<usize>,
     page_index: usize,
     // A deliberate page turn remains current even if the viewport also shows
     // part of a neighboring page. Scrolling chooses a new current page.
@@ -149,12 +127,9 @@ impl ReaderView {
             mode_override: None,
             display_scale,
             pages: Vec::new(),
-            images: HashMap::new(),
-            in_flight: None,
-            generation: 0,
+            rasters: PageRasters::default(),
             document_generation: 0,
             selection: Selection::default(),
-            failed: None,
             page_index: 0,
             selected_page: None,
             last_viewport: (f32::NAN, f32::NAN, f32::NAN),
@@ -175,7 +150,6 @@ impl ReaderView {
 
     /// Replace the active document immediately, before any asynchronous work completes.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        self.generation += 1;
         self.document_generation += 1;
         self.marks = None;
         self.marks_subscriptions.clear();
@@ -191,9 +165,7 @@ impl ReaderView {
         self.scale = 1.0;
         self.zoom_mode = ZoomMode::Fixed;
         self.pages.clear();
-        self.images.clear();
-        self.in_flight = None;
-        self.failed = None;
+        self.rasters.invalidate();
         self.page_index = 0;
         self.selected_page = None;
         self.scroll.set_offset(point(px(0.0), px(0.0)));
@@ -365,7 +337,6 @@ impl ReaderView {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let generation = self.generation;
         let history = recent::history(cx);
         let history_epoch = history.as_ref().map(|history| history.epoch());
         let restore_position = settings.read(cx).reopen_at_last_position();
@@ -391,7 +362,7 @@ impl ReaderView {
                 Ok(None)
             };
             let _ = this.update(cx, |this, cx| {
-                if generation != this.generation {
+                if document_generation != this.document_generation {
                     return;
                 }
                 let mut opened = false;
@@ -555,13 +526,14 @@ impl ReaderView {
         self.record_path.as_deref()
     }
     pub fn displayed_page_index(&self) -> Option<usize> {
-        self.images
-            .contains_key(&self.page_index)
+        self.rasters
+            .image(self.page_index)
+            .is_some()
             .then_some(self.page_index)
     }
     /// Diagnostic for asserting that sustained scrolling does not retain every page.
     pub fn retained_bitmap_bytes(&self) -> usize {
-        self.images.values().map(|image| image.bytes).sum()
+        self.rasters.retained_bytes()
     }
 
     pub fn selected_text(&self) -> Option<String> {
@@ -641,12 +613,12 @@ impl ReaderView {
                 ReadingMode::Continuous => ReadingView::Continuous,
                 ReadingMode::SinglePage => ReadingView::Page,
             });
-            let generation = self.generation;
+            let generation = self.document_generation;
             let work = history.set_reading_mode(path, saved);
             cx.spawn(async move |this, cx| {
                 if let Err(error) = work.await {
                     let _ = this.update(cx, |this, cx| {
-                        if this.generation == generation {
+                        if this.document_generation == generation {
                             this.status = format!("Reading mode could not be saved: {error}");
                             cx.notify();
                         }
@@ -828,10 +800,7 @@ impl ReaderView {
             return;
         }
         self.scale = next;
-        self.generation += 1;
-        self.images.clear();
-        self.in_flight = None;
-        self.failed = None;
+        self.rasters.invalidate();
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
             self.layout().offset_for(position, anchor),
@@ -857,9 +826,7 @@ impl ReaderView {
             0.0
         };
         self.focus_page(index);
-        if self.failed != Some(index) {
-            self.failed = None;
-        }
+        self.rasters.on_page_selected(index);
         let (_, width, height) = self.viewport();
         self.apply_fit(index, Position { page: index, y }, (width, height), 0.0);
         self.scroll_to(
@@ -951,80 +918,40 @@ impl ReaderView {
         if self.pages.is_empty() {
             return;
         }
-        let (top, _, height) = self.viewport();
-        let range = self.layout().visible_pages(top, height);
-        if self.failed.is_some_and(|index| !range.contains(&index)) {
-            self.failed = None;
-        }
-        // No offscreen cache: bitmap ownership and memory scale with the viewport.
-        self.images.retain(|index, _| range.contains(index));
-        if self.in_flight.is_some() {
-            return;
-        }
-        let used = self.retained_bitmap_bytes();
-        let index = range
-            .filter(|index| !self.images.contains_key(index) && self.failed != Some(*index))
-            .min_by_key(|index| (self.layout().page_top(*index) - top).abs() as i64);
-        let Some(index) = index else {
-            if self.failed.is_none() {
-                self.status = self.ready_status();
-            }
+        let Some(path) = self.path.as_ref() else {
             return;
         };
-        let dimensions = self.pages[index];
-        let density = raster_scale(self.scale, self.display_scale, dimensions);
-        let estimated =
-            (dimensions.0 * density).ceil() as usize * (dimensions.1 * density).ceil() as usize * 4;
-        if used > 0 && used.saturating_add(estimated) > BITMAP_BUDGET {
-            self.status = self.ready_status();
-            return;
-        }
-        let generation = self.generation;
-        self.in_flight = Some((index, generation));
+        let (top, _, height) = self.viewport();
+        let layout = PageLayout::new(&self.pages, self.scale, self.reading_mode, self.page_index);
+        let request = match self
+            .rasters
+            .schedule(&layout, top, height, self.display_scale)
+        {
+            Schedule::Unchanged => return,
+            Schedule::Ready => {
+                self.status = self.ready_status();
+                return;
+            }
+            Schedule::Render(request) => request,
+        };
         self.status = format!(
             "Rendering page {} at {}%…",
-            index + 1,
+            request.page() + 1,
             (self.scale * 100.0).round()
         );
-        let Some(path) = self.path.clone() else {
-            return;
-        };
+        let path = path.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::render_bitmap(&path, index, density) });
+            .spawn(async move { pdf::render_bitmap(&path, request.page(), request.scale()) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                if generation != this.generation {
-                    return;
-                }
-                this.in_flight = None;
                 let (top, _, height) = this.viewport();
-                if this.layout().visible_pages(top, height).contains(&index) {
-                    match result {
-                        Ok(rendered) => {
-                            let bytes = rendered.bgra.len();
-                            if let Some(pixels) =
-                                RgbaImage::from_raw(rendered.width, rendered.height, rendered.bgra)
-                            {
-                                this.images.insert(
-                                    index,
-                                    Bitmap {
-                                        image: Arc::new(RenderImage::new(vec![Frame::new(pixels)])),
-                                        bytes,
-                                    },
-                                );
-                            } else {
-                                this.status =
-                                    "Cannot display page image: invalid pixel dimensions".into();
-                                this.failed = Some(index);
-                            }
-                        }
-                        Err(error) => {
-                            this.status = error;
-                            this.failed = Some(index);
-                        }
-                    }
+                let visible = this.layout().visible_pages(top, height);
+                match this.rasters.finish(request, result, visible) {
+                    Completion::Obsolete => return,
+                    Completion::Accepted => {}
+                    Completion::Failed(error) => this.status = error,
                 }
                 this.schedule(cx);
                 cx.notify();
@@ -1053,9 +980,7 @@ impl Render for ReaderView {
         let density = window.scale_factor();
         if self.display_scale != density {
             self.display_scale = density;
-            self.generation += 1;
-            self.images.clear();
-            self.in_flight = None;
+            self.rasters.invalidate();
             self.schedule(cx);
         }
         if !self.pages.is_empty() && self.viewport() != self.last_viewport {
@@ -1075,7 +1000,7 @@ impl Render for ReaderView {
             let (width, page_height) = self.pages[index];
             let page_width = px(width * self.scale);
             let page_height = px(page_height * self.scale);
-            let image = self.images.get(&index).map(|bitmap| bitmap.image.clone());
+            let image = self.rasters.image(index).cloned();
             let mut page = div()
                 .relative()
                 .w(page_width)
@@ -1365,6 +1290,7 @@ impl ReaderView {
 
 #[cfg(test)]
 mod tests {
+    use super::rendering::BITMAP_BUDGET;
     use super::*;
     use crate::app::keymap::install as bind_reader_keys;
     use crate::reading_history::LocalMark;
@@ -1375,7 +1301,9 @@ mod tests {
     mod find;
     mod marks;
     mod navigation;
+    mod rendering;
     mod selection;
+    use rendering::cached_pages;
 
     fn recent_test_window(
         cx: &mut TestAppContext,
@@ -2284,9 +2212,9 @@ mod tests {
         reader.read_with(cx, |reader, _| {
             assert_eq!(reader.page_index(), 499);
             assert!(
-                reader.images.len() <= 2,
+                cached_pages(reader).count() <= 2,
                 "Single Page eagerly rendered {} pages",
-                reader.images.len()
+                cached_pages(reader).count()
             );
         });
 
@@ -2299,7 +2227,7 @@ mod tests {
         reopened.read_with(cx, |reader, _| {
             assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
             assert_eq!(reader.page_index(), 499);
-            assert!(reader.images.len() <= 2);
+            assert!(cached_pages(reader).count() <= 2);
         });
     }
 
@@ -2341,7 +2269,7 @@ mod tests {
             assert_eq!(reader.page_count(), Some(1));
             assert_eq!(reader.page_index(), 0);
             assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
-            assert!(reader.images.len() <= 1);
+            assert!(cached_pages(reader).count() <= 1);
         });
         let (_, other) = recent_test_window(cx, Some(pdf));
         cx.run_until_parked();
@@ -3041,19 +2969,5 @@ mod tests {
             );
             assert_eq!(reader.page_count(), None);
         });
-    }
-
-    #[test]
-    fn display_density_changes_bitmap_resolution_not_logical_zoom() {
-        assert_eq!(raster_scale(1.0, 2.0, (612.0, 792.0)), 2.0);
-        assert_eq!(raster_scale(1.0, 1.0, (612.0, 792.0)), 1.0);
-    }
-
-    #[test]
-    fn high_zoom_is_bounded_for_a4_scans() {
-        let scale = raster_scale(4.0, 2.0, (595.44, 842.04));
-        assert!(scale < 8.0);
-        assert!(scale > 7.0);
-        assert!(595.44 * 842.04 * scale * scale <= 32_000_000.0);
     }
 }

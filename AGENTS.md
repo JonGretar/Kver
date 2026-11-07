@@ -137,6 +137,10 @@ Prioritize testing of:
 
 Use representative real-world PDFs during development.
 
+For modal popups, row actions that remove controls, or nested confirmations,
+read `docs/agents/workflow.md#modal-command-lists` before implementing or
+reviewing the interaction.
+
 For visible UI changes that need review or approval, capture and show the
 result in the Delta thread with the opt-in `tests/visual.rs` tool. See
 `docs/agents/workflow.md` for the capture and cleanup workflow.

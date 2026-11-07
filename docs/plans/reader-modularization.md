@@ -1,15 +1,19 @@
 # Reader modularization
 
+**Status: implementation complete; historical plan.** This is not an active
+task list. Use the [architecture](../../architecture.md) for current structure and
+the [ownership ADR](../../adr/0001-capability-owned-reader.md) for the settled
+decision. Implementation completion does not imply landing or release approval.
+
 ## Purpose and scope
 
 Restructure Kver so application policy, window composition, and PDF-reading
 behavior have clear owners. Keep one Cargo package and preserve existing
 reader behavior and presentation.
 
-This plan captures the design discussed with JonGretar and the proposed
-implementation sequence. It describes the intended result, not the current
-architecture or evidence that any stage is complete. Continue implementation
-serially in the existing Delta thread after review of the plan.
+This plan records the design discussed with JonGretar and the original
+implementation sequence. The sections below preserve the intent, alternatives,
+and acceptance criteria, not a description of the current architecture.
 
 Use this file for durable intent and acceptance criteria. Keep verification
 results and review discussion in the thread and, for ticketed work, the
@@ -318,23 +322,20 @@ Report checks actually run and remaining limitations. Completing a stage
 does not authorize a merge. If work spans sessions, agree on ticket slices
 and obtain approval before publishing them under the project workflow.
 
-## Resuming after compaction
+## Using this historical plan
 
-Read this plan, `AGENTS.md`, `docs/agents/workflow.md`, and the current
-architecture. Inspect the actual source, worktree changes, and available
-thread/issue verification evidence to identify the next unfinished stage.
-Do not infer completion from the target tree or assume a previous machine's
-test results cover later edits.
+For new work, start with `AGENTS.md`, the current architecture, and the feature
+workflow. Use live issues for remaining work rather than resuming this plan's
+completed stages or treating its illustrative target tree as a checklist.
 
-Read the current GPUI Kit coding guides before changing ownership or
-lifecycle. Ask before changing the agreed ownership rules or adding scope;
-ordinary file-placement adjustments within those rules do not require a
-new architecture.
+When revisiting the design, compare the original rationale here with the
+ownership ADR and actual source. The acceptance criteria remain useful
+regression scenarios; previous verification does not cover later edits.
 
 ## References
 
-- [Current architecture](../architecture.md)
-- [Feature workflow and validation policy](../agents/workflow.md)
-- [Domain documentation policy](../agents/domain.md)
+- [Current architecture](../../architecture.md)
+- [Feature workflow and validation policy](../../agents/workflow.md)
+- [Domain documentation policy](../../agents/domain.md)
 - [GPUI Kit Coding Guides](https://gpui-kit.com/docs/coding-guides/)
 - [Rust test organization](https://doc.rust-lang.org/book/ch11-03-test-organization.html)

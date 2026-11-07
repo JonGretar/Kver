@@ -23,5 +23,6 @@ explicit event and action routing, but avoids duplicate document state and
 unrelated lifecycle coupling. GPUI remains the action-dispatch mechanism; there
 is no second command bus. Compatibility re-exports preserve existing callers.
 
-See the [modularization plan](../plans/reader-modularization.md) for the alternatives
-and migration intent, and [architecture](../architecture.md) for current owners.
+See the [completed modularization plan](../plans/completed/reader-modularization.md)
+for the alternatives and migration intent, and [architecture](../architecture.md)
+for current owners.

@@ -155,6 +155,8 @@ impl ReadingView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     appearance: Appearance,
+    show_toolbar: bool,
+    show_statusbar: bool,
     remember_reading_history: bool,
     quit_when_last_window_closes: bool,
     initial_zoom: InitialZoom,
@@ -163,6 +165,24 @@ pub struct AppSettings {
 }
 
 impl AppSettings {
+    pub fn show_toolbar(self) -> bool {
+        self.show_toolbar
+    }
+
+    pub fn with_show_toolbar(mut self, show: bool) -> Self {
+        self.show_toolbar = show;
+        self
+    }
+
+    pub fn show_statusbar(self) -> bool {
+        self.show_statusbar
+    }
+
+    pub fn with_show_statusbar(mut self, show: bool) -> Self {
+        self.show_statusbar = show;
+        self
+    }
+
     pub fn appearance(self) -> Appearance {
         self.appearance
     }
@@ -222,6 +242,16 @@ impl AppSettings {
         let reader = table_in(document, "reader")?;
         Ok(Self {
             appearance: appearance_in(document)?,
+            show_toolbar: bool_in(
+                application.and_then(|table| table.get("show_toolbar")),
+                true,
+                "[application].show_toolbar",
+            )?,
+            show_statusbar: bool_in(
+                application.and_then(|table| table.get("show_statusbar")),
+                true,
+                "[application].show_statusbar",
+            )?,
             remember_reading_history: history_in(document)?,
             quit_when_last_window_closes: quit_when_last_window_closes_in(document)?,
             initial_zoom: initial_zoom_in(document)?,
@@ -246,6 +276,8 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             appearance: Appearance::default(),
+            show_toolbar: true,
+            show_statusbar: true,
             remember_reading_history: true,
             quit_when_last_window_closes: true,
             initial_zoom: InitialZoom::default(),
@@ -259,6 +291,8 @@ impl Default for AppSettings {
 #[derive(Clone, Copy, Debug)]
 pub enum SettingsChange {
     Appearance(Appearance),
+    ShowToolbar(bool),
+    ShowStatusbar(bool),
     RememberReadingHistory(bool),
     QuitWhenLastWindowCloses(bool),
     InitialZoom(InitialZoom),
@@ -270,6 +304,8 @@ impl SettingsChange {
     fn apply(self, document: &mut DocumentMut) {
         let (section, key, updated) = match self {
             Self::Appearance(choice) => ("application", "appearance", value(choice.key())),
+            Self::ShowToolbar(show) => ("application", "show_toolbar", value(show)),
+            Self::ShowStatusbar(show) => ("application", "show_statusbar", value(show)),
             Self::RememberReadingHistory(remember) => ("persistence", "remember", value(remember)),
             Self::QuitWhenLastWindowCloses(quit) => {
                 ("application", "quit_when_last_window_closes", value(quit))
@@ -525,6 +561,35 @@ mod tests {
     }
 
     #[test]
+    fn ui_elements_default_on_and_round_trip_independently() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert!(AppSettings::default().show_toolbar());
+        assert!(AppSettings::default().show_statusbar());
+        let defaults = super::load(&path).unwrap();
+        assert!(defaults.show_toolbar());
+        assert!(defaults.show_statusbar());
+        fs::write(&path, "# keep\n[application]\nappearance = 'dark'\nshow_toolbar = true # toolbar\n[future]\nvalue = 42\n").unwrap();
+        let hidden_toolbar = super::save(&path, SettingsChange::ShowToolbar(false)).unwrap();
+        assert!(!hidden_toolbar.show_toolbar());
+        assert!(hidden_toolbar.show_statusbar());
+        let hidden_both = super::save(&path, SettingsChange::ShowStatusbar(false)).unwrap();
+        assert_eq!(super::load(&path).unwrap(), hidden_both);
+        assert!(!hidden_both.show_toolbar());
+        assert!(!hidden_both.show_statusbar());
+        assert_eq!(hidden_both.appearance(), Appearance::Dark);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("show_toolbar = false # toolbar"));
+        assert!(text.contains("# keep"));
+        assert!(text.contains("[future]\nvalue = 42"));
+        super::save(&path, SettingsChange::ShowToolbar(true)).unwrap();
+        let restored = super::save(&path, SettingsChange::ShowStatusbar(true)).unwrap();
+        assert!(restored.show_toolbar());
+        assert!(restored.show_statusbar());
+        assert_eq!(super::load(&path).unwrap(), restored);
+    }
+
+    #[test]
     fn panel_chapters_round_trip_and_migrate_legacy_settings() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config.toml");
@@ -585,6 +650,8 @@ mod tests {
             "[application]\ntheme_mode = 'purple'\n",
             "[application]\nquit_when_last_window_closes = 'yes'\n",
             "[application]\nreopen_last_windows_on_startup = 'yes'\n",
+            "[application]\nshow_toolbar = 'yes'\n",
+            "[application]\nshow_statusbar = 1\n",
             "[persistence]\nremember = 'yes'\n",
             "[reader]\nreading_view = 'other'\n",
             "[reader]\nreading_view = true\n",

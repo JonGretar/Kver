@@ -559,6 +559,8 @@ impl Preview {
             outline_in_flight: false,
             status: "Open a PDF to start reading".into(),
         };
+        let settings = settings_ui::state(cx);
+        cx.observe(&settings, |_, _, cx| cx.notify()).detach();
         if reader.path.is_some() {
             reader.status = "Loading document…".into();
             reader.load(cx);
@@ -1728,6 +1730,9 @@ impl Preview {
 
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let settings = settings_ui::state(cx);
+        let show_toolbar = settings.read(cx).show_toolbar();
+        let show_statusbar = settings.read(cx).show_statusbar();
         if self.pending_find_reset {
             self.pending_find_reset = false;
             // InputState::set_value needs a Window. Defer the one-shot reset
@@ -2124,7 +2129,7 @@ impl Render for Preview {
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
-                            .child(
+                            .children(show_toolbar.then(|| {
                                 Toolbar::new("reading-toolbar")
                                     .px_3()
                                     .content(reader_button(
@@ -2260,8 +2265,8 @@ impl Render for Preview {
                                             false,
                                         )
                                         .small(),
-                                    ),
-                            )
+                                    )
+                            }))
                             .child(
                                 div()
                                     .id("page")
@@ -2366,17 +2371,24 @@ impl Render for Preview {
                                         content.into_any_element()
                                     }),
                             )
-                            .child(
+                            .children(show_statusbar.then(|| {
                                 StatusBar::new()
-                                    .left(div().min_w(px(0.0)).truncate().child(if has_document {
-                                        format!(
-                                            "PAGE {} / {}",
-                                            self.page_index + 1,
-                                            self.pages.len()
-                                        )
-                                    } else {
-                                        self.status.clone()
-                                    }))
+                                    .left(
+                                        div()
+                                            .id("reader-status")
+                                            .test_support()
+                                            .min_w(px(0.0))
+                                            .truncate()
+                                            .child(if has_document {
+                                                format!(
+                                                    "PAGE {} / {}",
+                                                    self.page_index + 1,
+                                                    self.pages.len()
+                                                )
+                                            } else {
+                                                self.status.clone()
+                                            }),
+                                    )
                                     .when(
                                         has_document && !self.status.starts_with("Page "),
                                         |bar| {
@@ -2398,8 +2410,8 @@ impl Render for Preview {
                                                 ZoomMode::FitPage => " · Fit page",
                                             }
                                         )))
-                                    }),
-                            ),
+                                    })
+                            })),
                     ),
             )
             .when_some(self.palette.clone(), |reader, palette| {

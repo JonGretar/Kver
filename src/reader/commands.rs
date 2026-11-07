@@ -6,10 +6,6 @@ gpui::actions!(
     kver,
     [
         OpenPdf,
-        ShowMarks,
-        ShowSetMark,
-        ShowJumpMark,
-        ShowDeleteMark,
         NextPage,
         PreviousPage,
         ZoomIn,
@@ -22,13 +18,3 @@ gpui::actions!(
         Copy
     ]
 );
-
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = kver, no_json)]
-pub struct SetLocalMark(pub char);
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = kver, no_json)]
-pub struct JumpLocalMark(pub char);
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = kver, no_json)]
-pub struct DeleteLocalMark(pub char);

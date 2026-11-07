@@ -154,8 +154,24 @@ each PDF's complete mark set for session edits, reads previously saved marks
 while recording is off, and flushes the resulting set (including deletions)
 when recording resumes.
 Mark writes are ordered with open, remove, and clear requests; deleting a parent
-document cascades to its marks and clears the session copy. Reader windows own
-only mark-input and popup focus, not separate copies of per-PDF mark state.
+document cascades to its marks and clears the session copy.
+`src/reader/marks.rs` owns local mark interaction in a `LocalMarks` entity for
+one immutable document snapshot. It owns popup focus, letter selection, name
+editing, history refreshes, and mark-operation replies. Its list is presentation
+data from the shared worker, not a second per-PDF store. The reader supplies
+the position to save and applies emitted jump destinations after checking the
+source entity, document generation, and page bounds.
+
+Replacing a document drops its marks owner and subscriptions. Closing or
+reopening the popup cancels reads and invalidates editor replies; a late name
+save cannot finish a new editor for the same letter. Refreshing the list does
+not clear a pending save. Submitted writes finish independently of popup and
+window lifetime and notify other windows to refresh from the worker, rather
+than installing potentially obsolete mutation snapshots. Pending navigation
+also checks the history deletion epoch. Lifecycle tests live beside the
+feature; composed keyboard, naming, and document-replacement tests live in
+`src/reader/tests/marks.rs`.
+
 GPUI's multi-keystroke bindings hold `m` then a letter to set or replace,
 `'` then a letter to jump, and `d m` then a letter to delete while the reader
 is focused. The pending keymap sequence takes priority over ordinary one-key

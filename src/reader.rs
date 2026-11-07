@@ -41,7 +41,7 @@ use crate::{
     reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
     recent::{self, RecentFile, RecentStore},
-    settings::InitialZoom,
+    settings::{InitialZoom, ReadingView},
     settings_ui::{self, ShowSettings},
 };
 
@@ -1057,6 +1057,10 @@ impl Preview {
             InitialZoom::ActualSize => ZoomMode::Fixed,
             InitialZoom::FitWidth => ZoomMode::FitWidth,
             InitialZoom::FitPage => ZoomMode::FitPage,
+        };
+        self.reading_mode = match settings.read(cx).reading_view() {
+            ReadingView::Continuous => ReadingMode::Continuous,
+            ReadingView::Page => ReadingMode::SinglePage,
         };
         let Some(path) = self.path.clone() else {
             return;
@@ -2889,7 +2893,12 @@ mod tests {
             .destination()
             .unwrap();
         first
-            .update(cx, |reader, _, cx| reader.navigate_outline(destination, cx))
+            .update(cx, |reader, _, cx| {
+                // A new document starts with the configured default view.
+                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
+                reader.set_reading_mode(ReadingMode::SinglePage, cx);
+                reader.navigate_outline(destination, cx);
+            })
             .unwrap();
         first
             .read_with(cx, |reader, _| {
@@ -3186,6 +3195,7 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(settings_window, |_, frame, cx| {
                 frame.render_frame(cx);
+                frame.click("reading-history", cx);
                 frame.click("remember-reading-history", cx);
             })
             .unwrap();
@@ -3906,7 +3916,11 @@ mod tests {
         let first_scale = first.read_with(cx, |reader, _| reader.scale()).unwrap();
 
         // A live preference edit changes only subsequent document opens.
-        std::fs::write(&config, "[reader]\ninitial_zoom = 'fit_page'\n").unwrap();
+        std::fs::write(
+            &config,
+            "[reader]\ninitial_zoom = 'fit_page'\nreading_view = 'page'\n",
+        )
+        .unwrap();
         cx.background_executor
             .advance_clock(Duration::from_millis(400));
         cx.run_until_parked();
@@ -3914,6 +3928,7 @@ mod tests {
             .read_with(cx, |reader, _| {
                 assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
                 assert_eq!(reader.scale(), first_scale);
+                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
             })
             .unwrap();
         let second =
@@ -3926,6 +3941,7 @@ mod tests {
         second
             .read_with(cx, |reader, _| {
                 assert_eq!(reader.zoom_mode(), ZoomMode::FitPage);
+                assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
                 assert!(reader.scale() < first_scale);
             })
             .unwrap();

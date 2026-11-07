@@ -68,20 +68,33 @@ preference edits do not refit open readers or replace their manual zoom.
 and resolves config and local-data directories with `directories::ProjectDirs`.
 Configuration lives at `config_dir()/config.toml`; reading history lives in
 `data_local_dir()/reading.sqlite3`. Neither location depends on a PDF path or
-the working directory. Appearance is `[appearance].theme_mode` (default System);
+the working directory. The config chapters match the Settings pages:
+`[application]`, `[reader]`, and `[persistence]`. Appearance is
+`[application].appearance` (default System);
 initial zoom is `[reader].initial_zoom` (`100_percent`, `fit_width`, or `fit_page`,
-default 100%); `[windows].quit_when_last_window_closes` and
-`[reading_history].remember` default to true.
+default 100%); `[reader].reading_view` is `continuous` (default) or `page`.
+Both reader defaults apply once per document open, not to existing readers.
+`[application].quit_when_last_window_closes` and `[persistence].remember`
+default to true. `[application].reopen_last_windows_on_startup` defaults to
+false and is saved for future use; window restoration is not implemented.
 Missing values use those defaults without writing a file until a choice is saved.
+Legacy `[appearance]`, `[windows]`, and `[reading_history]` keys remain readable.
+Explicit values in the new chapters take precedence. The next panel save moves
+known legacy keys to their new chapters, preserving unrelated entries and comments.
+The former `[application].theme_mode` key also remains readable and migrates to
+`appearance` on save; an explicit `appearance` value takes precedence.
 
 `src/settings.rs` validates the entire known `AppSettings` value before applying
 external edits or panel changes; a `SettingsChange` updates one known field in
 the latest valid TOML document. New preferences explicitly join this model
 and the panel, rather than generating controls from arbitrary TOML keys.
 `src/settings_ui.rs` owns the shared app-wide settings state and one Settings
-window. Its General page contains labeled appearance and initial zoom dropdowns,
-an appearance reset control when its value differs from System, and the
-last-window and reading-history switches, plus a confirmed clear-all action.
+window. Its navigation tree switches between Application (Theme and Windows),
+Reader (Reading Experience), and Persistence (Reading History). Child nodes select
+their parent page; grouping is visual, not an additional config nesting level.
+The tree owns selection and keyboard navigation, and only the selected page's
+controls are rendered. The panel retains the appearance reset control and the
+confirmed clear-all history action.
 Loading, periodic file checks, and saving TOML run off the UI thread. Valid
 external changes update the shared model, theme, and open Settings controls;
 invalid or partially written edits leave the last valid choice active and

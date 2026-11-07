@@ -62,6 +62,12 @@ the first launch, file picker, Open Recent, and OS file-open); readers wait for
 the initial asynchronous config load before loading their first PDF. Fit Width
 and Fit Page use the same measured-viewport fitting as reader Actions. Later
 preference edits do not refit open readers or replace their manual zoom.
+The same open path restores an optional page-local position after page geometry
+loads; each window still owns its live viewport. Positions use PDF points,
+clamp within a changed page and reject missing page indices rather than
+matching text across revisions. Explicit page turns persist the selected page
+even if several short pages fit in one viewport and its scroll offset cannot
+reach that page's top. An obsolete load cannot move a newer document.
 
 ### Settings and platform storage
 
@@ -75,8 +81,10 @@ the working directory. The config chapters match the Settings pages:
 initial zoom is `[reader].initial_zoom` (`100_percent`, `fit_width`, or `fit_page`,
 default 100%); `[reader].reading_view` is `continuous` (default) or `page`.
 Both reader defaults apply once per document open, not to existing readers.
-`[application].quit_when_last_window_closes` and `[persistence].remember`
-default to true. `[application].reopen_last_windows_on_startup` defaults to
+`[application].quit_when_last_window_closes`, `[persistence].remember`, and
+`[persistence].reopen_at_last_position` default to true. Disabling restoration
+starts a new open at the beginning without erasing its previously saved place.
+`[application].reopen_last_windows_on_startup` defaults to
 false and is saved for future use; window restoration is not implemented.
 Missing values use those defaults without writing a file until a choice is saved.
 Legacy `[appearance]`, `[windows]`, and `[reading_history]` keys remain readable.
@@ -114,8 +122,10 @@ removes its saved reading data, not the PDF itself. The schema uses
 `user_version` migrations and refuses newer versions rather than overwriting
 them. The shared background worker serializes disk requests from all reader
 windows. Its in-memory session index keeps new opens available across windows
-when recording is off; saved records remain readable. Re-enabling recording
-flushes current session paths. Removing one path or clearing all deletes the
+when recording is off; saved records remain readable. The `reading_positions`
+child table stores page indices and PDF-point offsets behind the same worker.
+Re-enabling recording flushes current session paths and positions. Removing
+one path or clearing all deletes the
 SQLite parent rows and invalidates the matching session index. A generation
 token captured when loading begins prevents an older in-flight open from
 resurrecting data after an explicit deletion; a new open may record it again.
@@ -123,7 +133,7 @@ The `reading_modes` child table stores only explicit per-PDF choices. Absence
 means the PDF follows the current TOML default on its next open. Mode reads and
 writes use the same serialized worker as document records, with session-only
 changes retained while history recording is off and flushed on re-enable.
-Later position and mark slices must use this same per-path session
+Later mark slices must use this same per-path session
 owner and recording gate (rather than writing their own SQLite connections
 from reader windows), and store child rows with cascading foreign keys.
 No SQLite or config I/O runs on the UI thread. Open Recent searches both the
@@ -268,8 +278,8 @@ follow-ups.
 
 ## Future state
 
-Reading history and appearance settings persist. Positions, marks, and
-per-document view overrides are separate future work; the SQLite document
-record is their shared deletion boundary. Platform-specific menus, dialogs,
-and packaging belong at the application boundary; PDF and navigation behavior
-should remain portable.
+Reading history, positions, per-document reading modes, and appearance settings
+persist. Marks are separate future work; the SQLite document record is their
+shared deletion boundary. Platform-specific menus, dialogs, and packaging
+belong at the application boundary; PDF and navigation behavior should remain
+portable.

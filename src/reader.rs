@@ -40,7 +40,7 @@ use crate::{
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
-    recent::{self, RecentFile, RecentStore},
+    recent::{self, ReadingPosition, RecentFile, RecentStore},
     settings::{InitialZoom, ReadingView},
     settings_ui::{self, ShowSettings},
 };
@@ -322,6 +322,10 @@ fn hit_boundary(text: &pdf::PageText, at: Point) -> Option<(usize, usize)> {
 pub struct Preview {
     path: Option<PathBuf>,
     record_path: Option<PathBuf>,
+    position_ready: bool,
+    position_touched: bool,
+    pending_restore: Option<ReadingPosition>,
+    recorded_position: Option<ReadingPosition>,
     scale: f32,
     zoom_mode: ZoomMode,
     settings_wait: Option<Subscription>,
@@ -529,6 +533,10 @@ impl Preview {
         let mut reader = Self {
             path,
             record_path: None,
+            position_ready: false,
+            position_touched: false,
+            pending_restore: None,
+            recorded_position: None,
             scale: 1.0,
             zoom_mode: ZoomMode::Fixed,
             settings_wait: None,
@@ -591,6 +599,10 @@ impl Preview {
         self.dragging = false;
         self.path = Some(path);
         self.record_path = None;
+        self.position_ready = false;
+        self.position_touched = false;
+        self.pending_restore = None;
+        self.recorded_position = None;
         self.mode_override = None;
         self.scale = 1.0;
         self.zoom_mode = ZoomMode::Fixed;
@@ -934,6 +946,7 @@ impl Preview {
         else {
             return;
         };
+        self.position_touched = true;
         let (_, width, height) = self.viewport();
         self.focus_page(hit.page);
         self.apply_fit(
@@ -1075,6 +1088,8 @@ impl Preview {
         let generation = self.generation;
         let history = recent::history(cx);
         let history_epoch = history.as_ref().map(|history| history.epoch());
+        let restore_position = settings.read(cx).reopen_at_last_position();
+        let document_generation = self.document_generation;
         let work = cx.background_executor().spawn(async move {
             let pages = pdf::document_pages(&path);
             let normalized = if matches!(&pages, Ok(pages) if !pages.is_empty()) {
@@ -1117,23 +1132,40 @@ impl Preview {
                             Some(Ok(path)) => {
                                 this.record_path = Some(path.clone());
                                 if let Some(history) = history {
-                                    let work = history.record_at(path, history_epoch.unwrap_or(0));
+                                    let record = history.record_at(path.clone(), history_epoch.unwrap_or(0));
+                                    let position = history.position(path, history_epoch.unwrap_or(0));
                                     cx.spawn(async move |this, cx| {
-                                        if let Err(error) = work.await {
-                                            let _ = this.update(cx, |this, cx| {
-                                                if generation == this.generation {
-                                                    this.status = format!("Reading history could not be saved: {error}");
+                                        let result = match record.await {
+                                            Ok(()) => position.await,
+                                            Err(error) => Err(error),
+                                        };
+                                        let _ = this.update(cx, |this, cx| {
+                                            if document_generation != this.document_generation {
+                                                return;
+                                            }
+                                            match result {
+                                                Ok(saved) => this.finish_position_load(
+                                                    if restore_position { saved } else { None }, cx
+                                                ),
+                                                Err(error) => {
+                                                    this.status = format!("Reading history could not be loaded: {error}");
+                                                    this.position_ready = true;
                                                     cx.notify();
                                                 }
-                                            });
-                                        }
+                                            }
+                                        });
                                     }).detach();
+                                } else {
+                                    this.finish_position_load(None, cx);
                                 }
                             }
                             Some(Err(error)) => {
                                 this.status = format!("Reading history could not be saved: {error}");
                             }
                             None => {}
+                        }
+                        if this.record_path.is_none() {
+                            this.finish_position_load(None, cx);
                         }
                         if this.recent_open == Some(generation) {
                             this.recent_open = None;
@@ -1168,6 +1200,40 @@ impl Preview {
             self.load_outline(cx);
         }
         self.sync_viewport(cx);
+    }
+
+    fn finish_position_load(&mut self, saved: Option<ReadingPosition>, cx: &mut Context<Self>) {
+        if !self.position_touched
+            && let Some(position) = saved
+            && position.page < self.pages.len()
+            && position.y.is_finite()
+            && position.y >= 0.0
+        {
+            self.pending_restore = Some(position);
+            self.restore_position(position);
+        }
+        self.recorded_position = (!self.position_touched).then(|| self.position_to_save());
+        self.position_ready = true;
+        self.sync_viewport(cx);
+    }
+
+    fn restore_position(&mut self, position: ReadingPosition) {
+        let y = position.y.min(self.pages[position.page].1);
+        self.focus_page(position.page);
+        let (_, width, height) = self.viewport();
+        self.apply_fit(
+            position.page,
+            Position {
+                page: position.page,
+                y,
+            },
+            (width, height),
+            0.0,
+        );
+        self.scroll_to(
+            -f32::from(self.scroll.offset().x),
+            self.page_top(position.page) + y * self.scale,
+        );
     }
 
     fn load_outline(&mut self, cx: &mut Context<Self>) {
@@ -1325,6 +1391,7 @@ impl Preview {
         if self.reading_mode == mode {
             return;
         }
+        self.position_touched = true;
         if self.pages.is_empty() {
             self.reading_mode = mode;
             cx.notify();
@@ -1531,6 +1598,14 @@ impl Preview {
         if self.pages.is_empty() {
             return;
         }
+        if self.position_touched {
+            self.pending_restore = None;
+        } else if self.scroll.bounds().size.height > px(0.0)
+            && self.scroll.bounds().size.width > px(0.0)
+            && let Some(position) = self.pending_restore.take()
+        {
+            self.restore_position(position);
+        }
         let (top, width, height) = self.viewport();
         if self.reading_mode == ReadingMode::SinglePage {
             self.scroll_to(-f32::from(self.scroll.offset().x), top);
@@ -1560,10 +1635,66 @@ impl Preview {
         self.page_index = target;
         let position = self.position_at(top + anchor);
         self.apply_fit(self.page_index, position, (width, height), anchor);
+        self.record_position(cx);
         self.last_viewport = self.viewport();
         self.schedule(cx);
         self.schedule_text(cx);
         cx.notify();
+    }
+
+    fn record_position(&mut self, cx: &mut Context<Self>) {
+        if !self.position_ready || self.pending_restore.is_some() {
+            return;
+        }
+        let position = self.position_to_save();
+        if self.recorded_position == Some(position) {
+            return;
+        }
+        let (Some(path), Some(history)) = (self.record_path.clone(), recent::history(cx)) else {
+            return;
+        };
+        self.recorded_position = Some(position);
+        let work = history.save_position(path, position);
+        let document_generation = self.document_generation;
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = work.await {
+                let _ = this.update(cx, |this, cx| {
+                    if document_generation == this.document_generation {
+                        this.status = format!("Reading position could not be saved: {error}");
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Explicit page turns remain the reading place even when short pages
+    /// share a viewport and the scroll offset cannot reach their top.
+    fn position_to_save(&self) -> ReadingPosition {
+        let (visible_page, visible_y) = self.reading_position();
+        if let Some(page) = self.selected_page
+            && page != visible_page
+        {
+            return ReadingPosition { page, y: 0.0 };
+        }
+        // A short final page can be current even when the viewport's top is
+        // stuck on the preceding page. Preserve the current page in that case.
+        if self.reading_mode == ReadingMode::Continuous
+            && self.selected_page.is_none()
+            && self.page_index == self.pages.len() - 1
+            && self.page_index != visible_page
+            && self.maximum_scroll(self.viewport().2) < self.page_top(self.page_index)
+        {
+            return ReadingPosition {
+                page: self.page_index,
+                y: 0.0,
+            };
+        }
+        ReadingPosition {
+            page: visible_page,
+            y: visible_y,
+        }
     }
 
     fn apply_fit(&mut self, page: usize, position: Position, viewport: (f32, f32), anchor: f32) {
@@ -1599,6 +1730,7 @@ impl Preview {
         if index >= self.pages.len() {
             return;
         }
+        self.position_touched = true;
         let y = if self.reading_mode == ReadingMode::SinglePage {
             self.reading_position().1
         } else {
@@ -1614,6 +1746,7 @@ impl Preview {
             -f32::from(self.scroll.offset().x),
             self.page_top(index) + y * self.scale,
         );
+        self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
         cx.notify();
@@ -1638,6 +1771,7 @@ impl Preview {
         if page >= self.pages.len() {
             return;
         }
+        self.position_touched = true;
         self.focus_page(page);
         if let Some(zoom) = destination.zoom() {
             self.zoom_mode = ZoomMode::Fixed;
@@ -1656,6 +1790,7 @@ impl Preview {
             0.0
         };
         self.scroll_to(x, self.page_top(page) + y * self.scale);
+        self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
         cx.notify();
@@ -1673,6 +1808,7 @@ impl Preview {
         self.set_zoom_mode(ZoomMode::FitPage, cx);
     }
     fn set_zoom_mode(&mut self, mode: ZoomMode, cx: &mut Context<Self>) {
+        self.position_touched = true;
         self.zoom_mode = mode;
         if !self.pages.is_empty() {
             let (top, width, height) = self.viewport();
@@ -1689,6 +1825,7 @@ impl Preview {
         cx.notify();
     }
     fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
+        self.position_touched = true;
         let next = (self.scale * factor).clamp(0.25, 4.0);
         if next == self.scale && self.zoom_mode == ZoomMode::Fixed {
             return;
@@ -2364,7 +2501,10 @@ impl Render for Preview {
                                         }),
                                     )
                                     .on_scroll(cx.listener(|this, _, _, cx| {
-                                        this.selected_page = None;
+                                        if this.viewport().0 != this.last_viewport.0 {
+                                            this.position_touched = true;
+                                            this.selected_page = None;
+                                        }
                                         this.sync_viewport(cx);
                                     }))
                                     .bg(cx.theme().muted)
@@ -2676,12 +2816,16 @@ impl Render for Preview {
 
 impl Preview {
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
-        self.selected_page = None;
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
         if self.pages.is_empty() {
             return;
         }
+        let old_top = self.viewport().0;
         self.scroll_to(-f32::from(self.scroll.offset().x), top);
+        if self.viewport().0 != old_top {
+            self.position_touched = true;
+            self.selected_page = None;
+        }
         self.sync_viewport(cx);
     }
 }
@@ -2711,35 +2855,46 @@ mod tests {
     }
 
     fn three_page_pdf_with_boxes(sizes: [(u32, u32); 3], boxes: [&str; 3]) -> Vec<u8> {
+        pdf_with_boxes(&sizes, &boxes)
+    }
+
+    fn pdf_with_boxes(sizes: &[(u32, u32)], boxes: &[&str]) -> Vec<u8> {
         let mut pdf = b"%PDF-1.4\n".to_vec();
-        let objects = [
+        let mut objects = vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
-            "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>".to_owned(),
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
-                sizes[0].0, sizes[0].1, boxes[0]
-            ),
-            format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
-                sizes[1].0, sizes[1].1, boxes[1]
-            ),
-            format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
-                sizes[2].0, sizes[2].1, boxes[2]
+                "<< /Type /Pages /Kids [{}] /Count {} >>",
+                (3..3 + sizes.len())
+                    .map(|id| format!("{id} 0 R"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                sizes.len()
             ),
         ];
+        for (size, box_options) in sizes.iter().zip(boxes) {
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] {} >>",
+                size.0, size.1, box_options
+            ));
+        }
         let mut offsets = Vec::new();
         for (index, object) in objects.iter().enumerate() {
             offsets.push(pdf.len());
             pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
         }
         let xref = pdf.len();
-        pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+        pdf.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
         for offset in offsets {
             pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
         }
         pdf.extend_from_slice(
-            format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
         );
         pdf
     }
@@ -2967,6 +3122,431 @@ mod tests {
         reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
         cx.run_until_parked();
         assert_eq!(cx.update(|cx| reader.read(cx).mode_override()), None);
+    }
+
+    #[gpui_kit::test]
+    fn wheel_scrolled_position_is_saved_for_reopen(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("wheel.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.scroll(
+                    "page",
+                    gpui::ScrollDelta::Pixels(point(px(0.0), px(-1800.0))),
+                    cx,
+                );
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        let position = first.read_with(cx, |reader, _| reader.reading_position());
+        assert!(position.0 > 0 || position.1 > 0.0, "wheel did not scroll");
+        let (_, reopened) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position(), position)
+        });
+    }
+
+    #[gpui_kit::test]
+    fn saved_single_page_mode_restores_its_page_local_position(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("single-page.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+                frame.dispatch_action(Box::new(NextPage), cx);
+            })
+            .unwrap();
+        });
+        first.update(cx, |reader, cx| reader.scroll_by(180.0, cx));
+        cx.run_until_parked();
+        let position = first.read_with(cx, |reader, _| reader.reading_position());
+        assert_eq!(position.0, 1);
+        assert!(position.1 > 0.0);
+        let (reopened_window, reopened) = recent_test_window(cx, Some(pdf));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(reopened_window, |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert_eq!(reader.reading_position().0, position.0);
+            assert!((reader.reading_position().1 - position.1).abs() < 2.0);
+        });
+    }
+
+    #[gpui_kit::test]
+    fn page_turn_to_short_page_reopens_at_selected_page(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("slides.pdf");
+        std::fs::write(&pdf, pdf_with_boxes(&[(600, 120); 2], &["", ""])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(NextPage), cx);
+                frame.render_frame(cx);
+                frame.scroll(
+                    "page",
+                    gpui::ScrollDelta::Pixels(point(px(0.0), px(-200.0))),
+                    cx,
+                );
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 1);
+            assert!(reader.position_ready);
+        });
+        assert_eq!(
+            RecentStore::new(&paths)
+                .position(&pdf)
+                .unwrap()
+                .map(|position| position.page),
+            Some(1),
+            "the selected page was never saved"
+        );
+        let (reopened_window, reopened) = recent_test_window(cx, Some(pdf));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(reopened_window, |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+    }
+
+    #[gpui_kit::test]
+    fn reading_position_survives_restart_zoom_and_independent_windows(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("rotated.pdf");
+        std::fs::write(
+            &pdf,
+            three_page_pdf_with_boxes(
+                [(600, 1400), (800, 1500), (700, 1300)],
+                ["", "/Rotate 90 /CropBox [40 30 700 1350]", ""],
+            ),
+        )
+        .unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_first_window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.read_with(cx, |reader, _| {
+            assert!(reader.position_ready, "{}", reader.status())
+        });
+        first.update(cx, |reader, cx| reader.scroll_by(1550.0, cx));
+        cx.run_until_parked();
+        let saved = first.read_with(cx, |reader, _| reader.reading_position());
+        assert_eq!(saved.0, 1);
+        assert!(saved.1 > 0.0);
+        first.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.recorded_position,
+                Some(ReadingPosition {
+                    page: saved.0,
+                    y: saved.1
+                }),
+                "{}",
+                reader.status()
+            );
+        });
+        let store = RecentStore::new(&paths);
+        assert!(store.contains(&pdf).unwrap());
+        assert_eq!(
+            store.position(&pdf).unwrap(),
+            Some(ReadingPosition {
+                page: saved.0,
+                y: saved.1
+            })
+        );
+
+        // A second live window restores the place, then moves independently.
+        let (_second_window, second) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        second.read_with(cx, |reader, _| assert_eq!(reader.reading_position(), saved));
+        second.update(cx, |reader, cx| reader.next_page(cx));
+        cx.run_until_parked();
+        first.read_with(cx, |reader, _| assert_eq!(reader.reading_position(), saved));
+        let later = second.read_with(cx, |reader, _| reader.reading_position());
+        assert_eq!(store.position(&pdf).unwrap().unwrap().page, later.0);
+
+        // Reinstalling both services against the same paths models a new process.
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::InitialZoom(InitialZoom::FitWidth),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_third_window, third) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        third.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position().0, later.0);
+            assert!((reader.reading_position().1 - later.1).abs() < 2.0);
+        });
+    }
+
+    #[gpui_kit::test]
+    fn restoration_off_preserves_saved_place_until_a_new_position_is_chosen(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("document.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        let store = RecentStore::new(&paths);
+        store.record(&pdf).unwrap();
+        store
+            .save_position(&pdf, ReadingPosition { page: 1, y: 200.0 })
+            .unwrap();
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::ReopenAtLastPosition(false),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.read_with(cx, |reader, _| {
+            assert!(reader.position_ready, "{}", reader.status())
+        });
+        first.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position(), (0, 0.0))
+        });
+        assert_eq!(store.position(&pdf).unwrap().unwrap().page, 1);
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::ReopenAtLastPosition(true),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, restored) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        restored.read_with(cx, |reader, _| {
+            assert!(reader.position_ready, "{}", reader.status());
+        });
+        restored.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position(), (1, 200.0))
+        });
+    }
+
+    #[gpui_kit::test]
+    fn private_positions_share_with_windows_and_flush_only_when_reenabled(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("private.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.update(cx, |reader, cx| reader.select_page(1, cx));
+        cx.run_until_parked();
+        let store = RecentStore::new(&paths);
+        assert!(!paths.local_data().join("reading.sqlite3").exists());
+        let (_, second) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        second.read_with(cx, |reader, _| assert_eq!(reader.reading_position().0, 1));
+        // Reinstalling the service models a restart; the private place disappears.
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, after_restart) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        after_restart.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position(), (0, 0.0))
+        });
+        after_restart.update(cx, |reader, cx| reader.select_page(2, cx));
+        cx.run_until_parked();
+        let history = cx.update(|cx| recent::history(cx).unwrap());
+        let work = history.set_recording(true);
+        cx.update(|cx| {
+            cx.spawn(async move |cx| {
+                work.await.unwrap();
+                cx.update(|_| ());
+            })
+            .detach()
+        });
+        cx.run_until_parked();
+        assert_eq!(store.position(&pdf).unwrap().unwrap().page, 2);
+    }
+
+    #[gpui_kit::test]
+    fn forgetting_pdf_clears_session_position_before_reopen(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("forgotten.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reader.update(cx, |reader, cx| reader.select_page(1, cx));
+        cx.run_until_parked();
+        let store = RecentStore::new(&paths);
+        assert_eq!(store.position(&pdf).unwrap().unwrap().page, 1);
+        let history = cx.update(|cx| recent::history(cx).unwrap());
+        let removal = history.remove(pdf.clone());
+        cx.update(|cx| {
+            cx.spawn(async move |cx| {
+                removal.await.unwrap();
+                cx.update(|_| ());
+            })
+            .detach()
+        });
+        cx.run_until_parked();
+        assert_eq!(store.position(&pdf).unwrap(), None);
+        reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position(), (0, 0.0))
+        });
+    }
+
+    #[gpui_kit::test]
+    fn changed_pdf_bounds_saved_position_and_stale_load_cannot_replace_new_document(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("changed.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        let store = RecentStore::new(&paths);
+        store.record(&pdf).unwrap();
+        store
+            .save_position(&pdf, ReadingPosition { page: 2, y: 9000.0 })
+            .unwrap();
+        // Rebuild at the same path with different page geometry: clamp the saved offset.
+        std::fs::write(
+            &pdf,
+            three_page_pdf([(600, 1400), (600, 1400), (600, 2000)]),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position().0, 2);
+            assert!(reader.reading_position().1 <= 2000.0);
+        });
+        store
+            .save_position(&pdf, ReadingPosition { page: 80, y: 100.0 })
+            .unwrap();
+        // A rebuilt file with fewer pages rejects the old index.
+        std::fs::write(&pdf, pdf_with_boxes(&[(600, 1400)], &[""])).unwrap();
+        cx.update(|cx| recent::install(cx, Some(paths.clone())));
+        let (_, next) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        next.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position(), (0, 0.0))
+        });
+        next.update(cx, |reader, cx| {
+            reader.open_path(pdf.clone(), cx);
+            reader.open_path(root.path().join("missing.pdf"), cx);
+        });
+        cx.run_until_parked();
+        next.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.path(),
+                Some(root.path().join("missing.pdf").as_path())
+            );
+            assert_eq!(reader.page_count(), None);
+        });
     }
 
     #[gpui_kit::test]

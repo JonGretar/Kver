@@ -158,6 +158,7 @@ pub struct AppSettings {
     show_toolbar: bool,
     show_statusbar: bool,
     remember_reading_history: bool,
+    reopen_at_last_position: bool,
     quit_when_last_window_closes: bool,
     initial_zoom: InitialZoom,
     reopen_last_windows_on_startup: bool,
@@ -198,6 +199,15 @@ impl AppSettings {
 
     pub fn with_remember_reading_history(mut self, remember: bool) -> Self {
         self.remember_reading_history = remember;
+        self
+    }
+
+    pub fn reopen_at_last_position(self) -> bool {
+        self.reopen_at_last_position
+    }
+
+    pub fn with_reopen_at_last_position(mut self, reopen: bool) -> Self {
+        self.reopen_at_last_position = reopen;
         self
     }
 
@@ -253,6 +263,12 @@ impl AppSettings {
                 "[application].show_statusbar",
             )?,
             remember_reading_history: history_in(document)?,
+            reopen_at_last_position: bool_in(
+                table_in(document, "persistence")?
+                    .and_then(|table| table.get("reopen_at_last_position")),
+                true,
+                "[persistence].reopen_at_last_position",
+            )?,
             quit_when_last_window_closes: quit_when_last_window_closes_in(document)?,
             initial_zoom: initial_zoom_in(document)?,
             reopen_last_windows_on_startup: bool_in(
@@ -279,6 +295,7 @@ impl Default for AppSettings {
             show_toolbar: true,
             show_statusbar: true,
             remember_reading_history: true,
+            reopen_at_last_position: true,
             quit_when_last_window_closes: true,
             initial_zoom: InitialZoom::default(),
             reopen_last_windows_on_startup: false,
@@ -294,6 +311,7 @@ pub enum SettingsChange {
     ShowToolbar(bool),
     ShowStatusbar(bool),
     RememberReadingHistory(bool),
+    ReopenAtLastPosition(bool),
     QuitWhenLastWindowCloses(bool),
     InitialZoom(InitialZoom),
     ReopenLastWindowsOnStartup(bool),
@@ -307,6 +325,9 @@ impl SettingsChange {
             Self::ShowToolbar(show) => ("application", "show_toolbar", value(show)),
             Self::ShowStatusbar(show) => ("application", "show_statusbar", value(show)),
             Self::RememberReadingHistory(remember) => ("persistence", "remember", value(remember)),
+            Self::ReopenAtLastPosition(reopen) => {
+                ("persistence", "reopen_at_last_position", value(reopen))
+            }
             Self::QuitWhenLastWindowCloses(quit) => {
                 ("application", "quit_when_last_window_closes", value(quit))
             }
@@ -587,6 +608,34 @@ mod tests {
         assert!(restored.show_toolbar());
         assert!(restored.show_statusbar());
         assert_eq!(super::load(&path).unwrap(), restored);
+    }
+
+    #[test]
+    fn restore_position_choice_is_independent_of_recording_and_preserves_toml() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert!(super::load(&path).unwrap().reopen_at_last_position());
+        fs::write(&path, "# retain\n[persistence]\nremember = false\nreopen_at_last_position = true # choice\n[other]\nvalue = 7\n").unwrap();
+        let updated = super::save(&path, SettingsChange::ReopenAtLastPosition(false)).unwrap();
+        assert!(!updated.reopen_at_last_position());
+        assert!(!updated.remember_reading_history());
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("reopen_at_last_position = false # choice")
+        );
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("[other]\nvalue = 7")
+        );
+        fs::write(&path, "[persistence]\nreopen_at_last_position = 'no'\n").unwrap();
+        assert!(super::load(&path).is_err());
+        assert!(super::save(&path, SettingsChange::ReopenAtLastPosition(true)).is_err());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "[persistence]\nreopen_at_last_position = 'no'\n"
+        );
     }
 
     #[test]

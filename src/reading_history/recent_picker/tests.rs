@@ -150,7 +150,8 @@ fn replacing_search_discards_obsolete_rows(cx: &mut TestAppContext) {
     })
     .unwrap();
     cx.update_window(handle, |_, window, cx| {
-        window.press("cmd-a", cx);
+        // Exercise replacement without assuming the platform's select-all key.
+        window.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
         window.input("second", cx);
     })
     .unwrap();

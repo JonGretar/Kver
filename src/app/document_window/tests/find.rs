@@ -165,7 +165,7 @@ fn replacing_query_and_document_discards_old_find_work(cx: &mut TestAppContext) 
     cx.update_window(window, |_, frame, cx| frame.input("This is page", cx))
         .unwrap();
     cx.update_window(window, |_, frame, cx| {
-        frame.press("cmd-a", cx);
+        frame.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
         frame.input("not-a-phrase-in-this-pdf", cx);
     })
     .unwrap();
@@ -173,12 +173,21 @@ fn replacing_query_and_document_discards_old_find_work(cx: &mut TestAppContext) 
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         assert_eq!(
+            frame.find("find-query").value(),
+            Some("not-a-phrase-in-this-pdf")
+        );
+        assert_eq!(
             frame.find("find-status").label(),
             Some("No matches in mapped text")
         );
         assert!(frame.try_find(("find-result", 0usize)).is_none());
-        frame.press("cmd-a", cx);
+        frame.dispatch_action(Box::new(gpui_kit::component::input::SelectAll), cx);
         frame.input("This is page 99 of 100", cx);
+        frame.render_frame(cx);
+        assert_eq!(
+            frame.find("find-query").value(),
+            Some("This is page 99 of 100")
+        );
         frame.press("enter", cx);
         reader.update(cx, |reader, cx| {
             reader.open_path(PathBuf::from("examples/field-guide.pdf"), cx)

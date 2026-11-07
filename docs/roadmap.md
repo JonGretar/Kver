@@ -15,9 +15,10 @@ have no fixed release sequence. See [features](features.md) for their scope.
 | 3. Find and navigate a document | **Complete** | Find and Contents work together in one sidebar, with headless and real-Mac checks ([#58](https://github.com/JonGretar/Kver/issues/58)); no release version or date is assigned. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** No further reader gate is scheduled. History, internal links,
-and the other [unscheduled goals](#goals-to-schedule-after-evidence) remain
-deferred. GitHub Issues tracks live ownership and blockers; the
+**Next work:** The [persistence and reading-mode gate (#67)](https://github.com/JonGretar/Kver/issues/67)
+is underway; its remaining tickets track the work without a release date.
+Internal links and the other [unscheduled goals](#goals-to-schedule-after-evidence)
+remain deferred. GitHub Issues tracks live ownership and blockers; the
 [feature workflow](agents/workflow.md) explains how to check work status.
 
 ## 0. Validate the stack
@@ -168,8 +169,7 @@ supported download; they are not part of the first Apple silicon release.
 
 Keep these visible without implying a date or order:
 
-- Internal links; navigation history and restoration of the last reading
-  position.
+- Internal links and back/forward navigation history.
 - Visual ruler: keyboard movement along text lines, a positional fallback on
   scans, and stable placement through zoom/scroll.
 - Configurable keybindings, numeric counts, multi-key commands, named marks,

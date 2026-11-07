@@ -64,6 +64,7 @@ gpui::actions!(
         FitPage,
         SinglePage,
         Continuous,
+        UseDefaultReadingMode,
         Copy,
         ShowFind,
         NextMatch,
@@ -329,6 +330,7 @@ pub struct Preview {
     zoom_mode: ZoomMode,
     settings_wait: Option<Subscription>,
     reading_mode: ReadingMode,
+    mode_override: Option<ReadingMode>,
     display_scale: f32,
     pages: Vec<(f32, f32)>,
     images: HashMap<usize, Bitmap>,
@@ -539,6 +541,7 @@ impl Preview {
             zoom_mode: ZoomMode::Fixed,
             settings_wait: None,
             reading_mode: ReadingMode::Continuous,
+            mode_override: None,
             display_scale,
             pages: Vec::new(),
             images: HashMap::new(),
@@ -600,6 +603,7 @@ impl Preview {
         self.position_touched = false;
         self.pending_restore = None;
         self.recorded_position = None;
+        self.mode_override = None;
         self.scale = 1.0;
         self.zoom_mode = ZoomMode::Fixed;
         self.pages.clear();
@@ -1077,6 +1081,7 @@ impl Preview {
             ReadingView::Continuous => ReadingMode::Continuous,
             ReadingView::Page => ReadingMode::SinglePage,
         };
+        self.mode_override = None;
         let Some(path) = self.path.clone() else {
             return;
         };
@@ -1096,6 +1101,15 @@ impl Preview {
         });
         cx.spawn(async move |this, cx| {
             let (result, normalized) = work.await;
+            let saved_mode = if matches!(&result, Ok(pages) if !pages.is_empty()) {
+                if let (Some(history), Some(Ok(path))) = (&history, &normalized) {
+                    history.reading_mode(path.clone(), history_epoch.unwrap_or(0)).await
+                } else {
+                    Ok(None)
+                }
+            } else {
+                Ok(None)
+            };
             let dismiss = this.update(cx, |this, cx| {
                 if generation != this.generation {
                     return false;
@@ -1103,7 +1117,17 @@ impl Preview {
                 let mut dismiss = false;
                 match result {
                     Ok(pages) if !pages.is_empty() => {
+                        if let Ok(Some(mode)) = saved_mode {
+                            this.reading_mode = match mode {
+                                ReadingView::Continuous => ReadingMode::Continuous,
+                                ReadingView::Page => ReadingMode::SinglePage,
+                            };
+                            this.mode_override = Some(this.reading_mode);
+                        }
                         self::Preview::install_pages(this, pages, cx);
+                        if let Err(error) = saved_mode {
+                            this.status = format!("Reading mode could not be loaded: {error}");
+                        }
                         match normalized {
                             Some(Ok(path)) => {
                                 this.record_path = Some(path.clone());
@@ -1273,6 +1297,9 @@ impl Preview {
     pub fn reading_mode(&self) -> ReadingMode {
         self.reading_mode
     }
+    pub fn mode_override(&self) -> Option<ReadingMode> {
+        self.mode_override
+    }
     pub fn scale(&self) -> f32 {
         self.scale
     }
@@ -1397,6 +1424,40 @@ impl Preview {
             self.page_top(page) + y * self.scale,
         );
         self.sync_viewport(cx);
+    }
+
+    /// A reader choice is an override even if it matches today's default.
+    fn choose_reading_mode(&mut self, mode: Option<ReadingMode>, cx: &mut Context<Self>) {
+        if self.pages.is_empty() {
+            return;
+        }
+        let effective =
+            mode.unwrap_or_else(|| match settings_ui::state(cx).read(cx).reading_view() {
+                ReadingView::Continuous => ReadingMode::Continuous,
+                ReadingView::Page => ReadingMode::SinglePage,
+            });
+        self.set_reading_mode(effective, cx);
+        self.mode_override = mode;
+        if let (Some(history), Some(path)) = (recent::history(cx), self.record_path.clone()) {
+            let saved = mode.map(|mode| match mode {
+                ReadingMode::Continuous => ReadingView::Continuous,
+                ReadingMode::SinglePage => ReadingView::Page,
+            });
+            let generation = self.generation;
+            let work = history.set_reading_mode(path, saved);
+            cx.spawn(async move |this, cx| {
+                if let Err(error) = work.await {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.generation == generation {
+                            this.status = format!("Reading mode could not be saved: {error}");
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
+        cx.notify();
     }
 
     /// Measured scroll bounds and centered page layout define the window origin.
@@ -2171,13 +2232,16 @@ impl Render for Preview {
             }))
             .on_action(cx.listener(|this, _: &SinglePage, _, cx| {
                 if !this.pages.is_empty() {
-                    this.set_reading_mode(ReadingMode::SinglePage, cx);
+                    this.choose_reading_mode(Some(ReadingMode::SinglePage), cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &Continuous, _, cx| {
                 if !this.pages.is_empty() {
-                    this.set_reading_mode(ReadingMode::Continuous, cx);
+                    this.choose_reading_mode(Some(ReadingMode::Continuous), cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &UseDefaultReadingMode, _, cx| {
+                this.choose_reading_mode(None, cx);
             }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 if this.palette.is_some() || this.recent.is_some() || !this.reading_allowed(window)
@@ -2311,10 +2375,11 @@ impl Render for Preview {
                                     .content(
                                         reader_button(
                                             "reading-mode",
-                                            if self.reading_mode == ReadingMode::SinglePage {
-                                                "Single page · switch to continuous"
-                                            } else {
-                                                "Continuous · switch to single page"
+                                            match (self.reading_mode, self.mode_override) {
+                                                (ReadingMode::SinglePage, Some(_)) => "Single page for this PDF · switch to continuous",
+                                                (ReadingMode::SinglePage, None) => "Single page (default) · switch to continuous",
+                                                (ReadingMode::Continuous, Some(_)) => "Continuous for this PDF · switch to single page",
+                                                (ReadingMode::Continuous, None) => "Continuous (default) · switch to single page",
                                             },
                                             Some(IconName::FileText),
                                             if self.reading_mode == ReadingMode::SinglePage {
@@ -2678,8 +2743,7 @@ impl Render for Preview {
                                                 .action(Box::new(SinglePage))
                                                 .disabled(
                                                     !has_document
-                                                        || self.reading_mode
-                                                            == ReadingMode::SinglePage,
+                                                        || self.mode_override == Some(ReadingMode::SinglePage),
                                                 ),
                                         )
                                         .item(
@@ -2688,9 +2752,14 @@ impl Render for Preview {
                                                 .action(Box::new(Continuous))
                                                 .disabled(
                                                     !has_document
-                                                        || self.reading_mode
-                                                            == ReadingMode::Continuous,
+                                                        || self.mode_override == Some(ReadingMode::Continuous),
                                                 ),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Use default reading mode")
+                                                .action(Box::new(UseDefaultReadingMode))
+                                                .disabled(!has_document || self.mode_override.is_none()),
                                         )
                                         .item(
                                             CommandItem::new()
@@ -2831,6 +2900,231 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn mode_override_survives_reopen_but_use_default_follows_new_preference(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let file = root.path().join("pages.pdf");
+        std::fs::write(&file, three_page_pdf([(400, 1200); 3])).unwrap();
+        let pdf = RecentStore::normalize(&file).unwrap();
+        let store = RecentStore::new(&paths);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (first_window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| first.read(cx).reading_mode()),
+            ReadingMode::Continuous
+        );
+        assert_eq!(cx.update(|cx| first.read(cx).mode_override()), None);
+        let (_, already_open) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.update(cx, |reader, cx| reader.scroll_by(80.0, cx));
+        let position = cx.update(|cx| first.read(cx).reading_position());
+        cx.update(|cx| {
+            cx.update_window(first_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(store.reading_mode(&pdf).unwrap(), Some(ReadingView::Page));
+        let after = cx.update(|cx| first.read(cx).reading_position());
+        assert_eq!(after.0, position.0);
+        assert!(
+            (after.1 - position.1).abs() < 2.0,
+            "before {position:?}, after {after:?}"
+        );
+        assert_eq!(
+            cx.update(|cx| already_open.read(cx).reading_mode()),
+            ReadingMode::Continuous
+        );
+
+        // Another window already reading this PDF keeps its live mode, while
+        // every fresh open path converges on the saved override.
+        let (_, second) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| second.read(cx).reading_mode()),
+            ReadingMode::SinglePage
+        );
+        let (empty_window, empty) = recent_test_window(cx, None);
+        cx.update(|cx| {
+            cx.update_window(empty_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(ShowRecent), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        empty.update(cx, |reader, cx| reader.open_recent(0, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| empty.read(cx).mode_override()),
+            Some(ReadingMode::SinglePage)
+        );
+
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::ReadingView(ReadingView::Page),
+        )
+        .unwrap();
+        cx.background_executor
+            .advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(first_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(UseDefaultReadingMode), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| first.read(cx).mode_override()), None);
+        assert_eq!(store.reading_mode(&pdf).unwrap(), None);
+        // Clearing the override does not copy Page: the next preference edit
+        // affects the next open, not an existing reader.
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::ReadingView(ReadingView::Continuous),
+        )
+        .unwrap();
+        cx.background_executor
+            .advance_clock(Duration::from_millis(400));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| first.read(cx).reading_mode()),
+            ReadingMode::SinglePage
+        );
+        assert_eq!(
+            cx.update(|cx| second.read(cx).reading_mode()),
+            ReadingMode::SinglePage
+        );
+        empty.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| empty.read(cx).reading_mode()),
+            ReadingMode::Continuous
+        );
+        assert_eq!(cx.update(|cx| empty.read(cx).mode_override()), None);
+
+        // Even a choice equal to the default becomes a real PDF override.
+        cx.update(|cx| {
+            cx.update_window(first_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(Continuous), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            store.reading_mode(&pdf).unwrap(),
+            Some(ReadingView::Continuous)
+        );
+        empty.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| empty.read(cx).mode_override()),
+            Some(ReadingMode::Continuous)
+        );
+    }
+
+    #[gpui_kit::test]
+    fn private_mode_is_session_only_then_flushes_on_reenable(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
+        let store = RecentStore::new(&paths);
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(!paths.local_data().join("reading.sqlite3").exists());
+        reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| reader.read(cx).mode_override()),
+            Some(ReadingMode::SinglePage)
+        );
+        // Replace the worker as if the process restarted: no private state
+        // crossed the disk boundary.
+        cx.update(|cx| recent::install(cx, Some(paths.clone())));
+        reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| reader.read(cx).mode_override()), None);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| cx.dispatch_action(&ShowSettings));
+        cx.run_until_parked();
+        let settings_window = cx.update(|cx| *cx.windows().last().unwrap());
+        cx.update(|cx| {
+            cx.update_window(settings_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("reading-history", cx);
+                frame.click("remember-reading-history", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(store.reading_mode(&pdf).unwrap(), Some(ReadingView::Page));
+        cx.update(|cx| recent::install(cx, Some(paths.clone())));
+        reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| reader.read(cx).mode_override()),
+            Some(ReadingMode::SinglePage)
+        );
+        cx.update(|cx| {
+            let history = recent::history(cx).unwrap();
+            cx.spawn(async move |cx| {
+                let _ = history.clear().await;
+                cx.update(recent::notify_changed);
+            })
+            .detach();
+        });
+        cx.run_until_parked();
+        assert_eq!(store.reading_mode(&pdf).unwrap(), None);
+        reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| reader.read(cx).mode_override()), None);
+    }
+
+    #[gpui_kit::test]
     fn wheel_scrolled_position_is_saved_for_reopen(cx: &mut TestAppContext) {
         let root = tempfile::tempdir().unwrap();
         let paths = crate::settings::AppPaths::for_locations(
@@ -2865,6 +3159,51 @@ mod tests {
         cx.run_until_parked();
         reopened.read_with(cx, |reader, _| {
             assert_eq!(reader.reading_position(), position)
+        });
+    }
+
+    #[gpui_kit::test]
+    fn saved_single_page_mode_restores_its_page_local_position(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("single-page.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SinglePage), cx);
+                frame.dispatch_action(Box::new(NextPage), cx);
+            })
+            .unwrap();
+        });
+        first.update(cx, |reader, cx| reader.scroll_by(180.0, cx));
+        cx.run_until_parked();
+        let position = first.read_with(cx, |reader, _| reader.reading_position());
+        assert_eq!(position.0, 1);
+        assert!(position.1 > 0.0);
+        let (reopened_window, reopened) = recent_test_window(cx, Some(pdf));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(reopened_window, |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+        });
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+            assert_eq!(reader.reading_position().0, position.0);
+            assert!((reader.reading_position().1 - position.1).abs() < 2.0);
         });
     }
 

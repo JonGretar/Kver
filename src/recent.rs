@@ -8,11 +8,11 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::settings::AppPaths;
+use crate::settings::{AppPaths, ReadingView};
 
-// Version 2 was also used by the independent reading-mode slice. Position
-// records must migrate after it, without assuming that table is present.
-const SCHEMA_VERSION: i64 = 3;
+// Version 2 holds reading modes; version 3 added positions in an independent
+// branch. Version 4 reconciles databases created by either branch alone.
+const SCHEMA_VERSION: i64 = 4;
 const RESULT_LIMIT: i64 = 100;
 
 /// Page-local distance in PDF points from the top of the displayed page.
@@ -78,10 +78,22 @@ impl RecentStore {
                      last_opened INTEGER NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS documents_recent ON documents(last_opened DESC);
-                 PRAGMA user_version = 1;
                  COMMIT;",
                 )
                 .map_err(|e| format!("Cannot migrate reading history: {e}"))?;
+        }
+        if version < 2 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     CREATE TABLE IF NOT EXISTS reading_modes (
+                         path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
+                         mode TEXT NOT NULL CHECK(mode IN ('continuous', 'page'))
+                     );
+                     PRAGMA user_version = 2;
+                     COMMIT;",
+                )
+                .map_err(|e| format!("Cannot migrate reading modes: {e}"))?;
         }
         if version < 3 {
             connection
@@ -96,6 +108,24 @@ impl RecentStore {
                      COMMIT;",
                 )
                 .map_err(|e| format!("Cannot migrate reading positions: {e}"))?;
+        }
+        if version < 4 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     CREATE TABLE IF NOT EXISTS reading_modes (
+                         path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
+                         mode TEXT NOT NULL CHECK(mode IN ('continuous', 'page'))
+                     );
+                     CREATE TABLE IF NOT EXISTS reading_positions (
+                         path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
+                         page INTEGER NOT NULL,
+                         y REAL NOT NULL
+                     );
+                     PRAGMA user_version = 4;
+                     COMMIT;",
+                )
+                .map_err(|e| format!("Cannot reconcile reading data: {e}"))?;
         }
         Ok(connection)
     }
@@ -217,6 +247,50 @@ impl RecentStore {
             .map_err(|e| e.to_string())
     }
 
+    /// None follows the application default rather than copying its value.
+    pub fn reading_mode(&self, path: &Path) -> Result<Option<ReadingView>, String> {
+        if !self.database_exists()? {
+            return Ok(None);
+        }
+        let path = path
+            .to_str()
+            .ok_or("Cannot store a non-UTF-8 document path")?;
+        let mode: Option<String> = self
+            .connect()?
+            .query_row(
+                "SELECT mode FROM reading_modes WHERE path = ?1",
+                [path],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        mode.map(|mode| ReadingView::parse(&mode)).transpose()
+    }
+
+    pub fn set_reading_mode(&self, path: &Path, mode: Option<ReadingView>) -> Result<(), String> {
+        let path = path
+            .to_str()
+            .ok_or("Cannot store a non-UTF-8 document path")?;
+        if mode.is_none() && !self.database_exists()? {
+            return Ok(());
+        }
+        let connection = self.connect()?;
+        if let Some(mode) = mode {
+            connection
+                .execute(
+                    "INSERT INTO reading_modes(path, mode) VALUES (?1, ?2)
+                     ON CONFLICT(path) DO UPDATE SET mode = excluded.mode",
+                    params![path, mode.key()],
+                )
+                .map_err(|e| e.to_string())?;
+        } else {
+            connection
+                .execute("DELETE FROM reading_modes WHERE path = ?1", [path])
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     pub fn position(&self, path: &Path) -> Result<Option<ReadingPosition>, String> {
         if !self.database_exists()? {
             return Ok(None);
@@ -303,6 +377,17 @@ mod shared {
             u64,
             async_channel::Sender<Result<(), String>>,
         ),
+        ReadMode(
+            PathBuf,
+            u64,
+            async_channel::Sender<Result<Option<ReadingView>, String>>,
+        ),
+        WriteMode(
+            PathBuf,
+            Option<ReadingView>,
+            u64,
+            async_channel::Sender<Result<(), String>>,
+        ),
     }
 
     #[derive(Clone)]
@@ -325,6 +410,7 @@ mod shared {
                         .unwrap_or(true);
                     let mut session = Vec::<PathBuf>::new();
                     let mut positions = HashMap::<PathBuf, ReadingPosition>::new();
+                    let mut modes = HashMap::<PathBuf, Option<ReadingView>>::new();
                     while let Ok(request) = receiver.recv().await {
                         match request {
                             Request::Record(path, token, reply) => {
@@ -371,6 +457,7 @@ mod shared {
                                 if result.is_ok() {
                                     session.retain(|entry| entry != &path);
                                     positions.remove(&path);
+                                    modes.remove(&path);
                                     worker_epoch.fetch_add(1, Ordering::SeqCst);
                                 }
                                 let _ = reply.try_send(result);
@@ -380,19 +467,28 @@ mod shared {
                                 if result.is_ok() {
                                     session.clear();
                                     positions.clear();
+                                    modes.clear();
                                     worker_epoch.fetch_add(1, Ordering::SeqCst);
                                 }
                                 let _ = reply.try_send(result);
                             }
                             Request::SetRecording(enabled, reply) => {
                                 let result = if enabled {
-                                    session.iter().rev().try_for_each(|path| {
-                                        store.record(path)?;
-                                        if let Some(position) = positions.get(path) {
-                                            store.save_position(path, *position)?;
-                                        }
-                                        Ok(())
-                                    })
+                                    session
+                                        .iter()
+                                        .rev()
+                                        .try_for_each(|path| {
+                                            store.record(path)?;
+                                            if let Some(position) = positions.get(path) {
+                                                store.save_position(path, *position)?;
+                                            }
+                                            Ok(())
+                                        })
+                                        .and_then(|()| {
+                                            modes.iter().try_for_each(|(path, mode)| {
+                                                store.set_reading_mode(path, *mode)
+                                            })
+                                        })
                                 } else {
                                     Ok(())
                                 };
@@ -423,6 +519,29 @@ mod shared {
                                 };
                                 if result.is_ok() && valid {
                                     positions.insert(path, position);
+                                }
+                                let _ = reply.try_send(result);
+                            }
+                            Request::ReadMode(path, token, reply) => {
+                                let result = if token != worker_epoch.load(Ordering::SeqCst) {
+                                    Ok(None)
+                                } else if let Some(mode) = modes.get(&path) {
+                                    Ok(*mode)
+                                } else {
+                                    store.reading_mode(&path)
+                                };
+                                let _ = reply.try_send(result);
+                            }
+                            Request::WriteMode(path, mode, token, reply) => {
+                                let result = if token != worker_epoch.load(Ordering::SeqCst) {
+                                    Ok(())
+                                } else if recording {
+                                    store.set_reading_mode(&path, mode)
+                                } else {
+                                    Ok(())
+                                };
+                                if result.is_ok() && token == worker_epoch.load(Ordering::SeqCst) {
+                                    modes.insert(path, mode);
                                 }
                                 let _ = reply.try_send(result);
                             }
@@ -548,6 +667,25 @@ mod shared {
             }
         }
 
+        pub fn reading_mode(
+            &self,
+            path: PathBuf,
+            epoch: u64,
+        ) -> impl Future<Output = Result<Option<ReadingView>, String>> + use<> {
+            let (reply, answer) = async_channel::bounded(1);
+            let queued = self
+                .sender
+                .try_send(Request::ReadMode(path, epoch, reply))
+                .map_err(|_| "Reading history worker is unavailable".to_owned());
+            async move {
+                queued?;
+                answer
+                    .recv()
+                    .await
+                    .map_err(|_| "Reading history worker stopped".to_owned())?
+            }
+        }
+
         pub fn save_position(
             &self,
             path: PathBuf,
@@ -557,6 +695,25 @@ mod shared {
             let queued = self
                 .sender
                 .try_send(Request::SavePosition(path, position, self.epoch(), reply))
+                .map_err(|_| "Reading history worker is unavailable".to_owned());
+            async move {
+                queued?;
+                answer
+                    .recv()
+                    .await
+                    .map_err(|_| "Reading history worker stopped".to_owned())?
+            }
+        }
+
+        pub fn set_reading_mode(
+            &self,
+            path: PathBuf,
+            mode: Option<ReadingView>,
+        ) -> impl Future<Output = Result<(), String>> + use<> {
+            let (reply, answer) = async_channel::bounded(1);
+            let queued = self
+                .sender
+                .try_send(Request::WriteMode(path, mode, self.epoch(), reply))
                 .map_err(|_| "Reading history worker is unavailable".to_owned());
             async move {
                 queued?;
@@ -720,7 +877,9 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         store.record(Path::new("/tmp/kept.pdf")).unwrap();
         assert!(store.contains(Path::new("/tmp/kept.pdf")).unwrap());
-        connection.pragma_update(None, "user_version", 4).unwrap();
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
         assert!(store.search("").unwrap_err().contains("newer"));
     }
 
@@ -793,8 +952,67 @@ mod tests {
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            3
+            SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn position_schema_v3_upgrades_without_losing_position_data() {
+        let (root, store) = store();
+        fs::create_dir_all(root.path().join("local")).unwrap();
+        let connection = Connection::open(&store.database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE documents (path TEXT PRIMARY KEY NOT NULL, last_opened INTEGER NOT NULL);
+                 CREATE TABLE reading_positions (
+                     path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
+                     page INTEGER NOT NULL,
+                     y REAL NOT NULL
+                 );
+                 INSERT INTO documents VALUES ('/book.pdf', 1);
+                 INSERT INTO reading_positions VALUES ('/book.pdf', 2, 45.0);
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        drop(connection);
+        let path = Path::new("/book.pdf");
+        assert_eq!(
+            store.position(path).unwrap(),
+            Some(ReadingPosition { page: 2, y: 45.0 })
+        );
+        assert_eq!(store.reading_mode(path).unwrap(), None);
+        store
+            .set_reading_mode(path, Some(ReadingView::Page))
+            .unwrap();
+        assert_eq!(store.reading_mode(path).unwrap(), Some(ReadingView::Page));
+    }
+
+    #[test]
+    fn existing_history_migrates_and_mode_is_cascaded_without_copying_a_default() {
+        let (_root, store) = store();
+        std::fs::create_dir_all(store.database.parent().unwrap()).unwrap();
+        let connection = Connection::open(&store.database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE documents (path TEXT PRIMARY KEY NOT NULL, last_opened INTEGER NOT NULL);
+                 INSERT INTO documents VALUES ('/tmp/old.pdf', 1);
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        drop(connection);
+        let path = Path::new("/tmp/old.pdf");
+        assert_eq!(store.reading_mode(path).unwrap(), None);
+        store
+            .set_reading_mode(path, Some(ReadingView::Page))
+            .unwrap();
+        assert_eq!(store.reading_mode(path).unwrap(), Some(ReadingView::Page));
+        store.set_reading_mode(path, None).unwrap();
+        assert_eq!(store.reading_mode(path).unwrap(), None);
+        store
+            .set_reading_mode(path, Some(ReadingView::Continuous))
+            .unwrap();
+        store.remove(path).unwrap();
+        assert_eq!(store.reading_mode(path).unwrap(), None);
     }
 
     #[test]

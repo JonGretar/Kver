@@ -40,7 +40,8 @@ and accepted limitations.
 The reader loads page dimensions in background work. Continuous mode lays out
 the document with spacers around visible pages; Single Page mode lays out only
 the selected page and bounds the scroll region to that page. Each reader window
-owns its mode; this slice does not persist a mode or set a configurable default.
+owns its live mode; the TOML opening default and optional PDF-specific override
+are resolved when a document opens, without reconfiguring other open windows.
 Wheel and trackpad input never turn pages in Single Page mode; page turns are
 explicit Actions. Page-local PDF-point positions anchor mode switches, zoom,
 and jumps, clamped to the destination page's viewport. The reader selects one
@@ -115,7 +116,7 @@ errors leave the window usable and appear beside the setting.
 
 `src/recent.rs` owns local PDF identity and the SQLite schema. A successful
 page load records the canonical local path; failed and cancelled opens do not.
-The `documents` table is the ownership boundary for future per-PDF records: child tables
+The `documents` table is the ownership boundary for per-PDF records: child tables
 must reference its path with `ON DELETE CASCADE`, so removing a document
 removes its saved reading data, not the PDF itself. The schema uses
 `user_version` migrations and refuses newer versions rather than overwriting
@@ -128,7 +129,11 @@ one path or clearing all deletes the
 SQLite parent rows and invalidates the matching session index. A generation
 token captured when loading begins prevents an older in-flight open from
 resurrecting data after an explicit deletion; a new open may record it again.
-Later mode and mark slices must use this same per-path session
+The `reading_modes` child table stores only explicit per-PDF choices. Absence
+means the PDF follows the current TOML default on its next open. Mode reads and
+writes use the same serialized worker as document records, with session-only
+changes retained while history recording is off and flushed on re-enable.
+Later mark slices must use this same per-path session
 owner and recording gate (rather than writing their own SQLite connections
 from reader windows), and store child rows with cascading foreign keys.
 No SQLite or config I/O runs on the UI thread. Open Recent searches both the
@@ -273,8 +278,8 @@ follow-ups.
 
 ## Future state
 
-Reading history, positions, and appearance settings persist. Marks and
-per-document view overrides are separate future work; the SQLite document
-record is their shared deletion boundary. Platform-specific menus, dialogs,
-and packaging belong at the application boundary; PDF and navigation behavior
-should remain portable.
+Reading history, positions, per-document reading modes, and appearance settings
+persist. Marks are separate future work; the SQLite document record is their
+shared deletion boundary. Platform-specific menus, dialogs, and packaging
+belong at the application boundary; PDF and navigation behavior should remain
+portable.

@@ -18,7 +18,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Close the active window with Command-W or the Window menu on macOS.
 - Choose whether closing the last window quits Kver; on macOS, leave it running to reopen from the Dock, create a new window, or open a PDF from Finder.
 - Choose whether newly opened PDFs start at 100%, Fit Width, or Fit Page in Settings without changing PDFs already open.
-- Choose Continuous or Page as the reading view for newly opened PDFs.
+- Choose Continuous or Single Page as the reading view for newly opened PDFs. Set a different mode for one PDF, or use the default again; the PDF choice survives reopening when reading history is on.
 - Save a preference for reopening windows on startup for a future release; window restoration is not implemented yet.
 
 ### Changed

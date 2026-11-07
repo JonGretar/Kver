@@ -1,6 +1,9 @@
 use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
+mod recent_history;
+mod recent_picker;
+
 fn setup(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);

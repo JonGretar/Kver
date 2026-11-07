@@ -33,9 +33,10 @@ overlays and applies the theme's interface scale. The window uses Kit's
 title. Kver follows the system's light/dark appearance for reader chrome
 unless the app-wide preference selects Light or Dark; PDF pages retain their
 document colors. `DocumentWindow` retains the system-appearance subscription
-and owns the native file picker and Open/Close/Next Window/Previous Window
-handlers. Those handlers are ancestors of the reader's focused regions, so
-sidebar and palette input still reach the correct window.
+and owns the native file picker, Open Recent coordination, and
+Open/Close/Next Window/Previous Window handlers. Those handlers are ancestors
+of the reader's focused regions, so sidebar and palette input still reach the
+correct window.
 
 The window strongly owns one reader entity, with no reverse reference. The
 reader remains the source of document identity, loading, and restoration;
@@ -216,12 +217,19 @@ overlay layer rather than a second hand-built reader overlay.
 `src/reading_history/recent_picker.rs` owns the Open Recent dialog, query,
 history-revision subscription, and search task. It receives the normalized
 active path as an exclusion snapshot and emits an open request rather than
-loading PDFs. The document owner replies to the originating picker and request;
-a late completion cannot dismiss a reopened dialog. Search, open, and removal
+loading PDFs. `DocumentWindow` retains the picker and matches its pending
+request to the reader's document generation. The reader emits replacement
+and load-completion events without retaining a picker or referring to dialogs.
+The window updates the active-path exclusion, cancels superseded requests,
+and replies to the originating picker and request; a late completion cannot
+dismiss a reopened dialog. Search, open, and removal
 have independent busy state, so a search refresh cannot enable rows while an
 open is pending. Confirmed removals complete and notify other windows even if
 the originating picker closes. This retains the shared serialized history
 worker and existing schema rather than introducing a separate picker store.
+Composed Recent, focus, and cross-window history workflows are tested under
+`src/app/document_window/tests/`; picker-only lifecycle tests remain beside
+`recent_picker.rs`.
 
 ### Actions, palette, and menu
 

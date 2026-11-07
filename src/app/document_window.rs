@@ -13,14 +13,32 @@ use gpui_kit::{
 };
 
 use super::windows::{self, CloseWindow, NextWindow, PreviousWindow};
-use crate::{reader::Preview, settings::Appearance, settings_ui};
+use crate::{
+    reader::{DocumentEvent, Preview},
+    reading_history::{
+        ShowRecent,
+        recent_picker::{RecentPicker, RecentPickerEvent},
+    },
+    settings::Appearance,
+    settings_ui,
+};
 
 gpui_kit::actions!(kver, [OpenPdf]);
 
 pub struct DocumentWindow {
     reader: Entity<Preview>,
     file_picker: Option<Task<()>>,
+    recent: Option<Entity<RecentPicker>>,
+    recent_subscription: Option<Subscription>,
+    recent_open: Option<PendingRecentOpen>,
+    _document_subscription: Subscription,
     _appearance_subscription: Subscription,
+}
+
+struct PendingRecentOpen {
+    generation: u64,
+    picker: gpui_kit::WeakEntity<RecentPicker>,
+    request: u64,
 }
 
 impl DocumentWindow {
@@ -31,9 +49,18 @@ impl DocumentWindow {
             }
             cx.notify();
         });
+        let reader = cx.new(|cx| Preview::new(path, window.scale_factor(), cx));
+        let document_subscription =
+            cx.subscribe_in(&reader, window, |this, _, event, window, cx| {
+                this.on_document_event(event, window, cx);
+            });
         Self {
-            reader: cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
+            reader,
             file_picker: None,
+            recent: None,
+            recent_subscription: None,
+            recent_open: None,
+            _document_subscription: document_subscription,
             _appearance_subscription: appearance_subscription,
         }
     }
@@ -81,6 +108,77 @@ impl DocumentWindow {
                 .update(cx, |reader, cx| reader.open_path(path, cx));
         }
     }
+
+    fn show_recent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.recent.is_some() {
+            return;
+        }
+        self.reader.update(cx, |reader, cx| reader.hide_palette(cx));
+        let excluded = self.reader.read(cx).record_path().map(ToOwned::to_owned);
+        let picker = cx.new(|cx| RecentPicker::new(excluded, window, cx));
+        self.recent_subscription = Some(cx.subscribe(&picker, |this, picker, event, cx| {
+            if this.recent.as_ref() != Some(&picker) {
+                return;
+            }
+            match event {
+                RecentPickerEvent::Open { path, request } => {
+                    this.open_path(path.clone(), cx);
+                    this.recent_open = Some(PendingRecentOpen {
+                        generation: this.reader.read(cx).document_generation(),
+                        picker: picker.downgrade(),
+                        request: *request,
+                    });
+                }
+                RecentPickerEvent::Closed => {
+                    this.recent = None;
+                    this.recent_subscription = None;
+                }
+            }
+            cx.notify();
+        }));
+        self.recent = Some(picker.clone());
+        picker.update(cx, |picker, cx| picker.show(window, cx));
+        cx.notify();
+    }
+
+    fn on_document_event(
+        &mut self,
+        event: &DocumentEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let generation = match event {
+            DocumentEvent::Replaced { generation } | DocumentEvent::Opened { generation, .. } => {
+                *generation
+            }
+        };
+        if generation != self.reader.read(cx).document_generation() {
+            return;
+        }
+        if self
+            .recent_open
+            .as_ref()
+            .is_some_and(|pending| pending.generation != generation)
+            && let Some(pending) = self.recent_open.take()
+        {
+            let _ = pending
+                .picker
+                .update(cx, |picker, cx| picker.cancel_open(pending.request, cx));
+        }
+        if let Some(picker) = &self.recent {
+            let excluded = self.reader.read(cx).record_path().map(ToOwned::to_owned);
+            picker.update(cx, |picker, cx| picker.set_active_path(excluded, cx));
+        }
+        if let DocumentEvent::Opened { result, .. } = event
+            && let Some(pending) = self.recent_open.take()
+        {
+            // Reply to the initiating picker, never to whichever modal happens
+            // to be open now. A reopened dialog has a different entity identity.
+            let _ = pending.picker.update(cx, |picker, cx| {
+                picker.finish_open(pending.request, result.clone(), window, cx);
+            });
+        }
+    }
 }
 
 impl Render for DocumentWindow {
@@ -88,6 +186,7 @@ impl Render for DocumentWindow {
         div()
             .size_full()
             .on_action(cx.listener(|this, _: &OpenPdf, _, cx| this.open_dialog(cx)))
+            .on_action(cx.listener(|this, _: &ShowRecent, window, cx| this.show_recent(window, cx)))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &NextWindow, window, cx| windows::cycle(window, cx, 1))
             .on_action(|_: &PreviousWindow, window, cx| windows::cycle(window, cx, -1))

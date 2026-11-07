@@ -56,7 +56,6 @@ use crate::{
     coordinates::{PageViewport, Point},
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
-    reading_history::recent_picker::{RecentPicker, RecentPickerEvent},
     recent::{self, ReadingPosition, RecentStore},
     settings::{InitialZoom, ReadingView},
     settings_ui::{self, ShowSettings},
@@ -308,18 +307,28 @@ pub struct Preview {
     palette: Option<CommandPalette>,
     marks: Option<Entity<LocalMarks>>,
     marks_subscriptions: Vec<Subscription>,
-    recent: Option<Entity<RecentPicker>>,
-    recent_subscription: Option<Subscription>,
-    recent_open: Option<PendingRecentOpen>,
     sidebar: Option<Entity<ReaderSidebar>>,
     panel_subscriptions: Vec<Subscription>,
     status: String,
 }
 
-struct PendingRecentOpen {
-    generation: u64,
-    picker: gpui::WeakEntity<RecentPicker>,
-    request: u64,
+/// Document lifecycle, independent of the UI that requested an open.
+pub(crate) enum DocumentEvent {
+    Replaced {
+        generation: u64,
+    },
+    Opened {
+        generation: u64,
+        result: Result<(), String>,
+    },
+}
+
+impl gpui::EventEmitter<DocumentEvent> for Preview {}
+
+impl gpui::Focusable for Preview {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
 }
 
 impl Preview {
@@ -357,9 +366,6 @@ impl Preview {
             palette: None,
             marks: None,
             marks_subscriptions: Vec::new(),
-            recent: None,
-            recent_subscription: None,
-            recent_open: None,
             sidebar: None,
             panel_subscriptions: Vec::new(),
             status: "Open a PDF to start reading".into(),
@@ -377,14 +383,6 @@ impl Preview {
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.generation += 1;
         self.document_generation += 1;
-        if let Some(pending) = self.recent_open.take() {
-            let _ = pending
-                .picker
-                .update(cx, |picker, cx| picker.cancel_open(pending.request, cx));
-        }
-        if let Some(picker) = &self.recent {
-            picker.update(cx, |picker, cx| picker.set_active_path(None, cx));
-        }
         self.marks = None;
         self.marks_subscriptions.clear();
         if let Some(sidebar) = self.sidebar.as_mut() {
@@ -420,6 +418,9 @@ impl Preview {
         self.scroll.set_offset(point(px(0.0), px(0.0)));
         self.last_viewport = (f32::NAN, f32::NAN, f32::NAN);
         self.status = "Loading document…".into();
+        cx.emit(DocumentEvent::Replaced {
+            generation: self.document_generation,
+        });
         self.load(cx);
         cx.notify();
     }
@@ -445,9 +446,6 @@ impl Preview {
     }
 
     fn show_marks(&mut self, view: MarksView, window: &mut Window, cx: &mut Context<Self>) {
-        if self.recent.is_some() {
-            return;
-        }
         let Some(marks) = self.ensure_marks(cx) else {
             return;
         };
@@ -521,38 +519,9 @@ impl Preview {
         }
     }
 
-    fn show_recent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.recent.is_some() {
-            return;
-        }
+    /// A window overlay supersedes the palette and supplies its own focus.
+    pub(crate) fn hide_palette(&mut self, cx: &mut Context<Self>) {
         self.palette = None;
-        let picker = cx.new(|cx| RecentPicker::new(self.record_path.clone(), window, cx));
-        self.recent_subscription = Some(cx.subscribe(&picker, |reader, picker, event, cx| {
-            if !reader
-                .recent
-                .as_ref()
-                .is_some_and(|current| current.entity_id() == picker.entity_id())
-            {
-                return;
-            }
-            match event {
-                RecentPickerEvent::Open { path, request } => {
-                    reader.open_path(path.clone(), cx);
-                    reader.recent_open = Some(PendingRecentOpen {
-                        generation: reader.generation,
-                        picker: picker.downgrade(),
-                        request: *request,
-                    });
-                }
-                RecentPickerEvent::Closed => {
-                    reader.recent = None;
-                    reader.recent_subscription = None;
-                }
-            }
-            cx.notify();
-        }));
-        self.recent = Some(picker.clone());
-        picker.update(cx, |picker, cx| picker.show(window, cx));
         cx.notify();
     }
 
@@ -721,9 +690,9 @@ impl Preview {
             } else {
                 Ok(None)
             };
-            let completion = this.update(cx, |this, cx| {
+            let _ = this.update(cx, |this, cx| {
                 if generation != this.generation {
-                    return None;
+                    return;
                 }
                 let mut opened = false;
                 match result {
@@ -743,9 +712,6 @@ impl Preview {
                         match normalized {
                             Some(Ok(path)) => {
                                 this.record_path = Some(path.clone());
-                                if let Some(picker) = &this.recent {
-                                    picker.update(cx, |picker, cx| picker.set_active_path(Some(path.clone()), cx));
-                                }
                                 if let Some(history) = history {
                                     let record = history.record_at(path.clone(), history_epoch.unwrap_or(0));
                                     let position = history.position(path, history_epoch.unwrap_or(0));
@@ -786,17 +752,12 @@ impl Preview {
                     Ok(_) => this.status = "PDF has no pages".into(),
                     Err(error) => this.status = error,
                 }
-                let completion = this.recent_open.take()
-                    .filter(|pending| pending.generation == generation)
-                    .map(|pending| (pending, if opened { Ok(()) } else { Err(this.status.clone()) }));
-                cx.notify();
-                completion
-            });
-            if let Ok(Some((pending, result))) = completion {
-                let _ = pending.picker.update_in(cx, |picker, window, cx| {
-                    picker.finish_open(pending.request, result, window, cx);
+                cx.emit(DocumentEvent::Opened {
+                    generation: document_generation,
+                    result: if opened { Ok(()) } else { Err(this.status.clone()) },
                 });
-            }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -911,6 +872,9 @@ impl Preview {
     }
     pub(crate) fn document_generation(&self) -> u64 {
         self.document_generation
+    }
+    pub(crate) fn record_path(&self) -> Option<&Path> {
+        self.record_path.as_deref()
     }
     pub fn displayed_page_index(&self) -> Option<usize> {
         self.images
@@ -1717,7 +1681,7 @@ impl Render for Preview {
             .size_full()
             .track_focus(&self.focus)
             .when(
-                self.palette.is_none() && !self.marks_open(cx) && self.recent.is_none() && self.focus.is_focused(window),
+                self.palette.is_none() && !self.marks_open(cx) && self.focus.is_focused(window),
                 |reader| reader.key_context("Reader"),
             )
             .on_action(cx.listener(Self::on_show_palette))
@@ -1739,9 +1703,6 @@ impl Render for Preview {
             }))
             .on_action(cx.listener(|this, action: &JumpLocalMark, _, cx| this.jump_mark(action.0, cx)))
             .on_action(cx.listener(|this, action: &DeleteLocalMark, _, cx| this.change_mark(action.0, None, cx)))
-            .on_action(cx.listener(|this, _: &ShowRecent, window, cx| {
-                this.show_recent(window, cx);
-            }))
             .on_action(cx.listener(|this, _: &ShowFind, window, cx| {
                 if !this.pages.is_empty() {
                     this.show_sidebar(SidebarPanel::Find, window, cx);
@@ -1806,7 +1767,7 @@ impl Render for Preview {
                 this.choose_reading_mode(None, cx);
             }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if this.palette.is_some() || this.marks_open(cx) || this.recent.is_some() || !this.focus.is_focused(window)
+                if this.palette.is_some() || this.marks_open(cx) || !this.focus.is_focused(window)
                 {
                     cx.propagate();
                     return;
@@ -2218,7 +2179,7 @@ mod tests {
     use crate::app::keymap::install as bind_reader_keys;
     use crate::reading_history::LocalMark;
     use gpui_kit::{
-        AnyWindowHandle, Focusable as _, TestAppContext, point, size,
+        AnyWindowHandle, TestAppContext, point, size,
         test::{TestEventExt as _, TestWindowExt},
     };
     use std::collections::BTreeMap;
@@ -2227,7 +2188,6 @@ mod tests {
     mod find;
     mod marks;
     mod palette;
-    mod recent_picker;
     mod sidebar;
 
     fn recent_test_window(
@@ -3801,596 +3761,6 @@ mod tests {
                 assert_eq!(reader.scale(), 1.0);
             })
             .unwrap();
-    }
-
-    #[gpui_kit::test]
-    fn fresh_private_session_never_creates_reading_database(cx: &mut TestAppContext) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        crate::settings::save(
-            paths.config(),
-            crate::settings::SettingsChange::RememberReadingHistory(false),
-        )
-        .unwrap();
-        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths.clone()));
-        });
-        let (first, _) = recent_test_window(cx, Some(pdf.clone()));
-        let (second, second_reader) = recent_test_window(cx, None);
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(second, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        second_reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
-                pdf
-            )
-        });
-        assert!(!paths.local_data().join("reading.sqlite3").exists());
-        cx.update(|cx| {
-            cx.update_window(first, |_, window, _| window.remove_window())
-                .unwrap()
-        });
-    }
-
-    #[gpui_kit::test]
-    fn history_off_is_session_only_across_reader_windows_and_reenable_saves_it(
-        cx: &mut TestAppContext,
-    ) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        let missing = root.path().join("offline-drive.pdf");
-        store.record(&missing).unwrap();
-        crate::settings::save(
-            paths.config(),
-            crate::settings::SettingsChange::RememberReadingHistory(false),
-        )
-        .unwrap();
-        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths.clone()));
-            settings_ui::install_with_paths(cx, Some(paths.clone()));
-        });
-        let (_first, first_reader) = recent_test_window(cx, Some(pdf.clone()));
-        let (second, second_reader) = recent_test_window(cx, None);
-        cx.run_until_parked();
-        assert!(!store.contains(&pdf).unwrap(), "off wrote to SQLite");
-        assert!(store.contains(&missing).unwrap(), "off erased old data");
-        cx.update(|cx| {
-            cx.update_window(second, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        second_reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
-                pdf
-            );
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).files()[1].path,
-                missing
-            );
-        });
-        // Restart while recording is off: only the previously saved missing
-        // path survives; a session-only open is never written implicitly.
-        cx.update(|cx| recent::install(cx, Some(paths.clone())));
-        cx.run_until_parked();
-        assert_eq!(store.search("").unwrap().len(), 1);
-        assert_eq!(store.search("").unwrap()[0].path, missing);
-        // Reopen the PDF in this session before re-enabling recording.
-        first_reader.update(cx, |reader, cx| reader.open_path(pdf.clone(), cx));
-        cx.run_until_parked();
-        cx.update(|cx| cx.dispatch_action(&ShowSettings));
-        cx.run_until_parked();
-        let settings_window = cx.update(|cx| *cx.windows().last().unwrap());
-        cx.update(|cx| {
-            cx.update_window(settings_window, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.click("reading-history", cx);
-                frame.click("remember-reading-history", cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        assert!(
-            crate::settings::load(paths.config())
-                .unwrap()
-                .remember_reading_history()
-        );
-        assert!(
-            store.contains(&pdf).unwrap(),
-            "re-enabling did not flush the session"
-        );
-        first_reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.path(), Some(pdf.as_path()))
-        });
-        second_reader.read_with(cx, |reader, _| assert_eq!(reader.path(), None));
-
-        // Reinitializing the service against the same locations represents a
-        // new process; only the saved state should be visible on disk.
-        cx.update(|cx| recent::install(cx, Some(paths.clone())));
-        cx.run_until_parked();
-        assert_eq!(store.search("").unwrap()[0].path, pdf);
-    }
-
-    #[gpui_kit::test]
-    fn forgetting_one_pdf_invalidates_open_recent_in_other_windows_and_does_not_resurrect(
-        cx: &mut TestAppContext,
-    ) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        let missing = root.path().join("offline.pdf");
-        store.record(&pdf).unwrap();
-        store.record(&missing).unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths.clone()));
-        });
-        let (first, first_reader) = recent_test_window(cx, None);
-        let (second, second_reader) = recent_test_window(cx, Some(pdf.clone()));
-        cx.run_until_parked();
-        for window in [first, second] {
-            cx.update(|cx| {
-                cx.update_window(window, |_, frame, cx| {
-                    frame.render_frame(cx);
-                    frame.dispatch_action(Box::new(ShowRecent), cx);
-                })
-                .unwrap();
-            });
-        }
-        cx.run_until_parked();
-        first_reader
-            .read_with(cx, |reader, _| reader.recent.as_ref().unwrap().clone())
-            .update(cx, |picker, cx| picker.remove(missing.clone(), cx));
-        cx.run_until_parked();
-        assert!(!store.contains(&missing).unwrap());
-        assert!(store.contains(&pdf).unwrap());
-        second_reader.read_with(cx, |reader, cx| {
-            assert!(
-                !reader
-                    .recent
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .files()
-                    .iter()
-                    .any(|file| file.path == missing)
-            );
-            assert_eq!(reader.path(), Some(pdf.as_path()));
-        });
-        cx.update(|cx| recent::install(cx, Some(paths.clone())));
-        cx.run_until_parked();
-        assert!(!store.contains(&missing).unwrap());
-    }
-
-    #[gpui_kit::test]
-    fn open_recent_excludes_the_active_pdf_without_changing_stored_history(
-        cx: &mut TestAppContext,
-    ) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        let active = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        let older = root.path().join("older.pdf");
-        store.record(&older).unwrap();
-        store.record(&active).unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (first, first_reader) = recent_test_window(cx, Some(active.clone()));
-        let (second, second_reader) = recent_test_window(cx, None);
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(first, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        first_reader.read_with(cx, |reader, cx| {
-            let files = reader.recent.as_ref().unwrap().read(cx).files();
-            assert_eq!(
-                files.iter().map(|file| &file.path).collect::<Vec<_>>(),
-                vec![&older]
-            );
-        });
-        cx.update(|cx| {
-            cx.update_window(first, |_, frame, cx| {
-                frame.input("readme-sample", cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        first_reader.read_with(cx, |reader, cx| {
-            assert!(reader.recent.as_ref().unwrap().read(cx).files().is_empty());
-        });
-        assert!(store.contains(&active).unwrap());
-        cx.update(|cx| {
-            cx.update_window(second, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        second_reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
-                active
-            );
-        });
-    }
-
-    #[gpui_kit::test]
-    fn clicking_outside_recent_closes_it_and_restores_reader_focus(cx: &mut TestAppContext) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        let store = RecentStore::new(&paths);
-        store.record(&pdf).unwrap();
-        store
-            .record(&RecentStore::normalize(Path::new("examples/field-guide.pdf")).unwrap())
-            .unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (handle, reader) = cx.update(|cx| {
-            gpui_kit::open_window(gpui::WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
-            })
-            .unwrap()
-        });
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.click("input-state", cx);
-                let focus = reader
-                    .read(cx)
-                    .recent
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .focus_handle(cx);
-                assert!(
-                    focus.is_focused(frame),
-                    "clicking fresh search moved focus to the reader"
-                );
-            })
-            .unwrap();
-        });
-        let before = reader.read_with(cx, |reader, cx| {
-            reader.recent.as_ref().unwrap().read(cx).selected_row(cx)
-        });
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.click("recent-header", cx);
-                frame.press("down", cx);
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, cx| {
-            assert_ne!(
-                reader.recent.as_ref().unwrap().read(cx).selected_row(cx),
-                before,
-                "arrow keys must navigate recent rows after clicking the header"
-            );
-        });
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| frame.input("read", cx))
-                .unwrap();
-        });
-        reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).query(cx),
-                "read",
-                "clicking the panel header must not strand keyboard search"
-            );
-        });
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                let outside = point(px(20.), px(200.));
-                frame.pointer_down(outside, gpui::MouseButton::Left, cx);
-                frame.pointer_up(outside, gpui::MouseButton::Left, cx);
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, _| {
-            assert!(
-                reader.recent.is_none(),
-                "outside click should dismiss Open Recent"
-            );
-        });
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                assert!(
-                    reader.read(cx).focus.is_focused(frame),
-                    "outside click should return focus to the reader"
-                );
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.press("escape", cx);
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, _| {
-            assert!(reader.recent.is_none(), "Escape should dismiss Open Recent");
-        });
-    }
-
-    #[gpui_kit::test]
-    fn row_x_confirms_the_specific_pdf_without_opening_it(cx: &mut TestAppContext) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        store.record(&pdf).unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (handle, reader) = cx.update(|cx| {
-            gpui_kit::open_window(gpui::WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
-            })
-            .unwrap()
-        });
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.render_frame(cx);
-                frame.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        let forget_id = format!("forget-pdf:{}", pdf.display());
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                assert_eq!(
-                    frame.find(forget_id.clone()).label(),
-                    Some("Forget readme-sample.pdf")
-                );
-                assert!(
-                    frame
-                        .find("recent-panel")
-                        .bounds()
-                        .contains(&frame.find(forget_id.clone()).bounds().center()),
-                    "X is outside the recent overlay"
-                );
-                frame.click(forget_id.clone(), cx);
-                assert!(reader.read(cx).recent.is_some(), "X click dismissed Recent");
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.render_frame(cx);
-                assert_eq!(frame.find("ok").label(), Some("Forget PDF"));
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, _| {
-            assert!(reader.path.is_none(), "X must not open the PDF row");
-        });
-        assert!(
-            store.contains(&pdf).unwrap(),
-            "X alone must not delete data"
-        );
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| frame.click("cancel", cx))
-                .unwrap();
-        });
-        cx.run_until_parked();
-        assert!(
-            store.contains(&pdf).unwrap(),
-            "Cancel must preserve the record"
-        );
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.simulate_next_frame(cx);
-                let focus = reader
-                    .read(cx)
-                    .recent
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .focus_handle(cx);
-                assert!(
-                    focus.is_focused(frame),
-                    "search not focused after confirmation"
-                );
-                frame.click("input-state", cx);
-                assert!(
-                    reader.read(cx).recent.is_some(),
-                    "search click dismissed recent"
-                );
-                assert!(focus.is_focused(frame), "clicking search changed focus");
-                frame.input("readme", cx);
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).query(cx),
-                "readme",
-                "cancelling Forget must return focus to recent-file search"
-            );
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| frame.click(forget_id.clone(), cx))
-                .unwrap();
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| frame.click("ok", cx))
-                .unwrap();
-        });
-        cx.run_until_parked();
-        assert!(!store.contains(&pdf).unwrap());
-        assert!(pdf.exists(), "forgetting must not delete the PDF");
-        cx.update(|cx| {
-            cx.update_window(handle, |_, frame, cx| {
-                frame.simulate_next_frame(cx);
-                let focus = reader
-                    .read(cx)
-                    .recent
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .focus_handle(cx);
-                assert!(
-                    focus.is_focused(frame),
-                    "search lost focus after forgetting a row"
-                );
-                frame.input("x", cx);
-            })
-            .unwrap();
-        });
-        reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).query(cx),
-                "readmex",
-                "confirming Forget must return focus even when its row disappears"
-            );
-        });
-    }
-
-    #[gpui_kit::test]
-    fn recent_action_search_and_missing_removal_work_across_windows(cx: &mut TestAppContext) {
-        let root = tempfile::tempdir().unwrap();
-        let paths = crate::settings::AppPaths::for_locations(
-            root.path().join("config.toml"),
-            root.path().join("local"),
-        );
-        let store = RecentStore::new(&paths);
-        let missing = root.path().join("missing-older.pdf");
-        store.record(&missing).unwrap();
-        let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
-        store.record(&pdf).unwrap();
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-            recent::install(cx, Some(paths));
-        });
-        let (first, first_reader) = recent_test_window(cx, None);
-        let (_second, second_reader) = recent_test_window(cx, None);
-        cx.update(|cx| {
-            cx.update_window(first, |_, window, cx| {
-                window.render_frame(cx);
-                window.dispatch_action(Box::new(ShowRecent), cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        first_reader.read_with(cx, |reader, cx| {
-            let panel = reader.recent.as_ref().unwrap().read(cx);
-            assert_eq!(panel.files().len(), 2);
-            assert_eq!(panel.files()[0].path, pdf);
-        });
-        second_reader.read_with(cx, |reader, _| {
-            assert!(reader.recent.is_none());
-            assert!(reader.path.is_none());
-        });
-
-        cx.update(|cx| {
-            cx.update_window(first, |_, frame, cx| {
-                frame.render_frame(cx);
-                assert_eq!(frame.find("recent-panel").label(), Some("Open Recent"));
-                frame.input("missing-older", cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        first_reader.read_with(cx, |reader, cx| {
-            assert_eq!(
-                reader.recent.as_ref().unwrap().read(cx).files()[0].path,
-                missing
-            );
-        });
-        cx.update(|cx| {
-            cx.update_window(first, |_, frame, cx| {
-                frame.press("enter", cx);
-            })
-            .unwrap();
-        });
-        cx.run_until_parked();
-        first_reader.read_with(cx, |reader, cx| {
-            let panel = reader.recent.as_ref().unwrap().read(cx);
-            assert!(panel.error().unwrap().contains("Could not open"));
-            assert_eq!(reader.page_count(), None);
-        });
-        first_reader
-            .read_with(cx, |reader, _| reader.recent.as_ref().unwrap().clone())
-            .update(cx, |picker, cx| picker.remove(missing.clone(), cx));
-        cx.run_until_parked();
-        first_reader.read_with(cx, |reader, cx| {
-            let panel = reader.recent.as_ref().unwrap().read(cx);
-            assert!(!panel.is_loading(), "removal still pending");
-            assert!(
-                panel.error().is_none(),
-                "removal failed: {:?}",
-                panel.error()
-            );
-        });
-        assert!(!store.contains(&missing).unwrap());
-        assert!(store.contains(&pdf).unwrap());
-        second_reader.read_with(cx, |reader, _| assert!(reader.path.is_none()));
     }
 
     #[gpui_kit::test]

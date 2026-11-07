@@ -1322,9 +1322,11 @@ mod tests {
         });
         cx.run_until_parked();
         let settings_window = cx.update(|cx| cx.windows()[0]);
-        let (reader_window, reader) = cx.update(|cx| {
+        let (reader_window, document) = cx.update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| Preview::new(Some(pdf.clone()), window.scale_factor(), cx))
+                cx.new(|cx| {
+                    crate::app::document_window::DocumentWindow::new(Some(pdf.clone()), window, cx)
+                })
             })
             .unwrap()
         });
@@ -1415,8 +1417,8 @@ mod tests {
             })
             .unwrap()
         });
-        reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.path(), Some(pdf.as_path()))
+        document.read_with(cx, |document, cx| {
+            assert_eq!(document.reader().read(cx).path(), Some(pdf.as_path()))
         });
         cx.update(|cx| {
             cx.update_window(settings_window, |_, frame, cx| {

@@ -1,5 +1,7 @@
 use super::*;
 
+mod documents;
+
 pub(super) fn cached_pages(reader: &ReaderView) -> impl Iterator<Item = usize> + '_ {
     reader.rasters.cached_pages()
 }

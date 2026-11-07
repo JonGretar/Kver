@@ -69,6 +69,13 @@ as ordinary Rust state, without a separate entity or view back-reference.
 `src/reader/rendering.rs` owns raster request selection, reply validation, and
 visible bitmap retention. The reader coordinates navigation commands,
 restoration, background execution, and presentation.
+`src/reader/tests.rs` contains only the integration-suite declarations and
+shared fixtures. The suites under `reader/tests/` group loading, reading modes,
+saved positions, navigation, rendering, selection, Find, and marks behavior.
+They can inspect private reader invariants without widening production
+visibility; workflows that need chrome mount the real `DocumentWindow`.
+Window-only composition, command routing, and focus tests remain beside
+`DocumentWindow`.
 `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
 entries and destinations, and premultiplied BGRA pixels, not Hayro types, to

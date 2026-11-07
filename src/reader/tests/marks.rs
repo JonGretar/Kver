@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod persistence;
+
 #[gpui_kit::test]
 fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();

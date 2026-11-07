@@ -1,5 +1,7 @@
 use super::*;
 
+mod single_page;
+
 #[gpui_kit::test]
 fn reading_keys_navigate_and_zoom_without_screenshots(cx: &mut TestAppContext) {
     cx.update(|cx| {

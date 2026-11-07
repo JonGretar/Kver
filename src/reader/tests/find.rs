@@ -75,7 +75,7 @@ fn single_page_find_jump_and_window_modes_are_local(cx: &mut TestAppContext) {
     first.read_with(cx, |reader, _| {
         assert_eq!(reader.page_index(), 2);
         assert_eq!(reader.reading_position().0, 2);
-        assert_eq!(reader.visible_pages(0.0, 700.0), 2..3);
+        assert_eq!(reader.layout().visible_pages(0.0, 700.0), 2..3);
         assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
     });
     second.read_with(cx, |reader, _| {
@@ -98,7 +98,7 @@ fn single_page_find_jump_and_window_modes_are_local(cx: &mut TestAppContext) {
     first.read_with(cx, |reader, _| {
         assert_eq!(reader.page_index(), 2);
         assert_eq!(reader.reading_position().0, 2);
-        assert_eq!(reader.visible_pages(0.0, 700.0), 2..3);
+        assert_eq!(reader.layout().visible_pages(0.0, 700.0), 2..3);
     });
     cx.run_until_parked();
     first.read_with(cx, |reader, _| {

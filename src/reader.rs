@@ -4,6 +4,7 @@ mod commands;
 mod contents;
 mod find;
 mod marks;
+mod navigation;
 mod selection;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
@@ -22,6 +23,8 @@ pub use marks::{
     ShowSetMark,
 };
 pub(crate) use marks::{LocalMarks, MarksView};
+use navigation::{GAP, PAGE_PADDING, PageLayout, Position};
+pub use navigation::{ReadingMode, ZoomMode};
 use selection::Selection;
 
 use std::{
@@ -59,37 +62,7 @@ use crate::{
     settings_ui,
 };
 
-const GAP: f32 = 16.0;
 const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
-const PAGE_PADDING: f32 = 16.0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ZoomMode {
-    Fixed,
-    FitWidth,
-    FitPage,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ReadingMode {
-    #[default]
-    Continuous,
-    SinglePage,
-}
-
-fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32)) -> Option<f32> {
-    let (width, height) = viewport;
-    if width <= PAGE_PADDING * 2.0 || height <= PAGE_PADDING * 2.0 {
-        return None;
-    }
-    let width_scale = (width - PAGE_PADDING * 2.0) / page.0;
-    let scale = match mode {
-        ZoomMode::Fixed => return None,
-        ZoomMode::FitWidth => width_scale,
-        ZoomMode::FitPage => width_scale.min((height - PAGE_PADDING * 2.0) / page.1),
-    };
-    Some(scale.clamp(0.25, 4.0))
-}
 
 fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
     let max_scale = (32_000_000.0 / (width * height))
@@ -97,61 +70,6 @@ fn raster_scale(zoom: f32, density: f32, (width, height): (f32, f32)) -> f32 {
         .min(8192.0 / width)
         .min(8192.0 / height);
     (zoom * density).clamp(0.25, 8.0).min(max_scale)
-}
-
-/// Page-local position stays in PDF points when layout or zoom changes.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Position {
-    page: usize,
-    y: f32,
-}
-
-fn page_top(pages: &[(f32, f32)], zoom: f32, index: usize) -> f32 {
-    pages.iter().take(index).map(|&(_, h)| h * zoom + GAP).sum()
-}
-
-fn position_at(pages: &[(f32, f32)], zoom: f32, offset: f32) -> Position {
-    let mut top = 0.0;
-    for (index, &(_, height)) in pages.iter().enumerate() {
-        let next = top + height * zoom + GAP;
-        if offset < next || index + 1 == pages.len() {
-            return Position {
-                page: index,
-                y: ((offset - top) / zoom).clamp(0.0, height),
-            };
-        }
-        top = next;
-    }
-    Position { page: 0, y: 0.0 }
-}
-
-fn visible_range(pages: &[(f32, f32)], zoom: f32, top: f32, height: f32) -> std::ops::Range<usize> {
-    let mut y = 0.0;
-    let mut first = pages.len();
-    let mut end = pages.len();
-    for (index, &(_, page_height)) in pages.iter().enumerate() {
-        let bottom = y + page_height * zoom;
-        if bottom >= top && y <= top + height {
-            first = first.min(index);
-            end = index + 1;
-        } else if y > top + height {
-            break;
-        }
-        y = bottom + GAP;
-    }
-    first..end
-}
-
-fn current_page_at(pages: &[(f32, f32)], zoom: f32, top: f32, height: f32) -> usize {
-    let last = pages.len() - 1;
-    let document_end = page_top(pages, zoom, pages.len());
-    // A short final page cannot be scrolled to the top; reaching the end
-    // must still make it the current page.
-    if top + height >= document_end - 1.0 {
-        last
-    } else {
-        position_at(pages, zoom, top + height / 2.0).page
-    }
 }
 
 struct Bitmap {
@@ -409,7 +327,8 @@ impl ReaderView {
         let y = find_search::page_rect(hit, self.pages[hit.page]).1;
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
-            self.page_top(hit.page) + y * self.scale - height * 0.25,
+            self.layout()
+                .offset_for(Position { page: hit.page, y }, height * 0.25),
         );
         self.sync_viewport(cx);
         cx.notify();
@@ -580,7 +499,13 @@ impl ReaderView {
         );
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
-            self.page_top(position.page) + y * self.scale,
+            self.layout().offset_for(
+                Position {
+                    page: position.page,
+                    y,
+                },
+                0.0,
+            ),
         );
     }
 
@@ -614,11 +539,7 @@ impl ReaderView {
     /// Page and PDF-point offset at the top of the viewport.
     pub fn reading_position(&self) -> (usize, f32) {
         let (top, _, _) = self.viewport();
-        let position = if self.pages.is_empty() {
-            Position { page: 0, y: 0.0 }
-        } else {
-            self.position_at(top)
-        };
+        let position = self.layout().position_at(top);
         (position.page, position.y)
     }
     pub fn page_count(&self) -> Option<usize> {
@@ -647,46 +568,13 @@ impl ReaderView {
         self.selection.selected_text()
     }
 
-    fn page_top(&self, index: usize) -> f32 {
-        match self.reading_mode {
-            ReadingMode::Continuous => page_top(&self.pages, self.scale, index),
-            ReadingMode::SinglePage => 0.0,
-        }
-    }
-
-    fn position_at(&self, top: f32) -> Position {
-        match self.reading_mode {
-            ReadingMode::Continuous => position_at(&self.pages, self.scale, top),
-            ReadingMode::SinglePage => Position {
-                page: self.page_index,
-                y: (top / self.scale).clamp(0.0, self.pages[self.page_index].1),
-            },
-        }
-    }
-
-    fn visible_pages(&self, top: f32, height: f32) -> std::ops::Range<usize> {
-        match self.reading_mode {
-            ReadingMode::Continuous => visible_range(&self.pages, self.scale, top, height),
-            ReadingMode::SinglePage => self.page_index..self.page_index + 1,
-        }
-    }
-
-    fn maximum_scroll(&self, height: f32) -> f32 {
-        match self.reading_mode {
-            ReadingMode::Continuous => {
-                (page_top(&self.pages, self.scale, self.pages.len()) - height).max(0.0)
-            }
-            ReadingMode::SinglePage => {
-                (self.pages[self.page_index].1 * self.scale + GAP + PAGE_PADDING * 2.0 - height)
-                    .max(0.0)
-            }
-        }
+    fn layout(&self) -> PageLayout<'_> {
+        PageLayout::new(&self.pages, self.scale, self.reading_mode, self.page_index)
     }
 
     fn scroll_to(&mut self, x: f32, top: f32) {
-        let maximum = self.maximum_scroll(self.viewport().2);
-        self.scroll
-            .set_offset(point(px(-x.max(0.0)), px(-top.clamp(0.0, maximum))));
+        let (x, top) = self.layout().clamp_scroll(x, top, self.viewport().2);
+        self.scroll.set_offset(point(px(-x), px(-top)));
     }
 
     fn focus_page(&mut self, page: usize) {
@@ -708,9 +596,9 @@ impl ReaderView {
             return;
         }
         let (top, _, height) = self.viewport();
-        let position = self.position_at(top);
+        let position = self.layout().position_at(top);
         let page = if mode == ReadingMode::SinglePage && self.selected_page.is_none() {
-            current_page_at(&self.pages, self.scale, top, height)
+            self.layout().current_page_at(top, height)
         } else {
             self.page_index
         };
@@ -731,7 +619,7 @@ impl ReaderView {
         };
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
-            self.page_top(page) + y * self.scale,
+            self.layout().offset_for(Position { page, y }, 0.0),
         );
         self.sync_viewport(cx);
     }
@@ -774,20 +662,14 @@ impl ReaderView {
     fn page_viewport(&self, index: usize) -> Option<PageViewport> {
         let transform = self.selection.page_transform(index)?;
         let bounds = self.scroll.bounds();
-        let width = self.pages.get(index)?.0 * self.scale;
-        let inner_width = (f32::from(bounds.size.width) - PAGE_PADDING * 2.0).max(0.0);
-        let origin = Point {
-            x: f32::from(bounds.origin.x) as f64
-                + PAGE_PADDING as f64
-                + ((inner_width - width).max(0.0) / 2.0) as f64,
-            y: f32::from(bounds.origin.y) as f64
-                + PAGE_PADDING as f64
-                + self.page_top(index) as f64,
-        };
-        PageViewport::new(
+        self.layout().page_viewport(
+            index,
             transform,
-            self.scale as f64,
-            origin,
+            Point {
+                x: f32::from(bounds.origin.x) as f64,
+                y: f32::from(bounds.origin.y) as f64,
+            },
+            f32::from(bounds.size.width),
             Point {
                 x: -f32::from(self.scroll.offset().x) as f64,
                 y: -f32::from(self.scroll.offset().y) as f64,
@@ -837,7 +719,7 @@ impl ReaderView {
             return;
         };
         let (top, _, height) = self.viewport();
-        let visible = self.visible_pages(top, height);
+        let visible = self.layout().visible_pages(top, height);
         let Some(request) = self
             .selection
             .request_text(visible, self.document_generation)
@@ -886,30 +768,10 @@ impl ReaderView {
             self.scroll_to(-f32::from(self.scroll.offset().x), top);
         }
         let (top, _, _) = self.viewport();
-        let visible = self.visible_pages(top, height);
-        if self
-            .selected_page
-            .is_some_and(|page| !visible.contains(&page))
-        {
-            self.selected_page = None;
-        }
-        let target = if self.reading_mode == ReadingMode::SinglePage {
-            self.page_index
-        } else {
-            self.selected_page
-                .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height))
-        };
-        // When a scroll changes the fit target, keep the point at the
-        // viewport center stable. Anchoring the top instead can move the
-        // center back across the boundary and refit the previous page.
-        let anchor = if self.selected_page.is_none() && target != self.page_index {
-            height / 2.0
-        } else {
-            0.0
-        };
-        self.page_index = target;
-        let position = self.position_at(top + anchor);
-        self.apply_fit(self.page_index, position, (width, height), anchor);
+        let refit = self.layout().refit(top, height, self.selected_page);
+        self.selected_page = refit.selected_page;
+        self.page_index = refit.page;
+        self.apply_fit(refit.page, refit.position, (width, height), refit.anchor);
         self.record_position(cx);
         self.last_viewport = self.viewport();
         self.schedule(cx);
@@ -944,36 +806,19 @@ impl ReaderView {
         .detach();
     }
 
-    /// Explicit page turns remain the reading place even when short pages
-    /// share a viewport and the scroll offset cannot reach their top.
     fn position_to_save(&self) -> ReadingPosition {
-        let (visible_page, visible_y) = self.reading_position();
-        if let Some(page) = self.selected_page
-            && page != visible_page
-        {
-            return ReadingPosition { page, y: 0.0 };
-        }
-        // A short final page can be current even when the viewport's top is
-        // stuck on the preceding page. Preserve the current page in that case.
-        if self.reading_mode == ReadingMode::Continuous
-            && self.selected_page.is_none()
-            && self.page_index == self.pages.len() - 1
-            && self.page_index != visible_page
-            && self.maximum_scroll(self.viewport().2) < self.page_top(self.page_index)
-        {
-            return ReadingPosition {
-                page: self.page_index,
-                y: 0.0,
-            };
-        }
+        let (top, _, height) = self.viewport();
+        let position = self
+            .layout()
+            .position_to_save(top, height, self.selected_page);
         ReadingPosition {
-            page: visible_page,
-            y: visible_y,
+            page: position.page,
+            y: position.y,
         }
     }
 
     fn apply_fit(&mut self, page: usize, position: Position, viewport: (f32, f32), anchor: f32) {
-        if let Some(scale) = fit_scale(self.zoom_mode, self.pages[page], viewport) {
+        if let Some(scale) = self.layout().fit_scale(self.zoom_mode, page, viewport) {
             self.set_scale(scale, position, anchor);
         }
     }
@@ -989,7 +834,7 @@ impl ReaderView {
         self.failed = None;
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
-            self.page_top(position.page) + position.y * next - anchor,
+            self.layout().offset_for(position, anchor),
         );
     }
 
@@ -1019,7 +864,7 @@ impl ReaderView {
         self.apply_fit(index, Position { page: index, y }, (width, height), 0.0);
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
-            self.page_top(index) + y * self.scale,
+            self.layout().offset_for(Position { page: index, y }, 0.0),
         );
         self.record_position(cx);
         self.schedule(cx);
@@ -1053,7 +898,7 @@ impl ReaderView {
         } else {
             0.0
         };
-        self.scroll_to(x, self.page_top(page) + y * self.scale);
+        self.scroll_to(x, self.layout().offset_for(Position { page, y }, 0.0));
         self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
@@ -1080,9 +925,9 @@ impl ReaderView {
                 self.page_index
             } else {
                 self.selected_page
-                    .unwrap_or_else(|| current_page_at(&self.pages, self.scale, top, height))
+                    .unwrap_or_else(|| self.layout().current_page_at(top, height))
             };
-            let position = self.position_at(top);
+            let position = self.layout().position_at(top);
             self.apply_fit(self.page_index, position, (width, height), 0.0);
             self.schedule(cx);
         }
@@ -1095,7 +940,7 @@ impl ReaderView {
             return;
         }
         let (top, _, _) = self.viewport();
-        let position = self.position_at(top);
+        let position = self.layout().position_at(top);
         self.zoom_mode = ZoomMode::Fixed;
         self.set_scale(next, position, 0.0);
         self.schedule(cx);
@@ -1107,7 +952,7 @@ impl ReaderView {
             return;
         }
         let (top, _, height) = self.viewport();
-        let range = self.visible_pages(top, height);
+        let range = self.layout().visible_pages(top, height);
         if self.failed.is_some_and(|index| !range.contains(&index)) {
             self.failed = None;
         }
@@ -1119,7 +964,7 @@ impl ReaderView {
         let used = self.retained_bitmap_bytes();
         let index = range
             .filter(|index| !self.images.contains_key(index) && self.failed != Some(*index))
-            .min_by_key(|index| (self.page_top(*index) - top).abs() as i64);
+            .min_by_key(|index| (self.layout().page_top(*index) - top).abs() as i64);
         let Some(index) = index else {
             if self.failed.is_none() {
                 self.status = self.ready_status();
@@ -1155,7 +1000,7 @@ impl ReaderView {
                 }
                 this.in_flight = None;
                 let (top, _, height) = this.viewport();
-                if this.visible_pages(top, height).contains(&index) {
+                if this.layout().visible_pages(top, height).contains(&index) {
                     match result {
                         Ok(rendered) => {
                             let bytes = rendered.bgra.len();
@@ -1217,22 +1062,9 @@ impl Render for ReaderView {
             self.sync_viewport(cx);
         }
         let (top, _, height) = self.viewport();
-        let range = if !self.pages.is_empty() {
-            self.visible_pages(top, height)
-        } else {
-            0..0
-        };
-        let top_space = if self.reading_mode == ReadingMode::SinglePage {
-            0.0
-        } else {
-            page_top(&self.pages, self.scale, range.start)
-        };
-        let end_space = if self.reading_mode == ReadingMode::SinglePage {
-            0.0
-        } else {
-            page_top(&self.pages, self.scale, self.pages.len())
-                - page_top(&self.pages, self.scale, range.end)
-        };
+        let layout = self.layout();
+        let range = layout.visible_pages(top, height);
+        let (top_space, end_space) = layout.spacers(range.clone());
         let mut content = div()
             .w_full()
             .flex()
@@ -1542,6 +1374,7 @@ mod tests {
 
     mod find;
     mod marks;
+    mod navigation;
     mod selection;
 
     fn recent_test_window(
@@ -2895,7 +2728,7 @@ mod tests {
         cx.simulate_keystrokes(window, "s");
         reader.read_with(cx, |reader, _| {
             assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
-            assert_eq!(reader.visible_pages(0.0, 700.0), 0..1);
+            assert_eq!(reader.layout().visible_pages(0.0, 700.0), 0..1);
         });
         cx.update(|cx| {
             cx.update_window(window, |_, frame, cx| {
@@ -2953,7 +2786,7 @@ mod tests {
         reader.read_with(cx, |reader, _| {
             assert_eq!(reader.page_index(), 1);
             assert!((reader.reading_position().1 - bottom).abs() < 1.0);
-            assert_eq!(reader.visible_pages(0.0, 700.0), 1..2);
+            assert_eq!(reader.layout().visible_pages(0.0, 700.0), 1..2);
         });
         reader.update(cx, |reader, cx| reader.zoom_in(cx));
         reader.read_with(cx, |reader, _| {
@@ -3016,113 +2849,6 @@ mod tests {
         });
         reader.update(cx, |reader, cx| reader.previous_page(cx));
         assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 0);
-    }
-
-    #[gpui_kit::test]
-    fn reading_keys_navigate_and_zoom_without_screenshots(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-        });
-        let window = cx.add_window(|window, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                window.scale_factor(),
-                cx,
-            )
-        });
-        cx.run_until_parked();
-        window
-            .read_with(cx, |reader, _| assert_eq!(reader.page_count(), Some(100)))
-            .unwrap();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
-                .unwrap();
-        });
-        cx.simulate_keystrokes(window.into(), "right =");
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert_eq!(reader.scale(), 1.25);
-            })
-            .unwrap();
-    }
-
-    #[gpui_kit::test]
-    fn reader_navigation_is_window_local(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            gpui_kit::init(cx);
-            bind_reader_keys(cx);
-        });
-        let first = cx.add_window(|window, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                window.scale_factor(),
-                cx,
-            )
-        });
-        let second = cx.add_window(|window, cx| Preview::new(None, window.scale_factor(), cx));
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(first.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-            cx.update_window(second.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        cx.simulate_keystrokes(first.into(), "right =");
-        first
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_index(), 1);
-                assert_eq!(reader.scale(), 1.25);
-            })
-            .unwrap();
-        second
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.page_count(), None);
-                assert_eq!(reader.page_index(), 0);
-                assert_eq!(reader.scale(), 1.0);
-            })
-            .unwrap();
-    }
-
-    #[gpui_kit::test]
-    fn fit_width_tracks_window_resize_and_manual_zoom_exits_fit(cx: &mut TestAppContext) {
-        cx.update(gpui_kit::init);
-        let window = cx.add_window(|window, cx| {
-            Preview::new(
-                Some(PathBuf::from("examples/readme-sample.pdf")),
-                window.scale_factor(),
-                cx,
-            )
-        });
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        window
-            .update(cx, |reader, _, cx| reader.fit_width(cx))
-            .unwrap();
-        let before = window.read_with(cx, |reader, _| reader.scale()).unwrap();
-        assert!(before > 0.25);
-
-        cx.simulate_window_resize(window.into(), size(px(600.0), px(700.0)));
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        let after = window.read_with(cx, |reader, _| reader.scale()).unwrap();
-        assert!(after < before, "a narrower viewport must reduce fit width");
-        window
-            .update(cx, |reader, _, cx| reader.zoom_in(cx))
-            .unwrap();
-        window
-            .read_with(cx, |reader, _| {
-                assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
-                assert!((reader.scale() - after * 1.25).abs() < 0.01);
-            })
-            .unwrap();
     }
 
     #[gpui_kit::test]
@@ -3291,56 +3017,6 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn fit_page_scrolling_does_not_jump_back_across_a_page_boundary(cx: &mut TestAppContext) {
-        let path = PathBuf::from("target/test-fixtures/fit-scroll-regression.pdf");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, three_page_pdf([(384, 504), (378, 288), (352, 294)])).unwrap();
-        cx.update(gpui_kit::init);
-        let window =
-            cx.add_window(|window, cx| Preview::new(Some(path), window.scale_factor(), cx));
-        cx.run_until_parked();
-        cx.update(|cx| {
-            cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                .unwrap();
-        });
-        window
-            .update(cx, |reader, _, cx| reader.fit_page(cx))
-            .unwrap();
-
-        let mut highest = 0;
-        for _ in 0..20 {
-            window
-                .update(cx, |reader, _, cx| reader.scroll_by(80.0, cx))
-                .unwrap();
-            cx.run_until_parked();
-            cx.update(|cx| {
-                cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                    .unwrap();
-            });
-            let state = window
-                .read_with(cx, |reader, _| (reader.page_index(), reader.scale()))
-                .unwrap();
-            assert!(
-                state.0 >= highest,
-                "fit-page went backwards without scrolling backwards"
-            );
-            highest = state.0;
-            cx.update(|cx| {
-                cx.update_window(window.into(), |_, frame, cx| frame.render_frame(cx))
-                    .unwrap();
-            });
-            assert_eq!(
-                window
-                    .read_with(cx, |reader, _| (reader.page_index(), reader.scale()))
-                    .unwrap(),
-                state,
-                "fit-page changed without input"
-            );
-        }
-        assert!(highest >= 1, "scrolling must reach page two");
-    }
-
-    #[gpui_kit::test]
     fn loading_errors_leave_the_reader_without_a_document(cx: &mut TestAppContext) {
         let reader =
             cx.new(|cx| Preview::new(Some(PathBuf::from("examples/missing.pdf")), 1.0, cx));
@@ -3379,91 +3055,5 @@ mod tests {
         assert!(scale < 8.0);
         assert!(scale > 7.0);
         assert!(595.44 * 842.04 * scale * scale <= 32_000_000.0);
-    }
-
-    #[test]
-    fn long_document_only_lays_out_visible_pages() {
-        let pages = vec![(612.0, 792.0); 1000];
-        assert_eq!(visible_range(&pages, 1.0, 0.0, 700.0), 0..1);
-        assert_eq!(
-            visible_range(&pages, 1.0, page_top(&pages, 1.0, 500), 700.0),
-            500..501
-        );
-        assert_eq!(
-            visible_range(&pages, 1.0, page_top(&pages, 1.0, 999), 700.0),
-            999..1000
-        );
-    }
-
-    #[test]
-    fn current_page_ignores_a_sliver_but_counts_a_short_final_page() {
-        let pages = [(600.0, 1200.0), (300.0, 400.0), (600.0, 180.0)];
-        let zoom = 1.0;
-        // Ten points of the previous page are visible above page two.
-        assert_eq!(
-            current_page_at(&pages, zoom, page_top(&pages, zoom, 1) - 10.0, 450.0),
-            1
-        );
-        // The last page is shorter than half a viewport, but at the document
-        // end it is still the page the reader has reached.
-        let height = 700.0;
-        assert_eq!(
-            current_page_at(
-                &pages,
-                zoom,
-                page_top(&pages, zoom, pages.len()) - height,
-                height
-            ),
-            2
-        );
-    }
-
-    #[test]
-    fn page_local_position_survives_zoom() {
-        let pages = vec![(100.0, 200.0), (150.0, 300.0)];
-        let position = position_at(&pages, 1.0, 216.0 + 75.0);
-        assert_eq!(position, Position { page: 1, y: 75.0 });
-        assert_eq!(
-            position_at(&pages, 2.0, page_top(&pages, 2.0, 1) + 150.0),
-            position
-        );
-    }
-
-    #[test]
-    fn fit_uses_current_page_and_inner_viewport() {
-        let viewport = (632.0, 832.0);
-        assert_eq!(
-            fit_scale(ZoomMode::FitWidth, (600.0, 1200.0), viewport),
-            Some(1.0)
-        );
-        assert_eq!(
-            fit_scale(ZoomMode::FitPage, (600.0, 1200.0), viewport),
-            Some(2.0 / 3.0)
-        );
-        assert_eq!(
-            fit_scale(ZoomMode::FitWidth, (300.0, 400.0), viewport),
-            Some(2.0)
-        );
-        assert_eq!(
-            fit_scale(ZoomMode::FitPage, (300.0, 400.0), viewport),
-            Some(2.0)
-        );
-        assert_eq!(fit_scale(ZoomMode::Fixed, (300.0, 400.0), viewport), None);
-        assert_eq!(
-            fit_scale(ZoomMode::FitWidth, (300.0, 400.0), (0.0, 800.0)),
-            None
-        );
-        assert_eq!(
-            fit_scale(ZoomMode::FitPage, (300.0, 400.0), (632.0, 20.0)),
-            None
-        );
-        assert_eq!(
-            fit_scale(ZoomMode::FitWidth, (600.0, 1200.0), (332.0, 832.0)),
-            Some(0.5)
-        );
-        assert_eq!(
-            fit_scale(ZoomMode::FitPage, (600.0, 1200.0), (632.0, 632.0)),
-            Some(0.5)
-        );
     }
 }

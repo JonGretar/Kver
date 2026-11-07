@@ -65,8 +65,9 @@ panels, window chrome, the palette, or Recent dialogs. The former public
 `src/reader/commands.rs` declares document commands independently of physical
 bindings. `src/reader/selection.rs` owns text selection and its page-text cache
 as ordinary Rust state, without a separate entity or view back-reference.
-Navigation and raster rules still share the reader implementation;
-their deeper separation is the remaining modularization work.
+`src/reader/navigation.rs` owns shared layout and navigation-coordinate rules.
+The reader still coordinates navigation commands, restoration, and raster work;
+raster scheduling and cache ownership remain in the view.
 `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
 entries and destinations, and premultiplied BGRA pixels, not Hayro types, to
@@ -78,6 +79,17 @@ See the [rendering validation](rendering-validation.md) for the backend choice
 and accepted limitations.
 
 ### Rendering and navigation
+
+`PageLayout` borrows the reader's page dimensions, logical scale, reading mode,
+and current page. It derives visible ranges, virtualized spacers, scroll bounds,
+page-to-window transforms, fit scales, refit anchors, and positions to save.
+It retains no separate mutable viewport and depends on neither GPUI nor the
+PDF backend. Find, outline, and saved-position jumps retain their distinct
+placement policies while using the same page-local-to-scroll conversion.
+`ReaderView` applies those results to its scroll handle, invalidates bitmaps
+when scale changes, and coordinates selection and persistence.
+Pure rules are tested under `src/reader/navigation/`; reader integration
+tests exercise the real input, rendering, and history paths.
 
 The reader loads page dimensions in background work. Continuous mode lays out
 the document with spacers around visible pages; Single Page mode lays out only

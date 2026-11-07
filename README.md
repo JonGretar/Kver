@@ -44,13 +44,13 @@ You can also edit `~/Library/Application Support/com.JonGretar.Kver/config.toml`
 on macOS. For example:
 
 ```toml
-[appearance]
-theme_mode = "dark"
+[application]
+appearance = "dark"
 ```
 
-Valid `theme_mode` values are `"system"`, `"light"`, and `"dark"`. No file is
+Valid `appearance` values are `"system"`, `"light"`, and `"dark"`. No file is
 needed for the default System choice. Changes made directly to the file take
-effect after restarting Kver; live external-edit support is planned separately.
+effect while Kver is running; invalid edits leave the last valid settings active.
 
 ## Goals
 

@@ -16,9 +16,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Close the active window with Command-W or the Window menu on macOS.
 - Choose whether closing the last window quits Kver; on macOS, leave it running to reopen from the Dock, create a new window, or open a PDF from Finder.
 - Choose whether newly opened PDFs start at 100%, Fit Width, or Fit Page in Settings without changing PDFs already open.
+- Choose Continuous or Page as the reading view for newly opened PDFs.
+- Save a preference for reopening windows on startup for a future release; window restoration is not implemented yet.
 
 ### Changed
 
+- Split Settings into Application, Reader, and Persistence pages with working sidebar navigation and matching config sections. Existing config files remain readable.
+- Rename the appearance config key to `[application].appearance`; existing `theme_mode` values remain readable and migrate on save.
 - Apply valid edits to the settings file while Kver is open; keep the last working appearance and show an error during incomplete or invalid edits without overwriting the file.
 - Show Contents before Find in the sidebar and open Contents by default the first time the sidebar is shown.
 

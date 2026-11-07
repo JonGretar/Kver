@@ -8,12 +8,13 @@ use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, TitleBar, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::DialogEntrance,
+    list::ListItem,
     menu::{DropdownMenu as _, PopupMenuItem},
     notification::Notification,
     scroll::ScrollableElement as _,
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
     switch::Switch,
     theme::{Theme, ThemeMode},
+    tree::{TreeItem, TreeState, tree},
 };
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, KeyBinding,
@@ -23,7 +24,7 @@ use gpui_kit::{
 use crate::{
     reader_windows::CloseWindow,
     recent,
-    settings::{self, AppPaths, AppSettings, Appearance, InitialZoom, SettingsChange},
+    settings::{self, AppPaths, AppSettings, Appearance, InitialZoom, ReadingView, SettingsChange},
 };
 
 gpui::actions!(kver, [ShowSettings, CloseSettings]);
@@ -69,6 +70,10 @@ impl SettingsState {
         self.settings.initial_zoom()
     }
 
+    pub fn reading_view(&self) -> ReadingView {
+        self.settings.reading_view()
+    }
+
     pub fn ready(&self) -> bool {
         self.ready
     }
@@ -81,6 +86,10 @@ impl SettingsState {
         let updated = match change {
             SettingsChange::Appearance(choice) => self.settings.with_appearance(choice),
             SettingsChange::InitialZoom(choice) => self.settings.with_initial_zoom(choice),
+            SettingsChange::ReadingView(choice) => self.settings.with_reading_view(choice),
+            SettingsChange::ReopenLastWindowsOnStartup(reopen) => {
+                self.settings.with_reopen_last_windows_on_startup(reopen)
+            }
             SettingsChange::QuitWhenLastWindowCloses(quit) => {
                 self.settings.with_quit_when_last_window_closes(quit)
             }
@@ -350,10 +359,30 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
                 focus.focus(window, cx);
                 let settings = state(cx);
                 cx.observe(&settings, |_, _, cx| cx.notify()).detach();
+                let navigation = cx.new(|cx| {
+                    let mut tree = TreeState::new(cx).items(vec![
+                        TreeItem::new("application", "Application")
+                            .expanded(true)
+                            .children([
+                                TreeItem::new("theme", "Theme"),
+                                TreeItem::new("windows", "Windows"),
+                            ]),
+                        TreeItem::new("reader", "Reader")
+                            .expanded(true)
+                            .child(TreeItem::new("reading-experience", "Reading Experience")),
+                        TreeItem::new("persistence", "Persistence")
+                            .expanded(true)
+                            .child(TreeItem::new("reading-history", "Reading History")),
+                    ]);
+                    tree.set_selected_index(Some(0), cx);
+                    tree
+                });
+                cx.observe(&navigation, |_, _, cx| cx.notify()).detach();
                 SettingsView {
                     focus,
                     choice_focus,
                     zoom_focus,
+                    navigation,
                     settings,
                     clearing: false,
                     clear_error: None,
@@ -369,12 +398,92 @@ struct SettingsView {
     focus: FocusHandle,
     choice_focus: FocusHandle,
     zoom_focus: FocusHandle,
+    navigation: Entity<TreeState>,
     settings: Entity<SettingsState>,
     clearing: bool,
     clear_error: Option<String>,
 }
 
 impl SettingsView {
+    fn page(&self, cx: &App) -> SettingsPage {
+        match self
+            .navigation
+            .read(cx)
+            .selected_item()
+            .map(|item| item.id.as_ref())
+        {
+            Some("reader" | "reading-experience") => SettingsPage::Reader,
+            Some("persistence" | "reading-history") => SettingsPage::Persistence,
+            _ => SettingsPage::Application,
+        }
+    }
+
+    fn render_navigation(&self) -> impl IntoElement {
+        let selection = self.navigation.clone();
+        tree(&self.navigation, move |index, entry, _, _, _| {
+            let selection = selection.clone();
+            let disclosure = selection.clone();
+            let expanded = entry.is_expanded();
+            ListItem::new(entry.item().id.clone())
+                .accessibility_label(entry.item().label.clone())
+                .h_8()
+                .text_xs()
+                .pl(gpui::rems(entry.depth() as f32))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(if entry.is_folder() {
+                            Button::new(format!("disclose-{}", entry.item().id))
+                                .ghost()
+                                .xsmall()
+                                .icon(if expanded {
+                                    IconName::ChevronDown
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .accessibility_label(format!(
+                                    "{} {}",
+                                    if expanded { "Collapse" } else { "Expand" },
+                                    entry.item().label
+                                ))
+                                .on_click(move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    disclosure.update(cx, |tree, cx| {
+                                        tree.set_selected_index(Some(index), cx);
+                                        tree.focus(window, cx);
+                                    });
+                                    if expanded {
+                                        window.dispatch_action(
+                                            Box::new(gpui::base::actions::SelectLeft),
+                                            cx,
+                                        );
+                                    } else {
+                                        window.dispatch_action(
+                                            Box::new(gpui::base::actions::SelectRight),
+                                            cx,
+                                        );
+                                    }
+                                })
+                                .into_any_element()
+                        } else {
+                            div().w_5().flex_shrink_0().into_any_element()
+                        })
+                        .child(entry.item().label.clone()),
+                )
+                .on_click(move |_, window, cx| {
+                    // Selecting a page must not also collapse its child groups.
+                    // Tree retains arrow-key selection and disclosure behavior.
+                    cx.stop_propagation();
+                    selection.update(cx, |tree, cx| {
+                        tree.set_selected_index(Some(index), cx);
+                        tree.focus(window, cx);
+                    });
+                })
+        })
+    }
+
     fn clear_history(&mut self, cx: &mut Context<Self>) {
         if self.clearing {
             return;
@@ -405,8 +514,26 @@ impl SettingsView {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsPage {
+    Application,
+    Reader,
+    Persistence,
+}
+
+impl SettingsPage {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Application => "Application",
+            Self::Reader => "Reader",
+            Self::Persistence => "Persistence",
+        }
+    }
+}
+
 impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let page = self.page(cx);
         let settings = self.settings.read(cx);
         let selected = settings.appearance();
         let quit_on_close = settings.quit_when_last_window_closes();
@@ -415,8 +542,10 @@ impl Render for SettingsView {
         let state = self.settings.clone();
         let close_state = self.settings.clone();
         let zoom_state = self.settings.clone();
-        let choice_focus = self.choice_focus.clone();
-        let zoom_focus = self.zoom_focus.clone();
+        let reading_view = settings.reading_view();
+        let view_state = self.settings.clone();
+        let reopen = settings.settings.reopen_last_windows_on_startup();
+        let reopen_state = self.settings.clone();
         let reset_state = self.settings.clone();
         let reset_focus = self.choice_focus.clone();
         let remember = settings.remember_reading_history();
@@ -440,33 +569,19 @@ impl Render for SettingsView {
                     .flex()
                     .min_h_0()
                     .child(
-                        Sidebar::new("settings-sidebar")
-                            .w_48()
+                        div()
+                            .id("settings-sidebar")
+                            .test_support()
+                            .role(gpui::Role::Navigation)
+                            .aria_label("Settings pages")
+                            .w_56()
+                            .flex_shrink_0()
                             .h_full()
-                            .collapsible(false)
-                            .collapsed(false)
-                            .child(
-                                SidebarMenu::new().child(
-                                    SidebarMenuItem::new("General")
-                                        .active(true)
-                                        .default_open(true)
-                                        .click_to_open(true)
-                                        .on_click({
-                                            let focus = choice_focus.clone();
-                                            move |_, window, cx| window.focus(&focus, cx)
-                                        })
-                                        .children([
-                                            SidebarMenuItem::new("Appearance").on_click({
-                                                let focus = choice_focus.clone();
-                                                move |_, window, cx| window.focus(&focus, cx)
-                                            }),
-                                            SidebarMenuItem::new("Initial Zoom").on_click({
-                                                let focus = zoom_focus.clone();
-                                                move |_, window, cx| window.focus(&focus, cx)
-                                            }),
-                                        ]),
-                                ),
-                            ),
+                            .p_2()
+                            .bg(cx.theme().sidebar)
+                            .border_r_1()
+                            .border_color(cx.theme().border)
+                            .child(self.render_navigation()),
                     )
                     .child(
                         div()
@@ -482,9 +597,9 @@ impl Render for SettingsView {
                                     .border_b_1()
                                     .border_color(cx.theme().border)
                                     .font_medium()
-                                    .child("Settings"),
+                                    .child(page.label()),
                             )
-                            .child(
+                            .children((page != SettingsPage::Persistence).then(||
                                 div()
                                     .p_4()
                                     .flex()
@@ -497,9 +612,9 @@ impl Render for SettingsView {
                                             .border_color(cx.theme().border)
                                             .text_sm()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child("Theme"),
+                                            .child(if page == SettingsPage::Application { "Theme" } else { "Reading Experience" }),
                                     )
-                                    .child(
+                                    .children((page == SettingsPage::Application).then(||
                                         div()
                                             .flex()
                                             .items_center()
@@ -567,12 +682,9 @@ impl Render for SettingsView {
                                                             ),
                                                     ),
                                             ),
-                                    )
-                                    .child(
+                                    ))
+                                    .children((page == SettingsPage::Reader).then(||
                                         div()
-                                            .pt_2()
-                                            .border_t_1()
-                                            .border_color(cx.theme().border)
                                             .flex()
                                             .items_center()
                                             .justify_between()
@@ -616,9 +728,33 @@ impl Render for SettingsView {
                                                         },
                                                     ),
                                             ),
-                                    ),
-                            )
-                            .child(
+                                    ))
+                                    .children((page == SettingsPage::Reader).then(||
+                                        preference_row(
+                                            "Reading view",
+                                            "Set the layout for newly opened PDFs. Open readers keep their view.",
+                                            Button::new("reading-view-choice")
+                                                .small()
+                                                .outline()
+                                                .label(reading_view.label())
+                                                .accessibility_label(format!("Reading view: {}", reading_view.label()))
+                                                .dropdown_caret(true)
+                                                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |mut menu, _, _| {
+                                                    for choice in [ReadingView::Continuous, ReadingView::Page] {
+                                                        let state = view_state.clone();
+                                                        menu = menu.item(PopupMenuItem::new(choice.label())
+                                                            .checked(choice == reading_view)
+                                                            .on_click(move |_, _, cx| {
+                                                                state.update(cx, |settings, cx| settings.choose(SettingsChange::ReadingView(choice), cx));
+                                                            }));
+                                                    }
+                                                    menu
+                                                }),
+                                            cx,
+                                        )
+                                    )),
+                            ))
+                            .children((page == SettingsPage::Application).then(||
                                 div()
                                     .mx_4()
                                     .pb_2()
@@ -627,8 +763,8 @@ impl Render for SettingsView {
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
                                     .child("Windows"),
-                            )
-                            .child(
+                            ))
+                            .children((page == SettingsPage::Application).then(||
                                 div()
                                     .p_4()
                                     .flex()
@@ -653,18 +789,32 @@ impl Render for SettingsView {
                                                 close_state.update(cx, |settings, cx| settings.choose(SettingsChange::QuitWhenLastWindowCloses(*quit), cx));
                                             }),
                                     ),
-                            )
-                            .child(
+                            ))
+                            .children((page == SettingsPage::Application).then(||
+                                div().px_4().pb_4().child(preference_row(
+                                    "Reopen last windows on startup",
+                                    "Saved for a future release. Restoring windows is not implemented yet.",
+                                    Switch::new("reopen-last-windows")
+                                        .accessibility_label("Reopen last windows on startup")
+                                        .checked(reopen)
+                                        .on_change(move |reopen, _, cx| {
+                                            reopen_state.update(cx, |settings, cx| settings.choose(SettingsChange::ReopenLastWindowsOnStartup(*reopen), cx));
+                                        }),
+                                    cx,
+                                ))
+                            ))
+                            .children((page == SettingsPage::Persistence).then(||
                                 div()
                                     .mx_4()
+                                    .mt_4()
                                     .pb_2()
                                     .border_b_1()
                                     .border_color(cx.theme().border)
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Reading history"),
-                            )
-                            .child(
+                                    .child("Reading History"),
+                            ))
+                            .children((page == SettingsPage::Persistence).then(||
                                 div()
                                     .p_4()
                                     .flex()
@@ -689,8 +839,8 @@ impl Render for SettingsView {
                                                 history_state.update(cx, |settings, cx| settings.choose_history(*next, cx));
                                             }),
                                     ),
-                            )
-                            .child(
+                            ))
+                            .children((page == SettingsPage::Persistence).then(||
                                 div()
                                     .p_4()
                                     .flex()
@@ -704,7 +854,7 @@ impl Render for SettingsView {
                                             .flex()
                                             .flex_col()
                                             .gap_1()
-                                            .child(div().text_sm().font_medium().child("Clear Reading History"))
+                                            .child(div().text_sm().font_medium().child("Erase reading history"))
                                             .child(div().text_sm().text_color(cx.theme().muted_foreground).child("Erase saved data for every PDF. PDF files and app preferences stay unchanged.")),
                                     )
                                     .child(
@@ -732,14 +882,16 @@ impl Render for SettingsView {
                                                 });
                                             }),
                                     ),
-                            )
-                            .when_some(clear_error, |view, message| {
+                            ))
+                            .when_some(clear_error.filter(|_| page == SettingsPage::Persistence), |view, message| {
                                 view.child(
                                     div()
                                         .id("clear-history-error")
                                         .test_support()
                                         .role(gpui::Role::Status)
                                         .aria_label(message.clone())
+                                        .px_4()
+                                        .py_2()
                                         .text_sm()
                                         .text_color(cx.theme().danger)
                                         .child(message),
@@ -752,6 +904,8 @@ impl Render for SettingsView {
                                         .test_support()
                                         .role(gpui::Role::Status)
                                         .aria_label(message.clone())
+                                        .px_4()
+                                        .py_2()
                                         .text_sm()
                                         .text_color(cx.theme().danger)
                                         .child(message),
@@ -761,6 +915,35 @@ impl Render for SettingsView {
             )
             .track_focus(&self.focus)
     }
+}
+
+fn preference_row(
+    label: &'static str,
+    description: &'static str,
+    control: impl IntoElement,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(div().text_sm().font_medium().child(label))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(description),
+                ),
+        )
+        .child(control)
 }
 
 #[cfg(test)]
@@ -795,6 +978,112 @@ mod tests {
         cx.background_executor
             .advance_clock(Duration::from_millis(400));
         cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn settings_pages_show_only_the_selected_page(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(cx, None);
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert!(frame.try_find("appearance-choice").is_some());
+                assert!(frame.try_find("initial-zoom-choice").is_none());
+                assert!(frame.try_find("remember-reading-history").is_none());
+                for target in ["reader", "reading-experience"] {
+                    frame.click(target, cx);
+                    assert!(frame.try_find("appearance-choice").is_none());
+                    assert!(frame.try_find("initial-zoom-choice").is_some());
+                    assert!(frame.try_find("reading-view-choice").is_some());
+                    assert!(frame.try_find("remember-reading-history").is_none());
+                }
+                for target in ["persistence", "reading-history"] {
+                    frame.click(target, cx);
+                    assert!(frame.try_find("appearance-choice").is_none());
+                    assert!(frame.try_find("initial-zoom-choice").is_none());
+                    assert!(frame.try_find("remember-reading-history").is_some());
+                }
+                for target in ["application", "theme", "windows"] {
+                    frame.click(target, cx);
+                    assert!(frame.try_find("appearance-choice").is_some());
+                    assert!(frame.try_find("quit-on-last-close").is_some());
+                    assert!(frame.try_find("initial-zoom-choice").is_none());
+                }
+                // Arrow-key selection switches pages without leaving the tree.
+                frame.press("down", cx);
+                assert!(frame.try_find("initial-zoom-choice").is_some());
+                frame.press("down", cx);
+                frame.press("down", cx);
+                assert!(frame.try_find("remember-reading-history").is_some());
+            })
+            .unwrap();
+        });
+    }
+
+    #[gpui_kit::test]
+    fn new_preferences_persist_and_follow_live_file_edits(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(
+                cx,
+                Some(AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("reopen-last-windows", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            settings::load(&config)
+                .unwrap()
+                .reopen_last_windows_on_startup()
+        );
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.click("reader", cx);
+                frame.click("reading-view-choice", cx);
+                frame.press("down", cx);
+                frame.press("down", cx);
+                frame.press("enter", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            settings::load(&config).unwrap().reading_view(),
+            ReadingView::Page
+        );
+        std::fs::write(&config, "[application]\nreopen_last_windows_on_startup = false\n[reader]\nreading_view = 'continuous'\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(
+                    frame.find("reading-view-choice").label(),
+                    Some("Reading view: Continuous")
+                );
+                frame.click("application", cx);
+                assert_eq!(frame.find("reopen-last-windows").checked(), Some(false));
+            })
+            .unwrap();
+        });
     }
 
     #[gpui_kit::test]
@@ -845,6 +1134,7 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(settings_window, |_, frame, cx| {
                 frame.render_frame(cx);
+                frame.click("reading-history", cx);
                 frame.click("remember-reading-history", cx);
             })
             .unwrap();
@@ -1124,8 +1414,7 @@ mod tests {
                     Some("Appearance: System")
                 );
                 assert!(frame.try_find("appearance-reset").is_none());
-                frame.within("settings-sidebar").click("0-0-0", cx);
-                assert_eq!(frame.find("appearance-choice").focused(), Some(true));
+                frame.within("settings-sidebar").click("theme", cx);
                 for _ in 0..6 {
                     if frame.find("appearance-choice").focused() == Some(true) {
                         break;
@@ -1378,11 +1667,19 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(window, |_, frame, cx| {
                 frame.render_frame(cx);
+                frame
+                    .within("settings-sidebar")
+                    .click("reading-experience", cx);
                 assert_eq!(
                     frame.find("initial-zoom-choice").label(),
                     Some("Initial Zoom: Fit Width")
                 );
-                frame.within("settings-sidebar").click("0-0-1", cx);
+                for _ in 0..6 {
+                    if frame.find("initial-zoom-choice").focused() == Some(true) {
+                        break;
+                    }
+                    frame.press("tab", cx);
+                }
                 assert_eq!(frame.find("initial-zoom-choice").focused(), Some(true));
                 frame.press("enter", cx);
             })

@@ -116,6 +116,40 @@ impl InitialZoom {
     }
 }
 
+/// Default layout for a newly opened document; open readers keep their view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReadingView {
+    #[default]
+    Continuous,
+    Page,
+}
+
+impl ReadingView {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Continuous => "Continuous",
+            Self::Page => "Page",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::Page => "page",
+        }
+    }
+
+    fn parse(key: &str) -> Result<Self, String> {
+        match key {
+            "continuous" => Ok(Self::Continuous),
+            "page" => Ok(Self::Page),
+            _ => Err(format!(
+                "Unknown reading view {key:?}; use continuous or page"
+            )),
+        }
+    }
+}
+
 /// The complete set of preferences understood by this version of Kver.
 /// Unknown TOML entries remain in the file, but are not applied as settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,6 +158,8 @@ pub struct AppSettings {
     remember_reading_history: bool,
     quit_when_last_window_closes: bool,
     initial_zoom: InitialZoom,
+    reopen_last_windows_on_startup: bool,
+    reading_view: ReadingView,
 }
 
 impl AppSettings {
@@ -163,12 +199,45 @@ impl AppSettings {
         self
     }
 
+    pub fn reopen_last_windows_on_startup(self) -> bool {
+        self.reopen_last_windows_on_startup
+    }
+
+    pub fn with_reopen_last_windows_on_startup(mut self, reopen: bool) -> Self {
+        self.reopen_last_windows_on_startup = reopen;
+        self
+    }
+
+    pub fn reading_view(self) -> ReadingView {
+        self.reading_view
+    }
+
+    pub fn with_reading_view(mut self, view: ReadingView) -> Self {
+        self.reading_view = view;
+        self
+    }
+
     fn from_document(document: &DocumentMut) -> Result<Self, String> {
+        let application = table_in(document, "application")?;
+        let reader = table_in(document, "reader")?;
         Ok(Self {
             appearance: appearance_in(document)?,
             remember_reading_history: history_in(document)?,
             quit_when_last_window_closes: quit_when_last_window_closes_in(document)?,
             initial_zoom: initial_zoom_in(document)?,
+            reopen_last_windows_on_startup: bool_in(
+                application.and_then(|table| table.get("reopen_last_windows_on_startup")),
+                false,
+                "[application].reopen_last_windows_on_startup",
+            )?,
+            reading_view: match reader.and_then(|table| table.get("reading_view")) {
+                None => ReadingView::default(),
+                Some(value) => ReadingView::parse(
+                    value
+                        .as_str()
+                        .ok_or("Settings [reader].reading_view must be a string")?,
+                )?,
+            },
         })
     }
 }
@@ -180,6 +249,8 @@ impl Default for AppSettings {
             remember_reading_history: true,
             quit_when_last_window_closes: true,
             initial_zoom: InitialZoom::default(),
+            reopen_last_windows_on_startup: false,
+            reading_view: ReadingView::default(),
         }
     }
 }
@@ -191,63 +262,130 @@ pub enum SettingsChange {
     RememberReadingHistory(bool),
     QuitWhenLastWindowCloses(bool),
     InitialZoom(InitialZoom),
+    ReopenLastWindowsOnStartup(bool),
+    ReadingView(ReadingView),
 }
 
 impl SettingsChange {
     fn apply(self, document: &mut DocumentMut) {
-        match self {
-            Self::Appearance(appearance) => {
-                if document.get("appearance").is_none() {
-                    document["appearance"] = Item::Table(Table::new());
-                }
-                if let Some(existing) = document["appearance"]["theme_mode"].as_value_mut() {
-                    // Replacing an Item loses its inline comment; keep its decor.
-                    let decor = existing.decor().clone();
-                    *existing = appearance.key().into();
-                    *existing.decor_mut() = decor;
-                } else {
-                    document["appearance"]["theme_mode"] = value(appearance.key());
-                }
-            }
-            Self::RememberReadingHistory(remember) => {
-                if document.get("reading_history").is_none() {
-                    document["reading_history"] = Item::Table(Table::new());
-                }
-                if let Some(existing) = document["reading_history"]["remember"].as_value_mut() {
-                    let decor = existing.decor().clone();
-                    *existing = remember.into();
-                    *existing.decor_mut() = decor;
-                } else {
-                    document["reading_history"]["remember"] = value(remember);
-                }
-            }
+        let (section, key, updated) = match self {
+            Self::Appearance(choice) => ("application", "appearance", value(choice.key())),
+            Self::RememberReadingHistory(remember) => ("persistence", "remember", value(remember)),
             Self::QuitWhenLastWindowCloses(quit) => {
-                if document.get("windows").is_none() {
-                    document["windows"] = Item::Table(Table::new());
-                }
-                if let Some(existing) =
-                    document["windows"]["quit_when_last_window_closes"].as_value_mut()
-                {
-                    let decor = existing.decor().clone();
-                    *existing = quit.into();
-                    *existing.decor_mut() = decor;
-                } else {
-                    document["windows"]["quit_when_last_window_closes"] = value(quit);
-                }
+                ("application", "quit_when_last_window_closes", value(quit))
             }
-            Self::InitialZoom(zoom) => {
-                if document.get("reader").is_none() {
-                    document["reader"] = Item::Table(Table::new());
-                }
-                if let Some(existing) = document["reader"]["initial_zoom"].as_value_mut() {
-                    let decor = existing.decor().clone();
-                    *existing = zoom.key().into();
-                    *existing.decor_mut() = decor;
-                } else {
-                    document["reader"]["initial_zoom"] = value(zoom.key());
-                }
-            }
+            Self::InitialZoom(zoom) => ("reader", "initial_zoom", value(zoom.key())),
+            Self::ReopenLastWindowsOnStartup(reopen) => (
+                "application",
+                "reopen_last_windows_on_startup",
+                value(reopen),
+            ),
+            Self::ReadingView(view) => ("reader", "reading_view", value(view.key())),
+        };
+        if document.get(section).is_none() {
+            document[section] = Item::Table(Table::new());
         }
+        let mut updated = updated;
+        // Preserve inline comments when replacing a known setting.
+        if let Some(existing) = document[section].get(key).and_then(Item::as_value)
+            && let Some(value) = updated.as_value_mut()
+        {
+            *value.decor_mut() = existing.decor().clone();
+        }
+        document[section][key] = updated;
+    }
+}
+
+fn table_in<'a>(document: &'a DocumentMut, section: &str) -> Result<Option<&'a Table>, String> {
+    document
+        .get(section)
+        .map(|item| {
+            item.as_table()
+                .ok_or_else(|| format!("Settings [{section}] must be a table"))
+        })
+        .transpose()
+}
+
+fn bool_in(item: Option<&Item>, default: bool, path: &str) -> Result<bool, String> {
+    item.map(|item| {
+        item.as_bool()
+            .ok_or_else(|| format!("Settings {path} must be a boolean"))
+    })
+    .unwrap_or(Ok(default))
+}
+
+/// Read old chapters until the next panel save moves their known keys.
+/// Explicit values in the new chapters take precedence.
+fn grouped_item<'a>(
+    document: &'a DocumentMut,
+    section: &str,
+    legacy: &str,
+    key: &str,
+) -> Result<Option<&'a Item>, String> {
+    let current = table_in(document, section)?;
+    let old = table_in(document, legacy)?;
+    Ok(current
+        .and_then(|table| table.get(key))
+        .or_else(|| old.and_then(|table| table.get(key))))
+}
+
+fn migrate_chapters(document: &mut DocumentMut) {
+    for (legacy, section, key) in [
+        ("appearance", "application", "theme_mode"),
+        ("windows", "application", "quit_when_last_window_closes"),
+        ("reading_history", "persistence", "remember"),
+    ] {
+        let old = document
+            .get_mut(legacy)
+            .and_then(Item::as_table_mut)
+            .and_then(|table| table.remove(key));
+        let Some(old) = old else {
+            continue;
+        };
+        if document.get(section).is_none() {
+            document[section] = Item::Table(Table::new());
+        }
+        if document[section].get(key).is_none() {
+            document[section][key] = old;
+        }
+        // Retain legacy tables (and their comments) if they have unknown content.
+        if document
+            .get(legacy)
+            .and_then(Item::as_table)
+            .is_some_and(Table::is_empty)
+            && let Some(Item::Table(old)) = document.remove(legacy)
+            && let Some(table) = document.get_mut(section).and_then(Item::as_table_mut)
+        {
+            // Keep chapter comments even when the old header disappears.
+            let prefix = old
+                .decor()
+                .prefix()
+                .and_then(|text| text.as_str())
+                .unwrap_or("");
+            let suffix = old
+                .decor()
+                .suffix()
+                .and_then(|text| text.as_str())
+                .unwrap_or("")
+                .trim();
+            let current = table
+                .decor()
+                .prefix()
+                .and_then(|text| text.as_str())
+                .unwrap_or("");
+            let combined = if suffix.is_empty() {
+                format!("{prefix}{current}")
+            } else {
+                format!("{prefix}{suffix}\n{current}")
+            };
+            table.decor_mut().set_prefix(combined);
+        }
+    }
+    if let Some(application) = document.get_mut("application").and_then(Item::as_table_mut)
+        && let Some(old) = application.remove("theme_mode")
+        && !application.contains_key("appearance")
+    {
+        application.insert("appearance", old);
     }
 }
 
@@ -277,49 +415,38 @@ fn read_document(path: &Path) -> Result<DocumentMut, String> {
 }
 
 fn appearance_in(document: &DocumentMut) -> Result<Appearance, String> {
-    let Some(appearance) = document.get("appearance") else {
-        return Ok(Appearance::System);
-    };
-    let appearance = appearance
-        .as_table()
-        .ok_or("Settings [appearance] must be a table")?;
-    match appearance.get("theme_mode") {
+    let legacy = grouped_item(document, "application", "appearance", "theme_mode")?;
+    let appearance = table_in(document, "application")?
+        .and_then(|table| table.get("appearance"))
+        .or(legacy);
+    match appearance {
         None => Ok(Appearance::System),
-        Some(theme_mode) => theme_mode
+        Some(appearance) => appearance
             .as_str()
-            .ok_or_else(|| "Settings [appearance].theme_mode must be a string".to_owned())
+            .ok_or_else(|| "Settings [application].appearance must be a string".to_owned())
             .and_then(Appearance::parse),
     }
 }
 
 fn history_in(document: &DocumentMut) -> Result<bool, String> {
-    let Some(history) = document.get("reading_history") else {
-        return Ok(true);
-    };
-    let history = history
-        .as_table()
-        .ok_or("Settings [reading_history] must be a table")?;
-    match history.get("remember") {
-        None => Ok(true),
-        Some(remember) => remember
-            .as_bool()
-            .ok_or_else(|| "Settings [reading_history].remember must be a boolean".to_owned()),
-    }
+    bool_in(
+        grouped_item(document, "persistence", "reading_history", "remember")?,
+        true,
+        "[persistence].remember",
+    )
 }
 
 fn quit_when_last_window_closes_in(document: &DocumentMut) -> Result<bool, String> {
-    let Some(windows) = document.get("windows") else {
-        return Ok(true);
-    };
-    let windows = windows
-        .as_table()
-        .ok_or("Settings [windows] must be a table")?;
-    match windows.get("quit_when_last_window_closes") {
-        None => Ok(true),
-        Some(quit) => quit.as_bool().ok_or_else(|| {
-            "Settings [windows].quit_when_last_window_closes must be a boolean".to_owned()
-        }),
-    }
+    bool_in(
+        grouped_item(
+            document,
+            "application",
+            "windows",
+            "quit_when_last_window_closes",
+        )?,
+        true,
+        "[application].quit_when_last_window_closes",
+    )
 }
 
 fn initial_zoom_in(document: &DocumentMut) -> Result<InitialZoom, String> {
@@ -348,6 +475,7 @@ pub fn save(path: &Path, change: SettingsChange) -> Result<AppSettings, String> 
     let original = read_content(path)?;
     let mut document = parse_document(path, original.as_deref())?;
     AppSettings::from_document(&document)?;
+    migrate_chapters(&mut document);
     change.apply(&mut document);
     let updated = AppSettings::from_document(&document)?;
     let parent = path
@@ -394,6 +522,108 @@ mod tests {
 
     fn load(path: &Path) -> Result<Appearance, String> {
         super::load(path).map(AppSettings::appearance)
+    }
+
+    #[test]
+    fn panel_chapters_round_trip_and_migrate_legacy_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(&path, "# theme chapter\n[appearance]\ntheme_mode = 'dark' # theme\naccent = 'violet'\n\n# windows chapter\n[windows]\nquit_when_last_window_closes = false # close\n\n# history chapter\n[reading_history]\nremember = false # privacy\n").unwrap();
+        let before = super::load(&path).unwrap();
+        assert!(!before.reopen_last_windows_on_startup());
+        assert_eq!(before.reading_view(), ReadingView::Continuous);
+        super::save(&path, SettingsChange::ReopenLastWindowsOnStartup(true)).unwrap();
+        let updated = super::save(&path, SettingsChange::ReadingView(ReadingView::Page)).unwrap();
+        assert_eq!(
+            updated,
+            before
+                .with_reopen_last_windows_on_startup(true)
+                .with_reading_view(ReadingView::Page)
+        );
+        assert_eq!(super::load(&path).unwrap(), updated);
+        let text = fs::read_to_string(&path).unwrap();
+        let document: DocumentMut = text.parse().unwrap();
+        assert_eq!(document["application"]["appearance"].as_str(), Some("dark"));
+        assert_eq!(
+            document["application"]["quit_when_last_window_closes"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(document["persistence"]["remember"].as_bool(), Some(false));
+        assert_eq!(document["reader"]["reading_view"].as_str(), Some("page"));
+        assert!(document.get("windows").is_none());
+        assert!(document.get("reading_history").is_none());
+        assert_eq!(document["appearance"]["accent"].as_str(), Some("violet"));
+        for comment in [
+            "# theme chapter",
+            "# windows chapter",
+            "# history chapter",
+            "# theme",
+            "# close",
+            "# privacy",
+        ] {
+            assert!(text.contains(comment), "lost {comment}");
+        }
+        super::save(&path, SettingsChange::ReadingView(ReadingView::Continuous)).unwrap();
+        super::save(&path, SettingsChange::ReopenLastWindowsOnStartup(false)).unwrap();
+        assert_eq!(super::load(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn new_chapters_take_precedence_and_reject_invalid_values_without_writing() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(&path, "[appearance]\ntheme_mode = 'light'\n[application]\ntheme_mode = 'dark'\n[persistence]\nremember = false\n[reading_history]\nremember = true\n").unwrap();
+        assert_eq!(load(&path).unwrap(), Appearance::Dark);
+        assert!(!super::load(&path).unwrap().remember_reading_history());
+        save(&path, Appearance::System).unwrap();
+        assert!(!super::load(&path).unwrap().remember_reading_history());
+        for text in [
+            "application = false\n",
+            "persistence = false\n",
+            "[application]\nappearance = 'purple'\n",
+            "[application]\nappearance = false\n",
+            "[application]\ntheme_mode = 'purple'\n",
+            "[application]\nquit_when_last_window_closes = 'yes'\n",
+            "[application]\nreopen_last_windows_on_startup = 'yes'\n",
+            "[persistence]\nremember = 'yes'\n",
+            "[reader]\nreading_view = 'other'\n",
+            "[reader]\nreading_view = true\n",
+        ] {
+            fs::write(&path, text).unwrap();
+            assert!(super::load(&path).is_err(), "{text}");
+            assert!(save(&path, Appearance::Dark).is_err(), "{text}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn appearance_key_renames_theme_mode_and_preserves_comments() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        for section in ["application", "appearance"] {
+            fs::write(
+                &path,
+                format!("# keep chapter\n[{section}]\ntheme_mode = 'dark' # keep choice\n"),
+            )
+            .unwrap();
+            assert_eq!(load(&path).unwrap(), Appearance::Dark);
+            super::save(&path, SettingsChange::InitialZoom(InitialZoom::FitWidth)).unwrap();
+            let text = fs::read_to_string(&path).unwrap();
+            let document: DocumentMut = text.parse().unwrap();
+            assert_eq!(document["application"]["appearance"].as_str(), Some("dark"));
+            assert!(document["application"].get("theme_mode").is_none());
+            assert!(!text.contains("theme_mode"));
+            assert!(text.contains("# keep chapter"));
+            assert!(text.contains("# keep choice"));
+            save(&path, Appearance::Light).unwrap();
+            assert_eq!(load(&path).unwrap(), Appearance::Light);
+        }
+
+        fs::write(&path, "[application]\nappearance = 'light'\ntheme_mode = 'dark'\n[appearance]\ntheme_mode = 'system'\n").unwrap();
+        assert_eq!(load(&path).unwrap(), Appearance::Light);
+        super::save(&path, SettingsChange::InitialZoom(InitialZoom::FitPage)).unwrap();
+        assert_eq!(load(&path).unwrap(), Appearance::Light);
+        assert!(!fs::read_to_string(&path).unwrap().contains("theme_mode"));
     }
 
     #[test]
@@ -456,7 +686,7 @@ mod tests {
         save(&path, Appearance::Light).unwrap();
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            "[appearance]\ntheme_mode = \"light\"\n"
+            "[application]\nappearance = \"light\"\n"
         );
         fs::write(&path, "[other]\nkey = 1\n").unwrap();
         assert_eq!(load(&path).unwrap(), Appearance::System);

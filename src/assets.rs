@@ -9,7 +9,16 @@ use gpui_kit::{
 
 icon_assets!(
     ReaderIcons,
-    [MoveHorizontal, Expand, ZoomIn, ZoomOut, Sun, Moon, SunMoon]
+    [
+        MoveHorizontal,
+        Expand,
+        ZoomIn,
+        ZoomOut,
+        Sun,
+        Moon,
+        SunMoon,
+        Pencil
+    ]
 );
 
 /// The asset source registered by both the app and reader integration tests.
@@ -55,6 +64,7 @@ mod tests {
             "icons/moon.svg",
             "icons/sun-moon.svg",
             "icons/arrow-down.svg",
+            "icons/pencil.svg",
         ] {
             assert!(ReaderAssets.load(path).unwrap().is_some(), "{path}");
             assert!(ReaderAssets.list("icons/").unwrap().contains(&path.into()));

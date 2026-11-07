@@ -133,9 +133,26 @@ The `reading_modes` child table stores only explicit per-PDF choices. Absence
 means the PDF follows the current TOML default on its next open. Mode reads and
 writes use the same serialized worker as document records, with session-only
 changes retained while history recording is off and flushed on re-enable.
-Later mark slices must use this same per-path session
-owner and recording gate (rather than writing their own SQLite connections
-from reader windows), and store child rows with cascading foreign keys.
+The `local_marks` child table (schema version 5) stores lowercase letter,
+page index, PDF-point offset, and an optional display name. The letter remains
+the mark's identity and keyboard target; a name does not create an independent
+bookmark. UI-only name editing preserves that name when the letter's location
+is replaced, and removing the letter removes its name. Its shared worker caches
+each PDF's complete mark set for session edits, reads previously saved marks
+while recording is off, and flushes the resulting set (including deletions)
+when recording resumes.
+Mark writes are ordered with open, remove, and clear requests; deleting a parent
+document cascades to its marks and clears the session copy. Reader windows own
+only mark-input and popup focus, not separate copies of per-PDF mark state.
+GPUI's multi-keystroke bindings hold `m` then a letter to set or replace,
+`'` then a letter to jump, and `d m` then a letter to delete while the reader
+is focused. The pending keymap sequence takes priority over ordinary one-key
+reader shortcuts (such as `p` for Previous Page); no second letter handler
+competes with the normal keymap. The command palette exposes the corresponding
+operations and an Open marks popup; Command-Shift-M opens that popup directly.
+The popup lists only set local letters, their page-local positions, and optional
+names. Jumps reuse the saved-position coordinate transform, clamping offsets
+within a changed page and rejecting missing pages.
 No SQLite or config I/O runs on the UI thread. Open Recent searches both the
 session index and database, including stored records beyond the first 100 shown.
 It excludes the active reader's normalized PDF path before limiting results,

@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Set, revisit, replace, or delete per-PDF letter marks with reader keys or the command palette. Open a searchable list of saved marks and their page positions with Command-Shift-M, and optionally name marks in that popup. Marks and names survive restarts when reading history is on.
 - Resume each PDF where you stopped, with a separate Reopen at Last Position setting. Turning off history recording keeps new places for this session only.
 - Show or hide the toolbar and statusbar in Application → UI Elements settings; both are shown by default.
 - Choose whether Kver remembers reading history; while off, new opens stay available during the session without being saved. Clear all saved reading data from Settings with confirmation, or forget one PDF from Open Recent without deleting PDF files.

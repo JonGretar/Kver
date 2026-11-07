@@ -1,7 +1,7 @@
 //! Reader geometry drives layout; only the viewport owns bitmaps.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -25,6 +25,7 @@ use gpui_kit::{
             Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
             EmptyTitle,
         },
+        input::{Input, InputEvent, InputState},
         spinner::Spinner,
         status_bar::StatusBar,
         theme::Theme,
@@ -40,7 +41,7 @@ use crate::{
     find_search, pdf,
     reader_sidebar::{ReaderSidebar, SidebarPanel},
     reader_windows::{self, CloseWindow, NewWindow, NextWindow, PreviousWindow},
-    recent::{self, ReadingPosition, RecentFile, RecentStore},
+    recent::{self, LocalMark, ReadingPosition, RecentFile, RecentStore},
     settings::{InitialZoom, ReadingView},
     settings_ui::{self, ShowSettings},
 };
@@ -56,6 +57,10 @@ gpui::actions!(
         OpenPdf,
         ShowRecent,
         ShowCommandPalette,
+        ShowMarks,
+        ShowSetMark,
+        ShowJumpMark,
+        ShowDeleteMark,
         NextPage,
         PreviousPage,
         ZoomIn,
@@ -75,6 +80,47 @@ gpui::actions!(
     ]
 );
 
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = kver, no_json)]
+pub struct SetLocalMark(pub char);
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = kver, no_json)]
+pub struct JumpLocalMark(pub char);
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = kver, no_json)]
+pub struct DeleteLocalMark(pub char);
+
+// GPUI keeps incomplete key bindings pending and resolves the next keystroke
+// before dispatching one-key reader shortcuts (notably `p`, `n`, `s`, and `c`).
+const MARK_KEY_SEQUENCES: [(char, &str, &str, &str); 26] = [
+    ('a', "m a", "' a", "d m a"),
+    ('b', "m b", "' b", "d m b"),
+    ('c', "m c", "' c", "d m c"),
+    ('d', "m d", "' d", "d m d"),
+    ('e', "m e", "' e", "d m e"),
+    ('f', "m f", "' f", "d m f"),
+    ('g', "m g", "' g", "d m g"),
+    ('h', "m h", "' h", "d m h"),
+    ('i', "m i", "' i", "d m i"),
+    ('j', "m j", "' j", "d m j"),
+    ('k', "m k", "' k", "d m k"),
+    ('l', "m l", "' l", "d m l"),
+    ('m', "m m", "' m", "d m m"),
+    ('n', "m n", "' n", "d m n"),
+    ('o', "m o", "' o", "d m o"),
+    ('p', "m p", "' p", "d m p"),
+    ('q', "m q", "' q", "d m q"),
+    ('r', "m r", "' r", "d m r"),
+    ('s', "m s", "' s", "d m s"),
+    ('t', "m t", "' t", "d m t"),
+    ('u', "m u", "' u", "d m u"),
+    ('v', "m v", "' v", "d m v"),
+    ('w', "m w", "' w", "d m w"),
+    ('x', "m x", "' x", "d m x"),
+    ('y', "m y", "' y", "d m y"),
+    ('z', "m z", "' z", "d m z"),
+];
+
 /// Bind reading keys only in a focused reader, not in the palette's text input.
 /// Kit resolves the displayed shortcuts from these active Action bindings.
 pub fn bind_reader_keys(cx: &mut App) {
@@ -85,6 +131,7 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-`", NextWindow, None),
         KeyBinding::new("cmd-shift-`", PreviousWindow, None),
         KeyBinding::new("cmd-shift-p", ShowCommandPalette, None),
+        KeyBinding::new("cmd-shift-m", ShowMarks, None),
         KeyBinding::new("cmd-f", ShowFind, None),
         KeyBinding::new("cmd-b", ToggleSidebar, None),
         KeyBinding::new("cmd-g", NextMatch, None),
@@ -113,6 +160,17 @@ pub fn bind_reader_keys(cx: &mut App) {
         KeyBinding::new("cmd-alt-f", FitPage, None),
         KeyBinding::new("cmd-c", Copy, Some("Reader")),
     ]);
+    cx.bind_keys(
+        MARK_KEY_SEQUENCES
+            .into_iter()
+            .flat_map(|(letter, set, jump, delete)| {
+                [
+                    KeyBinding::new(set, SetLocalMark(letter), Some("Reader")),
+                    KeyBinding::new(jump, JumpLocalMark(letter), Some("Reader")),
+                    KeyBinding::new(delete, DeleteLocalMark(letter), Some("Reader")),
+                ]
+            }),
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -355,6 +413,8 @@ pub struct Preview {
     palette_focus: FocusHandle,
     focus_initialized: bool,
     palette: Option<Entity<CommandState>>,
+    marks_panel: Option<MarksPanel>,
+    _mark_name_subscription: Option<Subscription>,
     recent: Option<RecentPanel>,
     recent_revision: u64,
     recent_open: Option<u64>,
@@ -370,6 +430,25 @@ struct RecentPanel {
     files: Vec<RecentFile>,
     error: Option<String>,
     loading: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MarksView {
+    List,
+    Set,
+    Jump,
+    Delete,
+    Name(char),
+}
+
+#[derive(Clone)]
+struct MarksPanel {
+    command: Entity<CommandState>,
+    view: MarksView,
+    marks: BTreeMap<char, LocalMark>,
+    name_input: Option<Entity<InputState>>,
+    loading: bool,
+    error: Option<String>,
 }
 
 fn recent_content(
@@ -527,6 +606,9 @@ impl Preview {
                     let query = panel.command.read(cx).query(cx).to_string();
                     reader.search_recent(query, cx);
                 }
+                if reader.marks_panel.is_some() {
+                    reader.refresh_marks(cx);
+                }
             })
             .detach();
         }
@@ -562,6 +644,8 @@ impl Preview {
             palette_focus: cx.focus_handle(),
             focus_initialized: false,
             palette: None,
+            marks_panel: None,
+            _mark_name_subscription: None,
             recent: None,
             recent_revision: 0,
             recent_open: None,
@@ -584,6 +668,8 @@ impl Preview {
         self.generation += 1;
         self.document_generation += 1;
         self.recent_open = None;
+        self.marks_panel = None;
+        self._mark_name_subscription = None;
         if let Some(sidebar) = self.sidebar.as_mut() {
             sidebar.reset_document(cx);
         }
@@ -647,6 +733,8 @@ impl Preview {
         if self.palette.is_some() {
             return;
         }
+        self.marks_panel = None;
+        self._mark_name_subscription = None;
         let palette = cx.new(|cx| CommandState::new(window, cx));
         self.palette = Some(palette.clone());
         palette.update(cx, |palette, cx| palette.focus(window, cx));
@@ -660,6 +748,242 @@ impl Preview {
         cx: &mut Context<Self>,
     ) {
         self.show_palette(window, cx);
+    }
+
+    fn show_marks(&mut self, view: MarksView, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pages.is_empty() || self.record_path.is_none() || self.recent.is_some() {
+            return;
+        }
+        self.palette = None;
+        self._mark_name_subscription = None;
+        let command = cx.new(|cx| CommandState::new(window, cx));
+        command.update(cx, |state, cx| state.focus(window, cx));
+        self.marks_panel = Some(MarksPanel {
+            command,
+            view,
+            marks: BTreeMap::new(),
+            name_input: None,
+            loading: true,
+            error: None,
+        });
+        self.refresh_marks(cx);
+    }
+
+    fn dismiss_marks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.marks_panel = None;
+        self._mark_name_subscription = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    fn edit_mark_name(&mut self, letter: char, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mark) = self
+            .marks_panel
+            .as_ref()
+            .and_then(|panel| panel.marks.get(&letter))
+        else {
+            return;
+        };
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Optional name")
+                .default_value(mark.label.clone().unwrap_or_default())
+        });
+        let subscription = cx.subscribe_in(&input, window, move |reader, _, event, _, cx| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                reader.save_mark_name(letter, cx);
+            }
+        });
+        if let Some(panel) = self.marks_panel.as_mut() {
+            panel.view = MarksView::Name(letter);
+            panel.name_input = Some(input.clone());
+            panel.error = None;
+        }
+        self._mark_name_subscription = Some(subscription);
+        input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn cancel_mark_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(panel) = self.marks_panel.as_mut() {
+            panel.name_input = None;
+            self._mark_name_subscription = None;
+            panel.view = MarksView::List;
+            panel.error = None;
+            panel
+                .command
+                .update(cx, |command, cx| command.focus(window, cx));
+            cx.notify();
+        }
+    }
+
+    fn save_mark_name(&mut self, letter: char, cx: &mut Context<Self>) {
+        let (Some(panel), Some(path), Some(history)) = (
+            self.marks_panel.as_mut(),
+            self.record_path.clone(),
+            recent::history(cx),
+        ) else {
+            return;
+        };
+        if panel.loading {
+            return;
+        }
+        let Some(input) = panel.name_input.as_ref() else {
+            return;
+        };
+        let name = input.read(cx).value().trim().to_owned();
+        if name.chars().count() > 80 || name.chars().any(char::is_control) {
+            panel.error = Some("Use at most 80 characters on one line.".into());
+            cx.notify();
+            return;
+        }
+        let label = (!name.is_empty()).then_some(name);
+        panel.loading = true;
+        let generation = self.document_generation;
+        let work = history.name_mark(path.clone(), letter, label);
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.document_generation != generation
+                    || this.record_path.as_ref() != Some(&path)
+                {
+                    return;
+                }
+                if let Some(panel) = this.marks_panel.as_mut() {
+                    if panel.view != MarksView::Name(letter) {
+                        return;
+                    }
+                    panel.loading = false;
+                    match result {
+                        Ok(marks) => {
+                            panel.marks = marks;
+                            panel.name_input = None;
+                            this._mark_name_subscription = None;
+                            panel.view = MarksView::List;
+                            panel
+                                .command
+                                .update(cx, |command, cx| command.focus(window, cx));
+                        }
+                        Err(error) => {
+                            panel.error = Some(format!("Mark name could not be saved: {error}"))
+                        }
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_marks(&mut self, cx: &mut Context<Self>) {
+        let (Some(path), Some(history)) = (self.record_path.clone(), recent::history(cx)) else {
+            return;
+        };
+        let generation = self.document_generation;
+        let epoch = history.epoch();
+        let work = history.marks(path.clone(), epoch);
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.document_generation != generation
+                    || this.record_path.as_ref() != Some(&path)
+                {
+                    return;
+                }
+                if let Some(panel) = this.marks_panel.as_mut() {
+                    panel.loading = false;
+                    match result {
+                        Ok(marks) => panel.marks = marks,
+                        Err(error) => {
+                            panel.error = Some(format!("Marks could not be loaded: {error}"))
+                        }
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn change_mark(
+        &mut self,
+        letter: char,
+        position: Option<ReadingPosition>,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(path), Some(history)) = (self.record_path.clone(), recent::history(cx)) else {
+            return;
+        };
+        if !letter.is_ascii_lowercase() || self.pages.is_empty() {
+            return;
+        }
+        let generation = self.document_generation;
+        let work = history.change_mark(path.clone(), letter, position);
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.document_generation != generation
+                    || this.record_path.as_ref() != Some(&path)
+                {
+                    return;
+                }
+                match result {
+                    Ok(marks) => {
+                        if let Some(panel) = this.marks_panel.as_mut() {
+                            panel.marks = marks;
+                        }
+                        this.status = if position.is_some() {
+                            format!("Set local mark {letter}")
+                        } else {
+                            format!("Deleted local mark {letter}")
+                        };
+                    }
+                    Err(error) => this.status = format!("Local mark could not be saved: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn jump_mark(&mut self, letter: char, cx: &mut Context<Self>) {
+        let (Some(path), Some(history)) = (self.record_path.clone(), recent::history(cx)) else {
+            return;
+        };
+        if !letter.is_ascii_lowercase() || self.pages.is_empty() {
+            return;
+        }
+        let generation = self.document_generation;
+        let work = history.marks(path.clone(), history.epoch());
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.document_generation != generation
+                    || this.record_path.as_ref() != Some(&path)
+                {
+                    return;
+                }
+                match result {
+                    Ok(marks) => match marks.get(&letter).map(|mark| mark.position) {
+                        Some(position)
+                            if position.page < this.pages.len()
+                                && position.y.is_finite()
+                                && position.y >= 0.0 =>
+                        {
+                            this.position_touched = true;
+                            this.pending_restore = None;
+                            this.restore_position(position);
+                            this.sync_viewport(cx);
+                        }
+                        Some(_) => this.status = format!("Local mark {letter} is outside this PDF"),
+                        None => this.status = format!("Local mark {letter} is not set"),
+                    },
+                    Err(error) => this.status = format!("Local mark could not be loaded: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn show_recent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1037,17 +1361,6 @@ impl Preview {
                 .map_or(SidebarPanel::default(), ReaderSidebar::last);
             self.show_sidebar(panel, window, cx);
         }
-    }
-
-    // The root receives bubbled key-down events even when a panel owns focus.
-    // Only the focused reader handles bare scrolling keys.
-    fn reading_allowed(&self, window: &Window) -> bool {
-        self.palette.is_some()
-            || self
-                .sidebar
-                .as_ref()
-                .is_none_or(|sidebar| sidebar.active().is_none())
-            || self.focus.is_focused(window)
     }
 
     pub fn sidebar_panel(&self) -> Option<SidebarPanel> {
@@ -2156,7 +2469,7 @@ impl Render for Preview {
             .size_full()
             .track_focus(&self.focus)
             .when(
-                self.palette.is_none() && self.recent.is_none() && self.focus.is_focused(window),
+                self.palette.is_none() && self.marks_panel.is_none() && self.recent.is_none() && self.focus.is_focused(window),
                 |reader| reader.key_context("Reader"),
             )
             .on_action(cx.listener(Self::on_open_pdf))
@@ -2168,6 +2481,17 @@ impl Render for Preview {
                 reader_windows::cycle(window, cx, -1);
             }))
             .on_action(cx.listener(Self::on_show_palette))
+            .on_action(cx.listener(|this, _: &ShowMarks, window, cx| this.show_marks(MarksView::List, window, cx)))
+            .on_action(cx.listener(|this, _: &ShowSetMark, window, cx| this.show_marks(MarksView::Set, window, cx)))
+            .on_action(cx.listener(|this, _: &ShowJumpMark, window, cx| this.show_marks(MarksView::Jump, window, cx)))
+            .on_action(cx.listener(|this, _: &ShowDeleteMark, window, cx| this.show_marks(MarksView::Delete, window, cx)))
+            .on_action(cx.listener(|this, action: &SetLocalMark, _, cx| {
+                if !this.pages.is_empty() {
+                    this.change_mark(action.0, Some(this.position_to_save()), cx);
+                }
+            }))
+            .on_action(cx.listener(|this, action: &JumpLocalMark, _, cx| this.jump_mark(action.0, cx)))
+            .on_action(cx.listener(|this, action: &DeleteLocalMark, _, cx| this.change_mark(action.0, None, cx)))
             .on_action(cx.listener(|this, _: &ShowRecent, window, cx| {
                 this.show_recent(window, cx);
             }))
@@ -2244,7 +2568,7 @@ impl Render for Preview {
                 this.choose_reading_mode(None, cx);
             }))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if this.palette.is_some() || this.recent.is_some() || !this.reading_allowed(window)
+                if this.palette.is_some() || this.marks_panel.is_some() || this.recent.is_some() || !this.focus.is_focused(window)
                 {
                     cx.propagate();
                     return;
@@ -2664,6 +2988,30 @@ impl Render for Preview {
                                         )
                                         .item(
                                             CommandItem::new()
+                                                .label("Open marks…")
+                                                .action(Box::new(ShowMarks))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Set local mark…")
+                                                .action(Box::new(ShowSetMark))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Jump to local mark…")
+                                                .action(Box::new(ShowJumpMark))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
+                                                .label("Delete local mark…")
+                                                .action(Box::new(ShowDeleteMark))
+                                                .disabled(!has_document),
+                                        )
+                                        .item(
+                                            CommandItem::new()
                                                 .label("Settings…")
                                                 .action(Box::new(ShowSettings)),
                                         )
@@ -2811,6 +3159,162 @@ impl Render for Preview {
                             .focus_trap("reader-command-palette", &self.palette_focus),
                     )
             })
+            .when_some(self.marks_panel.clone(), |reader, panel| {
+                let owner = cx.weak_entity();
+                let rows: Vec<_> = match panel.view {
+                    MarksView::Set => ('a'..='z')
+                        .map(|letter| (letter, panel.marks.get(&letter).cloned())).collect(),
+                    MarksView::Name(_) => Vec::new(),
+                    _ => panel.marks.iter().map(|(&letter, mark)| (letter, Some(mark.clone()))).collect(),
+                };
+                let mut entries = Vec::new();
+                if panel.view == MarksView::List {
+                    entries.push(CommandItem::new().label("Set local mark…").keywords(["new mark"]));
+                }
+                for (letter, mark) in &rows {
+                    let letter = *letter;
+                    let label = match mark {
+                        Some(mark) => format!("{letter}    {}Page {} · {:.0} pt from top",
+                            mark.label.as_ref().map(|label| format!("{label} · ")).unwrap_or_default(),
+                            mark.position.page + 1, mark.position.y),
+                        None => format!("{letter}    Unset"),
+                    };
+                    let mut entry = CommandItem::new().label(label.clone()).keywords([letter.to_string()]);
+                    if panel.view == MarksView::List {
+                        let owner = owner.clone();
+                        let has_name = mark.as_ref().and_then(|mark| mark.label.as_ref()).is_some();
+                        entry = entry.child(move |_, _| {
+                            let owner = owner.clone();
+                            div().w_full().flex().items_center().justify_between().gap_2()
+                                .child(div().flex_1().min_w_0().truncate().child(label.clone()))
+                                .child(div().flex().flex_shrink_0().items_center().gap_1()
+                                    .child(Button::new(format!("name-mark:{letter}"))
+                                        .icon(IconName::Pencil)
+                                        .accessibility_label(format!("{} local mark {letter}", if has_name { "Rename" } else { "Name" }))
+                                        .tooltip(if has_name { "Rename mark" } else { "Name mark" })
+                                        .ghost().xsmall()
+                                        .on_click({
+                                            let owner = owner.clone();
+                                            move |_, window, cx| {
+                                                cx.stop_propagation();
+                                                let _ = owner.update(cx, |reader, cx| reader.edit_mark_name(letter, window, cx));
+                                            }
+                                        }))
+                                    .child(Button::new(format!("delete-mark:{letter}"))
+                                        .icon(IconName::Close)
+                                        .accessibility_label(format!("Delete local mark {letter}"))
+                                        .tooltip("Delete mark")
+                                        .ghost().xsmall()
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            let _ = owner.update(cx, |reader, cx| reader.change_mark(letter, None, cx));
+                                        })))
+                        });
+                    }
+                    entries.push(entry);
+                }
+                let title = match panel.view {
+                    MarksView::List => "Local marks",
+                    MarksView::Set => "Set local mark",
+                    MarksView::Jump => "Jump to local mark",
+                    MarksView::Delete => "Delete local mark",
+                    MarksView::Name(_) => "Name local mark",
+                };
+                reader
+                    .child(div().absolute().inset_0().bg(cx.theme().overlay))
+                    .child(div().id("marks-panel").test_support().role(gpui::Role::Dialog)
+                        .aria_label(title)
+                        .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                            if event.keystroke.key == "escape"
+                                && let Some(panel) = this.marks_panel.as_ref()
+                                && matches!(panel.view, MarksView::Name(_)) {
+                                if !panel.loading {
+                                    this.cancel_mark_name(window, cx);
+                                }
+                            } else {
+                                cx.propagate();
+                            }
+                        }))
+                        .absolute().inset_0().flex().items_center()
+                        .justify_center().p_4()
+                        .child(div().w_full().max_w(gpui::rems(28.)).bg(cx.theme().popover)
+                            .child(div().px_3().pt_3().pb_2().child(title))
+                            .when(panel.name_input.is_none(), {
+                                let command_owner = owner.clone();
+                                |content| content.child(Command::new(&panel.command)
+                                .placeholder("Search marks…")
+                                .items(entries)
+                                .empty(|_, _, cx| div().p_4()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No local marks match. Set one with m then a letter."))
+                                .on_confirm({
+                                    let owner = command_owner.clone();
+                                    move |index, window, cx| {
+                                        if panel.loading { return; }
+                                        let view = panel.view;
+                                        let letter = if view == MarksView::List && index.row == 0 {
+                                            None
+                                        } else {
+                                            rows.get(index.row - usize::from(view == MarksView::List)).map(|(letter, _)| *letter)
+                                        };
+                                        let _ = owner.update(cx, |reader, cx| {
+                                            match letter {
+                                                None if view == MarksView::List => reader.show_marks(MarksView::Set, window, cx),
+                                                Some(letter) => {
+                                                    reader.dismiss_marks(window, cx);
+                                                    let action: Box<dyn gpui::Action> = match view {
+                                                        MarksView::Set => Box::new(SetLocalMark(letter)),
+                                                        MarksView::Delete => Box::new(DeleteLocalMark(letter)),
+                                                        MarksView::Jump | MarksView::List => Box::new(JumpLocalMark(letter)),
+                                                        MarksView::Name(_) => return,
+                                                    };
+                                                    window.dispatch_action(action, cx);
+                                                }
+                                                None => {}
+                                            }
+                                        });
+                                    }
+                                })
+                                .on_cancel(move |window, cx| {
+                                    let _ = command_owner.update(cx, |reader, cx| {
+                                        if reader.marks_panel.as_ref().is_some_and(|panel| matches!(panel.view, MarksView::Name(_))) {
+                                            return;
+                                        }
+                                        reader.dismiss_marks(window, cx);
+                                    });
+                                }))
+                            })
+                            .when_some(panel.name_input.clone(), |content, input| {
+                                let MarksView::Name(letter) = panel.view else { return content; };
+                                content.child(div().px_3().pb_3().flex().flex_col().gap_3()
+                                    .child(div().text_color(cx.theme().muted_foreground)
+                                        .child(format!("Mark {letter} · Leave blank to remove its name")))
+                                    .child(Input::new(&input))
+                                    .child(div().flex().justify_end().gap_2()
+                                        .child(Button::new("cancel-mark-name").label("Cancel").ghost()
+                                            .disabled(panel.loading)
+                                            .on_click({
+                                                let owner = owner.clone();
+                                                move |_, window, cx| {
+                                                    let _ = owner.update(cx, |reader, cx| {
+                                                        reader.cancel_mark_name(window, cx);
+                                                    });
+                                                }
+                                            }))
+                                        .child(Button::new("save-mark-name").label("Save").primary()
+                                            .disabled(panel.loading)
+                                            .on_click({
+                                                let owner = owner.clone();
+                                                move |_, _, cx| {
+                                                    let _ = owner.update(cx, |reader, cx| reader.save_mark_name(letter, cx));
+                                                }
+                                            }))))
+                            })
+                            .when(panel.loading, |content| content.child(div().px_3().py_2().child("Loading marks…")))
+                            .when_some(panel.error, |content, error| content.child(div().px_3().py_2()
+                                .text_color(cx.theme().danger).child(error))))
+                        .focus_trap("reader-marks-palette", &self.palette_focus))
+            })
     }
 }
 
@@ -2850,8 +3354,565 @@ mod tests {
         })
     }
 
+    fn mark(position: ReadingPosition) -> LocalMark {
+        LocalMark {
+            position,
+            label: None,
+        }
+    }
+
+    #[gpui_kit::test]
+    fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("book.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reader.update(cx, |reader, cx| reader.select_page(1, cx));
+        cx.simulate_keystrokes(window, "m");
+        cx.simulate_keystrokes(window, "p");
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        let original = reader.read_with(cx, |reader, _| reader.position_to_save());
+        for letter in ['c', 'f', 'j', 'k', 'n', 's', 'w'] {
+            cx.simulate_keystrokes(window, &format!("m {letter}"));
+            reader.read_with(cx, |reader, _| {
+                assert_eq!(
+                    reader.position_to_save(),
+                    original,
+                    "reader shortcut ran for {letter}"
+                );
+                assert_eq!(reader.reading_mode(), ReadingMode::Continuous);
+                assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
+            });
+        }
+        cx.run_until_parked();
+        let store = RecentStore::new(&paths);
+        for letter in ['c', 'f', 'j', 'k', 'n', 'p', 's', 'w'] {
+            assert_eq!(
+                store
+                    .marks(&pdf)
+                    .unwrap()
+                    .get(&letter)
+                    .map(|mark| mark.position.page),
+                Some(1),
+                "mark {letter} was not set"
+            );
+        }
+        reader.update(cx, |reader, cx| reader.select_page(2, cx));
+        cx.simulate_keystrokes(window, "' p");
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        cx.simulate_keystrokes(window, "d m p");
+        cx.run_until_parked();
+        assert!(!store.marks(&pdf).unwrap().contains_key(&'p'));
+        reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        // Once a sequence completes, the ordinary one-key binding is active again.
+        cx.simulate_keystrokes(window, "p");
+        reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
+        reader.update(cx, |reader, cx| reader.select_page(2, cx));
+        cx.simulate_keystrokes(window, "m escape p");
+        reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        cx.simulate_keystrokes(window, "m cmd-f");
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.input("e", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(!store.marks(&pdf).unwrap().contains_key(&'e'));
+    }
+
+    #[gpui_kit::test]
+    fn naming_a_local_mark_in_popup_survives_replacing_and_restart(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("named.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SetLocalMark('a')), cx);
+                frame.dispatch_action(Box::new(ShowMarks), cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("name-mark:a", cx);
+            })
+            .unwrap()
+        });
+        reader.read_with(cx, |reader, _| {
+            assert!(
+                reader.marks_panel.is_some(),
+                "name button closed popup synchronously: {}",
+                reader.status
+            );
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.marks_panel.as_ref().unwrap().view,
+                MarksView::Name('a')
+            )
+        });
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| frame.press("escape", cx))
+                .unwrap()
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.marks_panel.as_ref().unwrap().view, MarksView::List)
+        });
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("name-mark:a", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.input("Introduction", cx);
+                frame.press("enter", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.marks_panel.as_ref().unwrap().view, MarksView::List)
+        });
+        let store = RecentStore::new(&paths);
+        assert_eq!(
+            store.marks(&pdf).unwrap()[&'a'].label.as_deref(),
+            Some("Introduction")
+        );
+        reader.update(cx, |reader, cx| reader.select_page(1, cx));
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(SetLocalMark('a')), cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            store.marks(&pdf).unwrap()[&'a'].label.as_deref(),
+            Some("Introduction")
+        );
+        assert_eq!(store.marks(&pdf).unwrap()[&'a'].position.page, 1);
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, reopened) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reopened.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        assert_eq!(
+            store.marks(&pdf).unwrap()[&'a'].label.as_deref(),
+            Some("Introduction")
+        );
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("name-mark:a", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.press("cmd-a", cx);
+                frame.press("backspace", cx);
+                frame.click("save-mark-name", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        assert_eq!(store.marks(&pdf).unwrap()[&'a'].label, None);
+        reader.read_with(cx, |reader, _| {
+            assert!(
+                reader.marks_panel.is_some(),
+                "saving name unexpectedly closed popup"
+            );
+        });
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.click("delete-mark:a", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        assert!(store.marks(&pdf).unwrap().is_empty());
+    }
+
     fn three_page_pdf(sizes: [(u32, u32); 3]) -> Vec<u8> {
         three_page_pdf_with_boxes(sizes, ["", "", ""])
+    }
+
+    #[gpui_kit::test]
+    fn local_marks_share_across_windows_restart_and_palette(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("marked.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.update(cx, |reader, cx| reader.scroll_by(1550.0, cx));
+        let saved = first.read_with(cx, |reader, _| reader.position_to_save());
+        cx.simulate_keystrokes(window, "m a");
+        cx.run_until_parked();
+        assert_eq!(
+            RecentStore::new(&paths).marks(&pdf).unwrap().get(&'a'),
+            Some(&mark(saved))
+        );
+
+        let (other_window, other) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        other.update(cx, |reader, cx| {
+            reader.select_page(2, cx);
+            reader.choose_reading_mode(Some(ReadingMode::SinglePage), cx);
+            reader.fit_width(cx);
+        });
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(JumpLocalMark('a')), cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), saved.page);
+            assert!((reader.reading_position().1 - saved.y).abs() < 2.0);
+        });
+        first.read_with(cx, |reader, _| assert_eq!(reader.position_to_save(), saved));
+
+        cx.simulate_keystrokes(other_window, "cmd-shift-m");
+        cx.run_until_parked();
+        other.read_with(cx, |reader, cx| {
+            let panel = reader.marks_panel.as_ref().expect("marks popup opened");
+            assert_eq!(panel.marks.get(&'a'), Some(&mark(saved)));
+            assert_eq!(panel.command.read(cx).query(cx), "");
+        });
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.find("reader-marks-palette");
+                frame.input("Page 2", cx);
+            })
+            .unwrap()
+        });
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| frame.press("enter", cx))
+                .unwrap()
+        });
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| assert!(reader.marks_panel.is_none()));
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(ShowCommandPalette), cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.input("Open marks", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        other.read_with(cx, |reader, cx| {
+            let palette = reader.palette.as_ref().expect("command palette opened");
+            assert_eq!(palette.read(cx).query(cx), "Open marks");
+        });
+        cx.update(|cx| {
+            cx.update_window(other_window, |_, frame, cx| frame.press("enter", cx))
+                .unwrap()
+        });
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| assert!(reader.marks_panel.is_some()));
+        cx.simulate_keystrokes(other_window, "escape");
+        other.update(cx, |reader, cx| reader.select_page(2, cx));
+        cx.simulate_keystrokes(other_window, "' a");
+        cx.run_until_parked();
+        other.read_with(cx, |reader, _| assert_eq!(reader.page_index(), saved.page));
+
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, reopened) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reopened.update(cx, |reader, cx| reader.select_page(0, cx));
+        reopened.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        reopened.read_with(cx, |reader, _| assert_eq!(reader.page_index(), saved.page));
+        cx.simulate_keystrokes(other_window, "d m a");
+        cx.run_until_parked();
+        assert!(RecentStore::new(&paths).marks(&pdf).unwrap().is_empty());
+    }
+
+    #[gpui_kit::test]
+    fn private_marks_replace_delete_flush_and_clear(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("private.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        let store = RecentStore::new(&paths);
+        store.record(&pdf).unwrap();
+        let old = ReadingPosition { page: 0, y: 40.0 };
+        store
+            .replace_marks(&pdf, &BTreeMap::from([('a', mark(old))]))
+            .unwrap();
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        first.read_with(cx, |reader, _| {
+            assert_eq!(reader.reading_position().1, old.y)
+        });
+        first.update(cx, |reader, cx| reader.select_page(1, cx));
+        first.update(cx, |reader, cx| {
+            reader.change_mark('a', Some(reader.position_to_save()), cx)
+        });
+        first.update(cx, |reader, cx| {
+            reader.change_mark('b', Some(reader.position_to_save()), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            store.marks(&pdf).unwrap(),
+            BTreeMap::from([('a', mark(old))])
+        );
+        let (_, second) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        second.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        second.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        second.update(cx, |reader, cx| reader.change_mark('a', None, cx));
+        cx.run_until_parked();
+        let history = cx.update(|cx| recent::history(cx).unwrap());
+        let name = history.name_mark(pdf.clone(), 'b', Some("Chapter two".into()));
+        cx.update(|cx| {
+            cx.spawn(async move |cx| {
+                name.await.unwrap();
+                cx.update(|_| ());
+            })
+            .detach()
+        });
+        cx.run_until_parked();
+        assert!(!store.marks(&pdf).unwrap().contains_key(&'b'));
+        let flush = history.set_recording(true);
+        cx.update(|cx| {
+            cx.spawn(async move |cx| {
+                flush.await.unwrap();
+                cx.update(|_| ());
+            })
+            .detach()
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            store
+                .marks(&pdf)
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec!['b']
+        );
+        assert_eq!(
+            store.marks(&pdf).unwrap()[&'b'].label.as_deref(),
+            Some("Chapter two")
+        );
+        let clear = history.clear();
+        cx.update(|cx| {
+            cx.spawn(async move |cx| {
+                clear.await.unwrap();
+                cx.update(|_| ());
+            })
+            .detach()
+        });
+        cx.run_until_parked();
+        assert!(store.marks(&pdf).unwrap().is_empty());
+        second.update(cx, |reader, cx| reader.jump_mark('b', cx));
+        cx.run_until_parked();
+        second.read_with(cx, |reader, _| assert!(reader.status.contains("not set")));
+    }
+
+    #[gpui_kit::test]
+    fn invalid_marks_and_text_focus_leave_reader_in_place(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("changed.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        let store = RecentStore::new(&paths);
+        store.record(&pdf).unwrap();
+        store
+            .replace_marks(
+                &pdf,
+                &BTreeMap::from([
+                    ('a', mark(ReadingPosition { page: 99, y: 20.0 })),
+                    ('b', mark(ReadingPosition { page: 0, y: 9000.0 })),
+                ]),
+            )
+            .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_reader_keys(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        reader.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.page_index(), 0);
+            assert!(reader.status.contains("outside this PDF"));
+        });
+        reader.update(cx, |reader, cx| reader.jump_mark('b', cx));
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, _| {
+            assert!(reader.reading_position().1 <= 1400.0)
+        });
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.dispatch_action(Box::new(ShowFind), cx);
+                frame.render_frame(cx);
+                frame.input("m a", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        assert!(!store.marks(&pdf).unwrap().contains_key(&'m'));
+        std::fs::remove_file(&pdf).unwrap();
+        assert_eq!(store.marks(&pdf).unwrap().len(), 2);
+    }
+
+    #[gpui_kit::test]
+    fn recording_off_discards_new_marks_on_restart_but_reads_saved_ones(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("local"),
+        );
+        let pdf = root.path().join("book.pdf");
+        std::fs::write(&pdf, three_page_pdf([(600, 1400); 3])).unwrap();
+        let pdf = RecentStore::normalize(&pdf).unwrap();
+        let store = RecentStore::new(&paths);
+        store.record(&pdf).unwrap();
+        store
+            .replace_marks(
+                &pdf,
+                &BTreeMap::from([('a', mark(ReadingPosition { page: 1, y: 80.0 }))]),
+            )
+            .unwrap();
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::RememberReadingHistory(false),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, first) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        first.update(cx, |reader, cx| {
+            reader.change_mark('a', None, cx);
+            reader.change_mark('b', Some(ReadingPosition { page: 2, y: 200.0 }), cx);
+        });
+        cx.run_until_parked();
+        let (_, same_session) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        same_session.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        same_session.read_with(cx, |reader, _| assert!(reader.status.contains("not set")));
+        cx.update(|cx| {
+            recent::install(cx, Some(paths.clone()));
+            settings_ui::install_with_paths(cx, Some(paths.clone()));
+        });
+        let (_, restarted) = recent_test_window(cx, Some(pdf.clone()));
+        cx.run_until_parked();
+        restarted.update(cx, |reader, cx| reader.jump_mark('a', cx));
+        cx.run_until_parked();
+        restarted.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+        assert_eq!(
+            store
+                .marks(&pdf)
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec!['a']
+        );
     }
 
     fn three_page_pdf_with_boxes(sizes: [(u32, u32); 3], boxes: [&str; 3]) -> Vec<u8> {

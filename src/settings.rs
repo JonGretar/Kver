@@ -128,18 +128,18 @@ impl ReadingView {
     pub fn label(self) -> &'static str {
         match self {
             Self::Continuous => "Continuous",
-            Self::Page => "Page",
+            Self::Page => "Single Page",
         }
     }
 
-    fn key(self) -> &'static str {
+    pub(crate) fn key(self) -> &'static str {
         match self {
             Self::Continuous => "continuous",
             Self::Page => "page",
         }
     }
 
-    fn parse(key: &str) -> Result<Self, String> {
+    pub(crate) fn parse(key: &str) -> Result<Self, String> {
         match key {
             "continuous" => Ok(Self::Continuous),
             "page" => Ok(Self::Page),

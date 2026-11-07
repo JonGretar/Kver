@@ -11,7 +11,7 @@ use crate::reader::OpenPdf;
 #[cfg(target_os = "macos")]
 use crate::reader::{
     Continuous, Copy, NextPage, PreviousPage, ShowContents, ShowFind, ShowRecent, SinglePage,
-    ToggleSidebar,
+    ToggleSidebar, UseDefaultReadingMode,
 };
 #[cfg(target_os = "macos")]
 use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
@@ -80,6 +80,7 @@ pub fn install(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Single Page", SinglePage),
             MenuItem::action("Continuous", Continuous),
+            MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
             MenuItem::action("Next Page", NextPage),
             MenuItem::action("Previous Page", PreviousPage),
         ]),

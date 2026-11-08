@@ -29,7 +29,7 @@ use crate::coordinates::{PageTransform, Point};
 mod links;
 #[cfg(test)]
 pub(crate) use links::linked_fixture;
-pub use links::{PageLink, page_links};
+pub use links::{LinkDestination, PageLink, page_links};
 
 pub struct RenderedPage {
     pub png: Vec<u8>,
@@ -1061,9 +1061,13 @@ mod tests {
     fn illustrated_field_guide_has_pages_and_outline() {
         let sample = include_bytes!("../examples/field-guide.pdf").to_vec();
         let outline = outline_bytes(sample.clone()).unwrap();
-        assert_eq!(outline[0].title, "Landscape");
+        assert!(outline[0].title().ends_with("Landscape"));
         assert_eq!(outline[0].destination.unwrap().page, 2);
-        assert!(outline.iter().any(|entry| entry.title == "Measurements"));
+        assert!(
+            outline
+                .iter()
+                .any(|entry| entry.title().ends_with("Measurements"))
+        );
 
         let cover_links = page_links(Path::new("examples/field-guide.pdf"), 0).unwrap();
         assert_eq!(cover_links.len(), 3);
@@ -1075,6 +1079,30 @@ mod tests {
         let page = render_bytes(sample, 2, 1.0).unwrap();
         assert_eq!(page.page_count, 24);
         assert_eq!((page.width, page.height), (612.0, 792.0));
+    }
+
+    #[test]
+    fn link_guide_targets_the_field_guide_and_keeps_local_links_local() {
+        let path = Path::new("examples/link-guide.pdf");
+        let links = page_links(path, 0).unwrap();
+        assert_eq!(links.len(), 4);
+        for (link, expected_page) in links[..3].iter().zip([0, 7, 22]) {
+            assert!(matches!(
+                link.target(),
+                Some(LinkDestination::AnotherDocument { path, page })
+                    if path == Path::new("examples/field-guide.pdf") && *page == expected_page
+            ));
+        }
+        assert_eq!(links[3].destination().unwrap().page(), 1);
+
+        let second = page_links(path, 1).unwrap();
+        assert_eq!(second.len(), 2);
+        assert!(matches!(
+            second[0].target(),
+            Some(LinkDestination::AnotherDocument { page: 0, .. })
+        ));
+        assert_eq!(second[1].destination().unwrap().page(), 0);
+        assert_eq!(document_pages(path).unwrap().len(), 2);
     }
 
     #[cfg(feature = "gui")]

@@ -1,9 +1,14 @@
 //! PDF link annotations decoded into document and unscaled rendered-page geometry.
 //! This module is the only place that knows about Hayro's annotation dictionaries.
 
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
-use hayro::hayro_syntax::object::{Array, Dict, Object, ObjectIdentifier};
+use hayro::hayro_syntax::object::{
+    Array, Dict, MaybeRef, Object, ObjectIdentifier, String as PdfString,
+};
 
 use crate::coordinates::{PageTransform, Point};
 
@@ -15,7 +20,14 @@ pub struct PageLink {
     document_rect: [f64; 4],
     /// Rectangle in unscaled, rotated rendered-page coordinates.
     page_rect: [f32; 4],
-    destination: Option<OutlineDestination>,
+    destination: Option<LinkDestination>,
+}
+
+/// Backend-neutral destinations of supported PDF link annotations.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LinkDestination {
+    SameDocument(OutlineDestination),
+    AnotherDocument { path: PathBuf, page: usize },
 }
 
 impl PageLink {
@@ -25,8 +37,14 @@ impl PageLink {
     pub fn page_rect(&self) -> [f32; 4] {
         self.page_rect
     }
+    pub fn target(&self) -> Option<&LinkDestination> {
+        self.destination.as_ref()
+    }
     pub fn destination(&self) -> Option<OutlineDestination> {
-        self.destination
+        match self.destination.as_ref()? {
+            LinkDestination::SameDocument(destination) => Some(*destination),
+            LinkDestination::AnotherDocument { .. } => None,
+        }
     }
 }
 
@@ -35,10 +53,10 @@ impl PageLink {
 pub fn page_links(path: &Path, page_index: usize) -> Result<Vec<PageLink>, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
-    links_bytes(data, page_index)
+    links_bytes(data, path, page_index)
 }
 
-fn links_bytes(data: Vec<u8>, page_index: usize) -> Result<Vec<PageLink>, String> {
+fn links_bytes(data: Vec<u8>, path: &Path, page_index: usize) -> Result<Vec<PageLink>, String> {
     let pdf = open_pdf(data)?;
     let page = pdf
         .pages()
@@ -118,15 +136,27 @@ fn links_bytes(data: Vec<u8>, page_index: usize) -> Result<Vec<PageLink>, String
             }
             let destination = annotation
                 .get::<Object<'_>>(b"Dest")
+                .and_then(|object| outline_destination(object, &pdf, &catalog, &names, &page_ids))
+                .map(LinkDestination::SameDocument)
                 .or_else(|| {
                     let action = annotation.get::<Dict<'_>>(b"A")?;
-                    (action
+                    match action
                         .get::<hayro::hayro_syntax::object::Name<'_>>(b"S")?
                         .as_ref()
-                        == b"GoTo")
-                        .then(|| action.get::<Object<'_>>(b"D"))?
-                })
-                .and_then(|object| outline_destination(object, &pdf, &catalog, &names, &page_ids));
+                    {
+                        b"GoTo" => outline_destination(
+                            action.get::<Object<'_>>(b"D")?,
+                            &pdf,
+                            &catalog,
+                            &names,
+                            &page_ids,
+                        )
+                        .map(LinkDestination::SameDocument),
+                        b"GoToR" => remote_destination(&action, path)
+                            .map(|(path, page)| LinkDestination::AnotherDocument { path, page }),
+                        _ => None,
+                    }
+                });
             links.push(PageLink {
                 document_rect: [x0, y0, x1, y1],
                 page_rect: [left as f32, top as f32, right as f32, bottom as f32],
@@ -137,12 +167,55 @@ fn links_bytes(data: Vec<u8>, page_index: usize) -> Result<Vec<PageLink>, String
     Ok(links)
 }
 
+fn remote_destination(action: &Dict<'_>, source: &Path) -> Option<(PathBuf, usize)> {
+    // Named remote destinations cannot be resolved against the source PDF.
+    let file = match action.get::<Object<'_>>(b"F")? {
+        Object::String(file) => file,
+        Object::Dict(dict) => dict
+            .get::<PdfString<'_>>(b"UF")
+            .or_else(|| dict.get::<PdfString<'_>>(b"F"))?,
+        _ => return None,
+    };
+    let filename = std::str::from_utf8(file.as_bytes()).ok()?;
+    let file = Path::new(filename);
+    if !file.extension()?.eq_ignore_ascii_case("pdf") {
+        return None;
+    }
+    let path = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        source.parent()?.join(file)
+    };
+    let destination = action.get::<Object<'_>>(b"D")?;
+    let page = match destination {
+        Object::Array(array) => {
+            let mut items = array.raw_iter();
+            let page = match items.next()? {
+                MaybeRef::NotRef(Object::Number(number)) => number.as_f64(),
+                _ => return None,
+            };
+            match items.next()? {
+                MaybeRef::NotRef(Object::Name(kind))
+                    if matches!(kind.as_ref(), b"Fit" | b"FitB") => {}
+                _ => return None,
+            }
+            page
+        }
+        Object::Number(number) => number.as_f64(),
+        _ => return None,
+    };
+    if !page.is_finite() || page < 0.0 || page.fract() != 0.0 || page >= usize::MAX as f64 {
+        return None;
+    }
+    Some((path, page as usize))
+}
+
 #[cfg(test)]
 pub(crate) fn linked_fixture() -> Vec<u8> {
     let objects = [
         "<< /Type /Catalog /Pages 2 0 R /Names << /Dests 13 0 R >> >>",
         "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /CropBox [20 50 320 550] /Rotate 90 /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 14 0 R 16 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /CropBox [20 50 320 550] /Rotate 90 /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 14 0 R 16 0 R 17 0 R 18 0 R] >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 1200] >>",
         "<< /Type /Annot /Subtype /Link /Rect [40 80 120 105] /Dest [4 0 R /XYZ 30 700 1.5] >>",
         "<< /Type /Annot /Subtype /Link /Rect [40 110 120 135] /A << /S /GoTo /D (chapter) >> >>",
@@ -156,6 +229,8 @@ pub(crate) fn linked_fixture() -> Vec<u8> {
         "<< /Type /Annot /Subtype /Link /Rect [0 0 60 90] /Dest [4 0 R /FitR 0 0 40 40] >>",
         "<< /D [3 0 R /XYZ 100 80 0] >>",
         "<< /Type /Annot /Subtype /Link /Rect [40 320 120 345] /Dest [4 0 R /XYZ (bad) 500 0] >>",
+        "<< /Type /Annot /Subtype /Link /Rect [40 350 120 375] /A << /S /GoToR /F (other.pdf) /D [1 /Fit] >> >>",
+        "<< /Type /Annot /Subtype /Link /Rect [40 380 120 405] /A << /S /GoToR /F (other.txt) /D [0 /Fit] >> >>",
     ];
     let mut bytes = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
@@ -187,12 +262,13 @@ mod tests {
 
     #[test]
     fn annotations_decode_named_fit_rotated_and_invalid_destinations() {
-        let links = links_bytes(linked_fixture(), 0).unwrap();
-        assert_eq!(links.len(), 9); // The annotation wholly outside the crop is skipped.
+        let links = links_bytes(linked_fixture(), Path::new("/books/source.pdf"), 0).unwrap();
+        assert_eq!(links.len(), 11); // The annotation wholly outside the crop is skipped.
         assert_eq!(links[0].document_rect(), [40.0, 80.0, 120.0, 105.0]);
         assert_eq!(links[7].document_rect(), [20.0, 50.0, 60.0, 90.0]);
-        assert_eq!(links[0].destination().unwrap().page(), 1);
-        assert_eq!(links[0].destination().unwrap().zoom(), Some(1.5));
+        let first = links[0].destination().unwrap();
+        assert_eq!(first.page(), 1);
+        assert_eq!(first.zoom(), Some(1.5));
         let named = links[1].destination().unwrap();
         assert_eq!(named.page(), 0);
         assert_eq!(named.point(), Some(Point { x: 100.0, y: 80.0 }));
@@ -209,7 +285,15 @@ mod tests {
             links[3].destination().unwrap().page_position().unwrap().1,
             900.0
         );
-        assert!(links[4..].iter().all(|link| link.destination().is_none()));
-        assert!(links_bytes(linked_fixture(), 2).is_err());
+        assert!(links[4..9].iter().all(|link| link.target().is_none()));
+        assert_eq!(
+            links[9].target(),
+            Some(&LinkDestination::AnotherDocument {
+                path: PathBuf::from("/books/other.pdf"),
+                page: 1
+            })
+        );
+        assert!(links[10].target().is_none());
+        assert!(links_bytes(linked_fixture(), Path::new("/books/source.pdf"), 2).is_err());
     }
 }

@@ -60,6 +60,22 @@ pub fn reopen(cx: &mut App) {
 }
 
 pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<DocumentWindow>, String> {
+    open_with_page(cx, path, None)
+}
+
+pub(crate) fn open_link(
+    cx: &mut App,
+    path: PathBuf,
+    page: usize,
+) -> Result<Entity<DocumentWindow>, String> {
+    open_with_page(cx, Some(path), Some(page))
+}
+
+fn open_with_page(
+    cx: &mut App,
+    path: Option<PathBuf>,
+    page: Option<usize>,
+) -> Result<Entity<DocumentWindow>, String> {
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
     let (handle, reader) = gpui_kit::open_window(
         WindowOptions {
@@ -68,7 +84,7 @@ pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<DocumentWindow
             ..TitleBar::window_options()
         },
         cx,
-        |window, cx| cx.new(|cx| DocumentWindow::new(path, window, cx)),
+        |window, cx| cx.new(|cx| DocumentWindow::new_with_page(path, page, window, cx)),
     )
     .map_err(|error| error.to_string())?;
     cx.update_window(handle, |_, window, _| window.activate_window())

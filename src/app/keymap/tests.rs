@@ -98,6 +98,57 @@ fn installed_contextual_action_wins_over_global_action(cx: &mut TestAppContext) 
     });
 }
 
+#[gpui_kit::test]
+fn switching_presets_replaces_reader_bindings_without_losing_kit_or_app_keys(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        let kit_bindings = cx.key_bindings().borrow().bindings().count();
+        install(cx);
+        let reader = [KeyContext::parse(key_context::READER).unwrap()];
+        let assert_reader = |cx: &App, keys: &str, expected: &str| {
+            let input = parse(keys, Platform::Mac.os()).unwrap();
+            let map = cx.key_bindings();
+            let bindings = map.borrow();
+            assert_eq!(
+                bindings.bindings_for_input(&input, &reader).0[0]
+                    .action()
+                    .name(),
+                expected
+            );
+        };
+        assert_reader(cx, "right", "kver::NextPage");
+        select_preset(cx, Preset::Vim);
+        assert_eq!(active_preset(cx), Preset::Vim);
+        assert_reader(cx, "right", "kver::ScrollRight");
+        assert_reader(cx, "n", "kver::NextPage");
+        assert_reader(cx, "cmd-o", "kver::OpenPdf");
+        let vim_count = cx.key_bindings().borrow().bindings().count();
+        select_preset(cx, Preset::Standard);
+        assert_eq!(active_preset(cx), Preset::Standard);
+        assert_reader(cx, "right", "kver::NextPage");
+        let input = parse("n", Platform::Mac.os()).unwrap();
+        assert!(
+            cx.key_bindings()
+                .borrow()
+                .bindings_for_input(&input, &reader)
+                .0
+                .is_empty()
+        );
+        assert_eq!(
+            cx.key_bindings().borrow().bindings().count(),
+            kit_bindings
+                + resolve(platform(cx), Preset::Standard)
+                    .unwrap()
+                    .bindings(cx)
+                    .len()
+        );
+        select_preset(cx, Preset::Vim);
+        assert_eq!(cx.key_bindings().borrow().bindings().count(), vim_count);
+    });
+}
+
 #[test]
 fn platform_filters_entries_before_duplicate_detection() {
     let overrides = || {
@@ -293,6 +344,10 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             ("shift-g", "kver::GoToDocumentEnd"),
             ("n", "kver::NextPage"),
             ("p", "kver::PreviousPage"),
+            ("o", "kver::OpenPdf"),
+            ("shift-o", "kver::ShowRecent"),
+            ("/", "kver::ShowFind"),
+            (":", "kver::ShowCommandPalette"),
             ("w", "kver::FitWidth"),
             ("f", "kver::FitPage"),
             ("s", "kver::SinglePage"),
@@ -302,7 +357,14 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             assert_eq!(map.action(keys, Context::Contents), None, "{keys}");
             assert_eq!(map.action(keys, Context::Global), None, "{keys}");
         }
-        assert_eq!(map.action("/", Context::Reader), Some("kver::ShowFind"));
+        for key in ["o", "shift-o", "/", ":"] {
+            assert_eq!(map.action(key, Context::Sidebar), None, "{key}");
+            assert_eq!(map.action(key, Context::Settings), None, "{key}");
+        }
+        let standard = resolve(platform, Preset::Standard).unwrap();
+        for key in ["o", "shift-o", "/", ":"] {
+            assert_eq!(standard.action(key, Context::Reader), None, "{key}");
+        }
         assert_eq!(
             map.action("ctrl-o", Context::Reader),
             Some("kver::NavigateBack")

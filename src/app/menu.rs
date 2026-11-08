@@ -26,6 +26,8 @@ pub use super::commands::{AboutKver, CheckForUpdates, Quit};
 #[cfg(target_os = "macos")]
 struct MenuState {
     updates_available: bool,
+    can_back: Cell<bool>,
+    can_forward: Cell<bool>,
 }
 #[cfg(target_os = "macos")]
 impl Global for MenuState {}
@@ -35,7 +37,11 @@ pub fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     let updates_available = crate::updater::install(cx);
     #[cfg(target_os = "macos")]
-    cx.set_global(MenuState { updates_available });
+    cx.set_global(MenuState {
+        updates_available,
+        can_back: Cell::new(false),
+        can_forward: Cell::new(false),
+    });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {
         if let Some(handle) = about_window.get()
@@ -75,6 +81,8 @@ pub fn install(cx: &mut App) {
 pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
     #[cfg(target_os = "macos")]
     if let Some(state) = cx.try_global::<MenuState>() {
+        state.can_back.set(can_back);
+        state.can_forward.set(can_forward);
         cx.set_menus([
             Menu::new("Kver").items([
                 MenuItem::action("About Kver", AboutKver),
@@ -118,6 +126,17 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (cx, can_back, can_forward);
+}
+
+/// Re-snapshot accelerators after a keymap change without discarding the
+/// active window's navigation availability.
+pub(crate) fn refresh_shortcuts(cx: &App) {
+    #[cfg(target_os = "macos")]
+    if let Some(state) = cx.try_global::<MenuState>() {
+        refresh_navigation(cx, state.can_back.get(), state.can_forward.get());
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = cx;
 }
 
 #[cfg(test)]

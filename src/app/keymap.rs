@@ -4,7 +4,9 @@
 //! Views still own focused contexts and action handlers; GPUI owns dispatch
 //! and pending multi-keystroke sequences. User file loading is not implemented.
 
-use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, Keystroke, OperatingSystem};
+use gpui_kit::{
+    Action, App, Global, KeyBinding, KeyBindingContextPredicate, Keystroke, OperatingSystem,
+};
 use std::{collections::HashSet, rc::Rc};
 
 use super::{
@@ -112,6 +114,32 @@ pub enum Preset {
     Vim,
 }
 
+impl Preset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::Vim => "Vim",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Vim => "vim",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "standard" => Ok(Self::Standard),
+            "vim" => Ok(Self::Vim),
+            _ => Err(format!(
+                "Unknown keyboard preset {value:?}; use standard or vim"
+            )),
+        }
+    }
+}
+
 /// One user-facing key slot. A missing action is an explicit unbind, not an
 /// absent override. A platform qualifier filters the entry before precedence.
 pub struct Entry {
@@ -170,6 +198,41 @@ pub struct ResolvedKeymap {
     platform: Platform,
 }
 
+struct InstalledKeymap {
+    baseline: Vec<KeyBinding>,
+    preset: Preset,
+}
+impl Global for InstalledKeymap {}
+
+pub fn active_preset(cx: &App) -> Preset {
+    cx.try_global::<InstalledKeymap>()
+        .map_or(Preset::default(), |map| map.preset)
+}
+
+pub fn platform(cx: &App) -> Platform {
+    match cx.platform_info().os {
+        OperatingSystem::Mac => Platform::Mac,
+        OperatingSystem::Windows => Platform::Windows,
+        _ => Platform::Linux,
+    }
+}
+
+/// Rebuild from Kit's original bindings rather than accumulating stale
+/// shortcuts from previously selected presets.
+pub fn select_preset(cx: &mut App, preset: Preset) {
+    let Some(installed) = cx.try_global::<InstalledKeymap>() else {
+        return;
+    };
+    if installed.preset == preset {
+        return;
+    }
+    let baseline = installed.baseline.clone();
+    cx.clear_key_bindings();
+    cx.bind_keys(baseline);
+    install_preset(cx, preset);
+    super::menu::refresh_shortcuts(cx);
+}
+
 impl ResolvedKeymap {
     /// Return the effective command, including contextual unbinding and fallback.
     pub fn action(&self, keys: &str, context: Context) -> Option<&str> {
@@ -183,6 +246,29 @@ impl ResolvedKeymap {
                     .find(|slot| slot.sequence == sequence && slot.entry.context == candidate)
             })
             .and_then(|slot| slot.entry.action.as_ref().map(|action| action.name()))
+    }
+
+    pub fn shortcuts(&self, action: &dyn Action, context: Context) -> Vec<&str> {
+        self.slots
+            .iter()
+            .filter_map(|slot| {
+                let bound = slot.entry.action.as_ref()?;
+                (bound.name() == action.name()
+                    && context.inherits_from(slot.entry.context)
+                    && self.action(&slot.entry.keys, context) == Some(action.name()))
+                .then_some(slot.entry.keys.as_str())
+            })
+            .collect()
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (Context, &str, &str)> {
+        self.slots.iter().filter_map(|slot| {
+            Some((
+                slot.entry.context,
+                slot.entry.action.as_ref()?.name(),
+                slot.entry.keys.as_str(),
+            ))
+        })
     }
 
     /// Bind only the resolved policy, rather than adding each layer to GPUI.
@@ -335,19 +421,23 @@ pub fn resolve_with(
 
 /// Register the effective defaults once, before native menus snapshot keys.
 pub fn install(cx: &mut App) {
+    let baseline = cx.key_bindings().borrow().bindings().cloned().collect();
+    cx.set_global(InstalledKeymap {
+        baseline,
+        preset: Preset::default(),
+    });
     install_preset(cx, Preset::default());
 }
 
-/// Install a selected preset before building native menus. Preset selection
-/// and live switching are separate from the embedded policy.
+/// Install a selected preset before building native menus. For an already
+/// initialized app, use `select_preset` to replace rather than append bindings.
 pub fn install_preset(cx: &mut App, preset: Preset) {
-    let platform = match cx.platform_info().os {
-        OperatingSystem::Mac => Platform::Mac,
-        OperatingSystem::Windows => Platform::Windows,
-        _ => Platform::Linux,
-    };
-    let map = resolve(platform, preset).expect("embedded keyboard defaults are valid");
+    let map = resolve(platform(cx), preset).expect("embedded keyboard defaults are valid");
     cx.bind_keys(map.bindings(cx));
+    if cx.has_global::<InstalledKeymap>() {
+        let installed = cx.global_mut::<InstalledKeymap>();
+        installed.preset = preset;
+    }
 }
 
 fn common() -> Vec<Entry> {
@@ -440,7 +530,10 @@ fn preset_defaults(preset: Preset) -> Vec<Entry> {
                 Entry::bind("shift-space", Context::Reader, ScrollHalfScreenUp),
                 Entry::bind("g g", Context::Reader, GoToDocumentStart),
                 Entry::bind("shift-g", Context::Reader, GoToDocumentEnd),
+                Entry::bind("o", Context::Reader, OpenPdf),
+                Entry::bind("shift-o", Context::Reader, ShowRecent),
                 Entry::bind("/", Context::Reader, ShowFind),
+                Entry::bind(":", Context::Reader, ShowCommandPalette),
                 Entry::bind("=", Context::Reader, ZoomIn),
                 Entry::bind("shift-=", Context::Reader, ZoomIn),
                 Entry::bind("-", Context::Reader, ZoomOut),

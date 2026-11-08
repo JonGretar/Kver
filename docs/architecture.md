@@ -27,14 +27,17 @@ page, Page Up/Down scroll by most of the measured viewport, Command/Ctrl plus
 or minus changes zoom, and modified page-turn keys follow the platform.
 Vim keeps reader-only `j/k` for vertical steps, `h/l` and Left/Right for
 horizontal steps, `n/p` for page turns, Space/Shift-Space for half-screen
-vertical scrolling, `gg/G` for document bounds, `/` for Find, `=/−` for
+vertical scrolling, `gg/G` for document bounds, `o/O` for Open PDF/Recent,
+`/` for Find, `:` for the command palette, `=/−` for
 zoom, `w/f` for fit, `s/c` for reading mode, and local-mark sequences.
 Horizontal keys do nothing when the current page fits the viewport.
 Standard leaves those letters free and uses the marks dialog and palette.
 Both presets inherit application commands (including macOS Command-Q/W)
-and the Reader/Contents-only Ctrl-O/I jumplist bindings. The selected
-preset can be installed through the same resolver; choosing it in Settings
-and switching it live are separate work.
+and the Reader/Contents-only Ctrl-O/I jumplist bindings. Settings persists
+`[keyboard].preset`; switching replaces installed keys from Kit's
+original bindings plus the newly resolved preset and refreshes native menus.
+Keyboard Settings shows context- and task-grouped bindings. The command
+palette shows contextual reader hints alongside its Action-derived global hints.
 The policy addresses a slot by product context and complete key sequence. A
 later layer replaces that slot; an explicit contextual unbind masks the same
 key inherited from its parent (including a global key) only in that context.
@@ -45,8 +48,8 @@ Reader, Sidebar, Contents, Settings, and About are stable product contexts;
 the sidebar contains Contents, while Reader and the auxiliary windows do not
 overlap. `src/key_context.rs` shares their GPUI names with the focused views.
 Features still own their Actions and handlers. GPUI owns dispatch, pending
-sequences, Escape cancellation, and focus invalidation. User file loading and
-keymap reloads are not implemented. Scroll and document-bound commands are
+sequences, Escape cancellation, and focus invalidation. User keymap override
+loading and reloads are separate work. Scroll and document-bound commands are
 semantic reader Actions, bound only while Reader owns focus, rather than
 physical keys interpreted by the view. The scroll content expands to the
 widest visible page so GPUI can clamp horizontal offsets to real content.

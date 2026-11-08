@@ -1,5 +1,5 @@
 use super::*;
-use gpui_kit::{AppContext as _, TestAppContext, test::TestWindowExt};
+use gpui_kit::{AppContext as _, Focusable as _, TestAppContext, test::TestWindowExt};
 
 #[test]
 fn finder_file_urls_preserve_special_characters() {
@@ -17,10 +17,10 @@ fn ignore_non_file_and_invalid_urls() {
 #[gpui_kit::test]
 fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext) {
     // Use the production initialization order without accessing user storage.
-    let reader = cx.update(|cx| {
+    let (reader, document) = cx.update(|cx| {
         initialize(cx, None);
-        windows::open(cx, None).unwrap();
-        cx.windows()[0]
+        let document = windows::open(cx, None).unwrap();
+        (cx.windows()[0], document)
     });
     cx.update_window(reader, |_, window, cx| {
         window.render_frame(cx);
@@ -42,6 +42,19 @@ fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext
     .unwrap();
     cx.run_until_parked();
     assert_eq!(cx.update(|cx| cx.windows()), vec![reader]);
+
+    cx.update_window(reader, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            document
+                .read(cx)
+                .reader()
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        );
+    })
+    .unwrap();
 
     cx.update(|cx| {
         cx.update_window(reader, |_, window, _| window.activate_window())

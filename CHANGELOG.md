@@ -28,6 +28,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Use conventional Standard reader shortcuts for scrolling, pages, zoom, and
+  window switching. Vim-style letters and mark sequences are no longer
+  Standard shortcuts; marks remain available through the dialog and palette.
 - Split Settings into Application, Reader, and Persistence pages with working sidebar navigation and matching config sections. Existing config files remain readable.
 - Rename the appearance config key to `[application].appearance`; existing `theme_mode` values remain readable and migrate on save.
 - Apply valid edits to the settings file while Kver is open; keep the last working appearance and show an error during incomplete or invalid edits without overwriting the file.

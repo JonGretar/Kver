@@ -26,6 +26,11 @@ use hayro::{
 
 use crate::coordinates::{PageTransform, Point};
 
+mod links;
+#[cfg(test)]
+pub(crate) use links::linked_fixture;
+pub use links::{PageLink, page_links};
+
 pub struct RenderedPage {
     pub png: Vec<u8>,
     /// Number of pages in the opened document.
@@ -88,6 +93,13 @@ pub struct OutlineDestination {
     page_y: Option<f32>,
     /// Explicit /XYZ zoom; other destinations keep reader zoom.
     zoom: Option<f32>,
+    fit: Option<DestinationFit>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DestinationFit {
+    Page,
+    Width,
 }
 
 impl OutlineDestination {
@@ -102,6 +114,9 @@ impl OutlineDestination {
     }
     pub fn zoom(&self) -> Option<f32> {
         self.zoom
+    }
+    pub fn fit(&self) -> Option<DestinationFit> {
+        self.fit
     }
 }
 
@@ -208,8 +223,9 @@ fn outline_destination(
         _ => return None,
     };
     let crop = pdf.pages()[page].intersected_crop_box();
-    let number = |item: Option<MaybeRef<Object<'_>>>| -> Option<f64> {
+    let number = |item: Option<MaybeRef<Object<'_>>>, fallback: f64| -> Option<f64> {
         match item? {
+            MaybeRef::NotRef(Object::Null(_)) => Some(fallback),
             MaybeRef::NotRef(Object::Number(n)) => {
                 let v = n.as_f64();
                 v.is_finite().then_some(v)
@@ -217,19 +233,28 @@ fn outline_destination(
             _ => None,
         }
     };
-    let (point, zoom) = match kind.as_ref() {
-        b"Fit" | b"FitB" => (None, None),
+    let (point, zoom, fit) = match kind.as_ref() {
+        b"Fit" | b"FitB" => (None, None, Some(DestinationFit::Page)),
         b"FitH" | b"FitBH" => {
-            let y = number(items.next()).unwrap_or(crop.y1);
-            (Some(Point { x: crop.x0, y }), None)
+            let y = number(items.next(), crop.y1)?;
+            (
+                Some(Point { x: crop.x0, y }),
+                None,
+                Some(DestinationFit::Width),
+            )
         }
         b"XYZ" => {
-            let x = number(items.next()).unwrap_or(crop.x0);
-            let y = number(items.next()).unwrap_or(crop.y1);
-            let zoom = number(items.next())
-                .filter(|&z| z > 0.0 && z <= 4.0)
-                .map(|z| z as f32);
-            (Some(Point { x, y }), zoom)
+            let x = number(items.next(), crop.x0)?;
+            let y = number(items.next(), crop.y1)?;
+            let zoom = number(items.next(), 0.0)?;
+            if zoom < 0.0 || zoom > 4.0 {
+                return None;
+            }
+            (
+                Some(Point { x, y }),
+                (zoom > 0.0).then_some(zoom as f32),
+                None,
+            )
         }
         _ => return None,
     };
@@ -241,12 +266,18 @@ fn outline_destination(
         PageTransform::from_coefficients(pdf.pages()[page].initial_transform(true).as_coeffs())
             .document_to_page(p)
     });
+    if page_point.is_some_and(|p| {
+        !p.x.is_finite() || !p.y.is_finite() || p.x > f32::MAX as f64 || p.y > f32::MAX as f64
+    }) {
+        return None;
+    }
     Some(OutlineDestination {
         page,
         point,
         page_x: page_point.map(|p| p.x as f32),
         page_y: page_point.map(|p| p.y as f32),
         zoom,
+        fit,
     })
 }
 
@@ -1030,9 +1061,16 @@ mod tests {
     fn illustrated_field_guide_has_pages_and_outline() {
         let sample = include_bytes!("../examples/field-guide.pdf").to_vec();
         let outline = outline_bytes(sample.clone()).unwrap();
-        assert_eq!(outline[0].title, "1 Landscape");
+        assert_eq!(outline[0].title, "Landscape");
         assert_eq!(outline[0].destination.unwrap().page, 2);
-        assert!(outline.iter().any(|entry| entry.title == "3 Measurements"));
+        assert!(outline.iter().any(|entry| entry.title == "Measurements"));
+
+        let cover_links = page_links(Path::new("examples/field-guide.pdf"), 0).unwrap();
+        assert_eq!(cover_links.len(), 3);
+        assert!(cover_links.iter().all(|link| link.destination().is_some()));
+        assert_eq!(cover_links[0].destination().unwrap().page(), 7);
+        assert_eq!(cover_links[1].destination().unwrap().page(), 12);
+        assert_eq!(cover_links[2].destination().unwrap().page(), 22);
 
         let page = render_bytes(sample, 2, 1.0).unwrap();
         assert_eq!(page.page_count, 24);

@@ -17,10 +17,11 @@ complete; further goals have no fixed release sequence. See
 | 4. Remember and configure reading | **Complete** | Settings, recent files, positions, Single Page, and local marks work together ([#77](https://github.com/JonGretar/Kver/issues/77)); no release version or date is assigned. |
 | Linux and Windows delivery | **Not scheduled** | Separate release gates; they do not block macOS. |
 
-**Next work:** No further reader gate is scheduled. Internal links,
-navigation history, and the other [unscheduled goals](#goals-to-schedule-after-evidence)
-remain deferred. GitHub Issues tracks live ownership and blockers; the
-[feature workflow](agents/workflow.md) explains how to check work status.
+**Next work:** No further reader gate is scheduled. Same-document PDF links
+are the first slice of [navigation spec #96](https://github.com/JonGretar/Kver/issues/96);
+the jumplist, Back/Forward, and another-PDF links remain open. GitHub Issues
+tracks live ownership and blockers; the [feature workflow](agents/workflow.md)
+explains how to check work status.
 
 ## 0. Validate the stack
 

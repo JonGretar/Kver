@@ -9,6 +9,7 @@ use gpui_kit::{AnyWindowHandle, TestAppContext, point, size, test::TestWindowExt
 use std::collections::BTreeMap;
 
 mod find;
+mod links;
 mod loading;
 mod marks;
 mod navigation;

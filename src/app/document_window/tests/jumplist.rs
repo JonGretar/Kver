@@ -245,3 +245,210 @@ fn replacement_clears_history_and_rejects_obsolete_jump(cx: &mut TestAppContext)
     reader.update(cx, |reader, cx| assert!(!reader.restore_jump(&old, cx)));
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
 }
+
+#[gpui_kit::test]
+fn keyboard_traversal_restores_both_locations_without_appending(cx: &mut TestAppContext) {
+    let (_root, window, document) = linked_window(cx);
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    reader.update(cx, |reader, cx| {
+        reader.set_reading_mode(ReadingMode::SinglePage, cx);
+        reader.fit_width(cx);
+    });
+    let origin = reader.read_with(cx, |reader, _| reader.jump_location().unwrap());
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    let destination = reader.read_with(cx, |reader, _| reader.jump_location().unwrap());
+    reader.update(cx, |reader, cx| reader.select_page(0, cx));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("ctrl-o", cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, _| {
+        assert!(reader.jump_location().unwrap().equivalent(&origin));
+        assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
+        assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth);
+    });
+    document.read_with(cx, |document, _| {
+        assert!(document.jumplist.can_forward());
+        assert!(!document.jumplist.can_back());
+        assert_eq!(document.jumplist.entries.len(), 2);
+    });
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+        .unwrap();
+    reader.read_with(cx, |reader, _| {
+        assert!(reader.jump_location().unwrap().equivalent(&destination));
+        assert_eq!(reader.zoom_mode(), ZoomMode::Fixed);
+        assert_eq!(reader.scale(), 1.5);
+    });
+    document.read_with(cx, |document, _| {
+        assert!(!document.jumplist.can_forward());
+        assert!(document.jumplist.can_back());
+        assert_eq!(document.jumplist.entries.len(), 2);
+    });
+}
+
+#[gpui_kit::test]
+fn new_jump_after_back_discards_forward_branch(cx: &mut TestAppContext) {
+    let (_root, window, document) = linked_window(cx);
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("ctrl-o", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| assert!(document.jumplist.can_forward()));
+    let path = reader.read_with(cx, |reader, _| reader.path().unwrap().to_path_buf());
+    let link = crate::pdf::page_links(&path, 0).unwrap().remove(0);
+    // A different departure state produces a new branch even if the target
+    // is the same page as the abandoned destination.
+    reader.update(cx, |reader, cx| {
+        reader.zoom_in(cx);
+        reader.navigate_outline(link.destination().unwrap(), cx);
+    });
+    document.read_with(cx, |document, _| {
+        assert!(!document.jumplist.can_forward());
+        assert_eq!(
+            document.jumplist.cursor,
+            document.jumplist.entries.len() - 1
+        );
+    });
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+        .unwrap();
+    reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+}
+
+#[gpui_kit::test]
+fn invalid_entries_are_removed_and_obsolete_generation_cannot_restore(cx: &mut TestAppContext) {
+    let (_root, window, document) = linked_window(cx);
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    let old = document.read_with(cx, |document, _| document.jumplist.entries[0].clone());
+    document.update(cx, |document, _| {
+        document.jumplist.entries[0] = old.clone().with_page(usize::MAX);
+    });
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-o", cx))
+        .unwrap();
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.jumplist.entries.len(), 1);
+        assert!(!document.jumplist.can_back());
+    });
+    reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
+
+    reader.update(cx, |reader, cx| {
+        reader.open_path(PathBuf::from("examples/field-guide.pdf"), cx)
+    });
+    cx.run_until_parked();
+    document.update(cx, |document, cx| {
+        document.jumplist.entries = vec![old];
+        document
+            .jumplist
+            .entries
+            .push(reader.read(cx).jump_location().unwrap());
+        document.jumplist.cursor = 1;
+        document.traverse_jumplist(-1, cx);
+        assert_eq!(document.jumplist.entries.len(), 1);
+    });
+    reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
+}
+
+#[gpui_kit::test]
+fn traversal_of_a_long_document_keeps_window_histories_independent(cx: &mut TestAppContext) {
+    setup(cx);
+    let path = PathBuf::from("examples/readme-sample.pdf");
+    let (window, document) = open(cx, Some(path.clone()));
+    let (_, independent) = open(cx, Some(path));
+    cx.run_until_parked();
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    let origin = reader.read_with(cx, |reader, _| reader.jump_location().unwrap());
+    reader.update(cx, |reader, cx| reader.select_page(99, cx));
+    let destination = reader.read_with(cx, |reader, _| reader.jump_location().unwrap());
+    reader.update(cx, |_, cx| {
+        cx.emit(JumpEvent {
+            from: origin.clone(),
+            to: destination.clone(),
+        });
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.dispatch_action(Box::new(NavigateBack), cx);
+        frame.dispatch_action(Box::new(NavigateForward), cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, _| {
+        assert_eq!(reader.page_index(), 99);
+        assert!(reader.jump_location().unwrap().equivalent(&destination));
+    });
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.jumplist.entries.len(), 2)
+    });
+    independent.read_with(cx, |document, _| {
+        assert!(document.jumplist.entries.is_empty())
+    });
+}
+
+#[gpui_kit::test]
+fn back_works_after_a_contents_jump_while_sidebar_keeps_focus(cx: &mut TestAppContext) {
+    setup(cx);
+    let (window, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("cmd-t", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click(("contents-entry", 0usize), cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.jumplist.entries.len(), 2)
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("ctrl-o", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+        .unwrap();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 1));
+}
+
+#[gpui_kit::test]
+fn forward_shortcut_does_not_steal_find_input_focus(cx: &mut TestAppContext) {
+    let (_root, window, document) = linked_window(cx);
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("ctrl-o", cx);
+        frame.press("cmd-f", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("ctrl-i", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+}

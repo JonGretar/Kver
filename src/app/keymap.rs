@@ -9,9 +9,9 @@ use std::{collections::HashSet, rc::Rc};
 
 use super::{
     commands::Quit,
-    document_window::OpenPdf,
     document_window::command_palette::ShowCommandPalette,
     document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar},
+    document_window::{NavigateBack, NavigateForward, OpenPdf},
     windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow},
 };
 use crate::{
@@ -363,6 +363,10 @@ fn common() -> Vec<Entry> {
         Entry::bind("cmd-alt-w", Context::Global, FitWidth),
         Entry::bind("cmd-alt-f", Context::Global, FitPage),
         Entry::bind("cmd-c", Context::Reader, Copy),
+        Entry::bind("ctrl-o", Context::Reader, NavigateBack),
+        Entry::bind("ctrl-i", Context::Reader, NavigateForward),
+        Entry::bind("ctrl-o", Context::Contents, NavigateBack),
+        Entry::bind("ctrl-i", Context::Contents, NavigateForward),
     ];
     for (letter, set, jump, delete) in MARK_KEY_SEQUENCES {
         entries.extend([

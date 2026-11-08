@@ -143,6 +143,12 @@ impl JumpLocation {
             && (self.scale - other.scale).abs() < 0.001
             && self.reading_mode == other.reading_mode
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_page(mut self, page: usize) -> Self {
+        self.page = page;
+        self
+    }
 }
 
 impl gpui::EventEmitter<JumpEvent> for ReaderView {}
@@ -592,7 +598,6 @@ impl ReaderView {
     }
 
     /// Apply a stored logical location without creating another semantic jump.
-    #[allow(dead_code)] // Cursor navigation consumes this restoration seam in #99.
     pub(crate) fn restore_jump(&mut self, location: &JumpLocation, cx: &mut Context<Self>) -> bool {
         if self.path.as_ref() != Some(&location.path)
             || self.document_generation != location.generation
@@ -603,12 +608,15 @@ impl ReaderView {
             || location.x < 0.0
             || location.y < 0.0
             || !(0.25..=4.0).contains(&location.scale)
+            || location.x > self.pages[location.page].0
+            || location.y > self.pages[location.page].1
         {
             return false;
         }
         self.position_touched = true;
         self.pending_restore = None;
         self.reading_mode = location.reading_mode;
+        self.mode_override = Some(location.reading_mode);
         self.zoom_mode = location.zoom_mode;
         self.focus_page(location.page);
         self.set_scale(

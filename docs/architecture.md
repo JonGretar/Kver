@@ -130,8 +130,10 @@ identity and generation, page-local PDF-point x/y, zoom mode and scale, and
 reading mode, never selection or highlights. Replacing the document clears
 the window's list; independent windows do not share one. Ordinary scrolling,
 zooming, fitting, and page turns change the live position without adding
-entries. Cursor movement and its command bindings are a separate navigation
-slice.
+entries. The window traverses stored locations without emitting another jump,
+removes entries the reader cannot restore, and truncates the forward branch on
+the next semantic jump. Reader- and Contents-scoped `Ctrl-O` and `Ctrl-I` are
+resolved through the application keymap, not interpreted by the reader.
 Pure rules are tested under `src/reader/navigation/`; reader integration
 tests exercise the real input, rendering, and history paths.
 

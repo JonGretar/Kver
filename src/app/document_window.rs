@@ -37,6 +37,7 @@ use command_palette::{
     CommandAvailability, CommandPalette, DismissCommandPalette, ShowCommandPalette,
 };
 use jumplist::Jumplist;
+pub(crate) use jumplist::{NavigateBack, NavigateForward};
 use sidebar::{ReaderSidebar, SidebarPanel};
 
 gpui_kit::actions!(kver, [OpenPdf]);
@@ -302,6 +303,13 @@ impl DocumentWindow {
             .read(cx)
             .focus_handle(cx)
             .dispatch_action(action, window, cx);
+    }
+
+    fn traverse_jumplist(&mut self, direction: i32, cx: &mut Context<Self>) {
+        self.jumplist.traverse(direction, |location| {
+            self.reader
+                .update(cx, |reader, cx| reader.restore_jump(location, cx))
+        });
     }
 
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -585,6 +593,10 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<SetLocalMark>))
             .on_action(cx.listener(Self::route_reader_action::<JumpLocalMark>))
             .on_action(cx.listener(Self::route_reader_action::<DeleteLocalMark>))
+            .on_action(cx.listener(|this, _: &NavigateBack, _, cx| this.traverse_jumplist(-1, cx)))
+            .on_action(
+                cx.listener(|this, _: &NavigateForward, _, cx| this.traverse_jumplist(1, cx)),
+            )
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &NextWindow, window, cx| windows::cycle(window, cx, 1))
             .on_action(|_: &PreviousWindow, window, cx| windows::cycle(window, cx, -1))

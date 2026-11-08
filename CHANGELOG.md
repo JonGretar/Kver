@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Return to earlier link, Find, Contents, and local-mark locations with Control-O, and move forward again with Control-I. A new jump after going back replaces the abandoned forward path.
 - Open supported links to another local PDF in a new window at the linked page, leaving the original document in place; missing or invalid targets show an error.
 - Follow same-PDF links by clicking them or focusing a link and pressing Enter; supported links can target a page, position, and zoom. Invalid or unsupported links leave the current place intact.
 - Set, revisit, replace, or delete per-PDF letter marks with reader keys or the command palette. Open a searchable list of saved marks and their page positions with Command-Shift-M, and optionally name marks in that popup. Marks and names survive restarts when reading history is on.

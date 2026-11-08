@@ -123,6 +123,24 @@ fn platform_filters_entries_before_duplicate_detection() {
             let map = resolve(platform, preset).unwrap();
             assert_eq!(map.action("n", Context::Reader), Some("kver::NextPage"));
             assert_eq!(map.action("cmd-o", Context::Global), Some("kver::OpenPdf"));
+            assert_eq!(
+                map.action("ctrl-o", Context::Reader),
+                Some("kver::NavigateBack")
+            );
+            assert_eq!(
+                map.action("ctrl-i", Context::Reader),
+                Some("kver::NavigateForward")
+            );
+            assert_eq!(
+                map.action("ctrl-o", Context::Contents),
+                Some("kver::NavigateBack")
+            );
+            assert_eq!(
+                map.action("ctrl-i", Context::Contents),
+                Some("kver::NavigateForward")
+            );
+            assert_eq!(map.action("ctrl-i", Context::Sidebar), None);
+            assert_eq!(map.action("ctrl-i", Context::Global), None);
         }
     }
 }

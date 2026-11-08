@@ -125,7 +125,14 @@ fn window_commands_bubble_from_sidebar_and_palette_without_moving_the_other_read
         window.press("cmd-f", cx);
         window.render_frame(cx);
         window.input("next", cx);
-        window.press("cmd-`", cx);
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-`"
+            } else {
+                "ctrl-f6"
+            },
+            cx,
+        );
     })
     .unwrap();
     cx.run_until_parked();

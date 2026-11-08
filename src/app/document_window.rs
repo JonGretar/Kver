@@ -5,6 +5,7 @@
 
 mod chrome;
 pub mod command_palette;
+mod jumplist;
 pub mod sidebar;
 
 use std::path::PathBuf;
@@ -20,10 +21,10 @@ use gpui_kit::{
 use super::windows::{self, CloseWindow, NextWindow, PreviousWindow};
 use crate::{
     reader::{
-        Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpLocalMark,
-        MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView, ScrollDown,
-        ScrollUp, SetLocalMark, ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks,
-        ShowSetMark, SinglePage, ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
+        Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpEvent,
+        JumpLocalMark, MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView,
+        ScrollDown, ScrollUp, SetLocalMark, ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark,
+        ShowMarks, ShowSetMark, SinglePage, ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::{
         ShowRecent,
@@ -35,12 +36,14 @@ use crate::{
 use command_palette::{
     CommandAvailability, CommandPalette, DismissCommandPalette, ShowCommandPalette,
 };
+use jumplist::Jumplist;
 use sidebar::{ReaderSidebar, SidebarPanel};
 
 gpui_kit::actions!(kver, [OpenPdf]);
 
 pub struct DocumentWindow {
     reader: Entity<ReaderView>,
+    jumplist: Jumplist,
     file_picker: Option<Task<()>>,
     recent: Option<Entity<RecentPicker>>,
     recent_subscription: Option<Subscription>,
@@ -51,6 +54,7 @@ pub struct DocumentWindow {
     _reader_observation: Subscription,
     _settings_observation: Subscription,
     _document_subscription: Subscription,
+    _jump_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
 
@@ -73,6 +77,11 @@ impl DocumentWindow {
             cx.subscribe_in(&reader, window, |this, _, event, window, cx| {
                 this.on_document_event(event, window, cx);
             });
+        let jump_subscription = cx.subscribe(&reader, |this, _, jump: &JumpEvent, cx| {
+            if this.reader.read(cx).jump_location().as_ref() == Some(&jump.to) {
+                this.jumplist.record(jump);
+            }
+        });
         let reader_observation = cx.observe(&reader, |_, _, cx| cx.notify());
         let settings = settings_ui::state(cx);
         let settings_observation = cx.observe_in(&settings, window, |this, _, window, cx| {
@@ -80,6 +89,7 @@ impl DocumentWindow {
         });
         Self {
             reader,
+            jumplist: Jumplist::default(),
             file_picker: None,
             recent: None,
             recent_subscription: None,
@@ -90,6 +100,7 @@ impl DocumentWindow {
             _reader_observation: reader_observation,
             _settings_observation: settings_observation,
             _document_subscription: document_subscription,
+            _jump_subscription: jump_subscription,
             _appearance_subscription: appearance_subscription,
         }
     }
@@ -355,6 +366,9 @@ impl DocumentWindow {
         };
         if generation != self.reader.read(cx).document_generation() {
             return;
+        }
+        if matches!(event, DocumentEvent::Replaced { .. }) {
+            self.jumplist.clear();
         }
         self.sync_sidebar_document(cx);
         if self

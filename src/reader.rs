@@ -108,6 +108,40 @@ pub(crate) enum DocumentEvent {
 
 impl gpui::EventEmitter<DocumentEvent> for ReaderView {}
 
+/// A semantic jump, emitted only after a valid destination has been applied.
+pub(crate) struct JumpEvent {
+    pub(crate) from: JumpLocation,
+    pub(crate) to: JumpLocation,
+}
+
+/// Window-local logical location; no viewport pixels or transient selection.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JumpLocation {
+    path: PathBuf,
+    generation: u64,
+    page: usize,
+    x: f32,
+    y: f32,
+    zoom_mode: ZoomMode,
+    scale: f32,
+    reading_mode: ReadingMode,
+}
+
+impl JumpLocation {
+    pub(crate) fn equivalent(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.generation == other.generation
+            && self.page == other.page
+            && (self.x - other.x).abs() < 1.0
+            && (self.y - other.y).abs() < 1.0
+            && self.zoom_mode == other.zoom_mode
+            && (self.scale - other.scale).abs() < 0.001
+            && self.reading_mode == other.reading_mode
+    }
+}
+
+impl gpui::EventEmitter<JumpEvent> for ReaderView {}
+
 impl gpui::Focusable for ReaderView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -240,10 +274,12 @@ impl ReaderView {
                             && position.y.is_finite()
                             && position.y >= 0.0
                         {
+                            let before = reader.jump_location();
                             reader.position_touched = true;
                             reader.pending_restore = None;
                             reader.restore_position(*position);
                             reader.sync_viewport(cx);
+                            reader.emit_jump(before, cx);
                         } else {
                             reader.status = format!("Local mark {letter} is outside this PDF");
                         }
@@ -289,6 +325,7 @@ impl ReaderView {
         if hit.page >= self.pages.len() {
             return;
         }
+        let before = self.jump_location();
         self.position_touched = true;
         let (_, width, height) = self.viewport();
         self.focus_page(hit.page);
@@ -308,6 +345,7 @@ impl ReaderView {
                 .offset_for(Position { page: hit.page, y }, height * 0.25),
         );
         self.sync_viewport(cx);
+        self.emit_jump(before, cx);
         cx.notify();
     }
 
@@ -517,6 +555,73 @@ impl ReaderView {
         let (top, _, _) = self.viewport();
         let position = self.layout().position_at(top);
         (position.page, position.y)
+    }
+    pub(crate) fn jump_location(&self) -> Option<JumpLocation> {
+        let path = self.path.clone()?;
+        if self.pages.is_empty() {
+            return None;
+        }
+        let position = self.position_to_save();
+        Some(JumpLocation {
+            path,
+            generation: self.document_generation,
+            page: position.page,
+            x: (-f32::from(self.scroll.offset().x)).max(0.0) / self.scale,
+            y: position.y,
+            zoom_mode: self.zoom_mode,
+            scale: self.scale,
+            reading_mode: self.reading_mode,
+        })
+    }
+
+    fn emit_jump(&self, before: Option<JumpLocation>, cx: &mut Context<Self>) {
+        if let (Some(from), Some(to)) = (before, self.jump_location())
+            && !from.equivalent(&to)
+        {
+            cx.emit(JumpEvent { from, to });
+        }
+    }
+
+    /// Apply a stored logical location without creating another semantic jump.
+    #[allow(dead_code)] // Cursor navigation consumes this restoration seam in #99.
+    pub(crate) fn restore_jump(&mut self, location: &JumpLocation, cx: &mut Context<Self>) -> bool {
+        if self.path.as_ref() != Some(&location.path)
+            || self.document_generation != location.generation
+            || location.page >= self.pages.len()
+            || !location.x.is_finite()
+            || !location.y.is_finite()
+            || !location.scale.is_finite()
+            || location.x < 0.0
+            || location.y < 0.0
+            || !(0.25..=4.0).contains(&location.scale)
+        {
+            return false;
+        }
+        self.position_touched = true;
+        self.pending_restore = None;
+        self.reading_mode = location.reading_mode;
+        self.zoom_mode = location.zoom_mode;
+        self.focus_page(location.page);
+        self.set_scale(
+            location.scale,
+            Position {
+                page: location.page,
+                y: location.y,
+            },
+            0.0,
+        );
+        self.scroll_to(
+            location.x * self.scale,
+            self.layout().offset_for(
+                Position {
+                    page: location.page,
+                    y: location.y.min(self.pages[location.page].1),
+                },
+                0.0,
+            ),
+        );
+        self.sync_viewport(cx);
+        true
     }
     pub fn page_count(&self) -> Option<usize> {
         (!self.pages.is_empty()).then_some(self.pages.len())
@@ -854,6 +959,7 @@ impl ReaderView {
         if page >= self.pages.len() {
             return;
         }
+        let before = self.jump_location();
         self.position_touched = true;
         self.focus_page(page);
         if let Some(zoom) = destination.zoom() {
@@ -883,6 +989,7 @@ impl ReaderView {
         self.schedule(cx);
         self.schedule_text(cx);
         self.schedule_links(cx);
+        self.emit_jump(before, cx);
         cx.notify();
     }
     fn activate_link(

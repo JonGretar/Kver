@@ -3,6 +3,7 @@ use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
 mod contents;
 mod find;
+mod jumplist;
 mod palette;
 mod recent_history;
 mod recent_picker;

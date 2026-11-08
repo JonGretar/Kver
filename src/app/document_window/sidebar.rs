@@ -155,7 +155,7 @@ impl Render for ReaderSidebar {
                     );
                 }),
             )
-            .key_context("ReaderSidebar")
+            .key_context(crate::key_context::SIDEBAR)
             .role(gpui_kit::Role::Complementary)
             .aria_label("Document sidebar")
             .flex()

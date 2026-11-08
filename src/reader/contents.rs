@@ -303,7 +303,7 @@ impl Render for ContentsPanel {
             .id("contents-panel")
             .test_support()
             .track_focus(&self.focus)
-            .key_context("ContentsPanel")
+            .key_context(crate::key_context::CONTENTS)
             .on_action(cx.listener(|this, _: &ActivateOutline, _, cx| this.activate_selected(cx)))
             .role(gpui_kit::Role::Navigation)
             .aria_label("PDF contents")

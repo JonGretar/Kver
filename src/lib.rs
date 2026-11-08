@@ -11,6 +11,8 @@ pub use app::{
 pub mod assets;
 pub mod coordinates;
 pub mod find_search;
+#[cfg(feature = "gui")]
+pub mod key_context;
 pub mod pdf;
 #[cfg(feature = "gui")]
 pub mod reader;

@@ -52,7 +52,7 @@ impl Render for AboutView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .tab_group()
-            .key_context("AboutKver")
+            .key_context(crate::key_context::ABOUT)
             .on_action(|_: &CloseAbout, window, _| window.remove_window())
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .child(TitleBar::new())

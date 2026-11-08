@@ -52,6 +52,12 @@ Valid `appearance` values are `"system"`, `"light"`, and `"dark"`. No file is
 needed for the default System choice. Changes made directly to the file take
 effect while Kver is running; invalid edits leave the last valid settings active.
 
+## Keyboard shortcuts
+
+Add bindings to `config.toml` to change a key or add an alias. Multi-key
+sequences such as `g t` work too. See [Customize keyboard shortcuts](docs/keybindings.md)
+for examples, command names, contexts, and error recovery.
+
 ## Goals
 
 - Fast and responsive PDF viewing

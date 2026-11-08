@@ -20,8 +20,8 @@ module trade-offs and the [glossary](../GLOSSARY.md) for reading-domain terms.
 registers OS open/reopen entry points before launch, initializes GPUI Kit and
 shared state, and creates the initial reader window. Settings and history
 receive the same resolved application paths.
-`src/app/keymap.rs` resolves embedded common, platform-filtered, and preset
-entries in that order before installing Actions and building native menus.
+`src/app/keymap.rs` resolves embedded common, platform-filtered, preset, and
+user entries in that order before installing Actions and building native menus.
 Standard is selected by default. Its reader-only arrows move by line or turn a
 page, Page Up/Down scroll by most of the measured viewport, Command/Ctrl plus
 or minus changes zoom, and modified page-turn keys follow the platform.
@@ -34,22 +34,27 @@ Standard leaves those letters free and uses the marks dialog and palette.
 Both presets inherit application commands (including macOS Command-Q/W)
 and the Reader/Contents-only Ctrl-O/I jumplist bindings. The selected
 preset can be installed through the same resolver; choosing it in Settings
-and switching it live are separate work.
+is separate work.
 The policy addresses a slot by product context and complete key sequence. A
-later layer replaces that slot; an explicit contextual unbind masks the same
-key inherited from its parent (including a global key) only in that context.
-Other contexts retain the inherited binding.
+later layer replaces that slot; an internal contextual unbind can mask an
+inherited key, but user-file unbinding is deferred. Other contexts retain
+their bindings. On macOS, edits that would promote a bare reader key to the
+first shortcut for a native menu action are rejected.
 Duplicate slots within a layer and one-key/multi-key prefix collisions in
 overlapping contexts are diagnostics, not implicit GPUI ordering rules.
 Reader, Sidebar, Contents, Settings, and About are stable product contexts;
 the sidebar contains Contents, while Reader and the auxiliary windows do not
 overlap. `src/key_context.rs` shares their GPUI names with the focused views.
 Features still own their Actions and handlers. GPUI owns dispatch, pending
-sequences, Escape cancellation, and focus invalidation. User file loading and
-keymap reloads are not implemented. Scroll and document-bound commands are
-semantic reader Actions, bound only while Reader owns focus, rather than
-physical keys interpreted by the view. The scroll content expands to the
-widest visible page so GPUI can clamp horizontal offsets to real content.
+sequences, Escape cancellation, and focus invalidation. The application reads
+keyboard entries from the existing TOML settings file and resolves a complete
+candidate before replacing live bindings. Invalid edits leave the last valid
+bindings in place; valid edits rebuild native menu accelerators. The palette
+derives shortcut hints from GPUI's currently installed bindings. Scroll and
+document-bound commands are semantic reader Actions, bound only while Reader
+owns focus, rather than physical keys interpreted by the view. The scroll
+content expands to the widest visible page so GPUI can clamp horizontal
+offsets to real content.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
 `src/app/windows.rs` creates document windows, cycles focus, and owns

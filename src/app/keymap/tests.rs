@@ -1,5 +1,5 @@
 use super::*;
-use gpui_kit::{KeyContext, TestAppContext};
+use gpui_kit::{KeyContext, TestAppContext, test::TestWindowExt as _};
 use std::collections::HashSet;
 
 #[test]
@@ -18,6 +18,333 @@ fn later_layers_replace_a_key_slot_and_unbind_masks_a_global_key() {
         Some("kver::NewWindow")
     );
     assert_eq!(map.action("cmd-o", Context::Reader), None);
+}
+
+#[test]
+fn toml_overrides_aliases_and_platform_precedence() {
+    let content = r#"
+[reader]
+initial_zoom = "fit-width"
+[[keyboard.bindings]]
+keys = "right"
+context = "reader"
+command = "previous-page"
+[[keyboard.bindings]]
+keys = "ctrl-e"
+context = "reader"
+command = "next-page"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-e"
+context = "reader"
+command = "previous-page"
+platform = "linux"
+"#;
+    let mac = resolve_config(content, Platform::Mac, Preset::Standard).unwrap();
+    assert_eq!(
+        mac.action("right", Context::Reader),
+        Some("kver::PreviousPage")
+    );
+    assert_eq!(
+        mac.action("ctrl-e", Context::Reader),
+        Some("kver::NextPage")
+    );
+    assert_eq!(
+        mac.action("cmd-alt-right", Context::Reader),
+        Some("kver::NextPage")
+    );
+    assert_eq!(mac.action("cmd-o", Context::Reader), Some("kver::OpenPdf"));
+    assert_eq!(
+        mac.action("cmd-o", Context::Settings),
+        Some("kver::OpenPdf")
+    );
+    let linux = resolve_config(content, Platform::Linux, Preset::Standard).unwrap();
+    assert_eq!(
+        linux.action("ctrl-e", Context::Reader),
+        Some("kver::PreviousPage")
+    );
+}
+
+#[test]
+fn documented_g_t_sequence_coexists_with_vim_g_g() {
+    let content = r#"
+[[keyboard.bindings]]
+keys = "g t"
+context = "reader"
+command = "document-start"
+"#;
+    let map = resolve_config(content, Platform::Mac, Preset::Vim).unwrap();
+    assert_eq!(
+        map.action("g t", Context::Reader),
+        Some("kver::GoToDocumentStart")
+    );
+    assert_eq!(
+        map.action("g g", Context::Reader),
+        Some("kver::GoToDocumentStart")
+    );
+    assert_eq!(map.action("g t", Context::Settings), None);
+}
+
+#[test]
+fn config_errors_point_to_the_entry_and_remedy() {
+    for (entry, expected) in [
+        ("command = \"unknown\"", "unknown command"),
+        (
+            "command = \"next-page\"\ncontext = \"editor\"",
+            "unknown context",
+        ),
+        (
+            "command = \"next-page\"\nplatform = \"macos\"",
+            "unknown platform",
+        ),
+        ("command = \"next-page\"", "invalid keys"),
+    ] {
+        let keys = if expected == "invalid keys" {
+            "not-a-key"
+        } else {
+            "ctrl-e"
+        };
+        let text = format!("[[keyboard.bindings]]\nkeys = \"{keys}\"\n{entry}\n");
+        let error = resolve_config(&text, Platform::Mac, Preset::Standard)
+            .err()
+            .unwrap();
+        assert!(error.contains(expected), "{error}");
+    }
+    let unmatched = "[[keyboard.unbind]]\nkeys = \"right\"\ncontext = \"reader\"\n";
+    assert!(
+        resolve_config(unmatched, Platform::Mac, Preset::Standard)
+            .err()
+            .unwrap()
+            .contains("not supported yet")
+    );
+    let prefix =
+        "[[keyboard.bindings]]\nkeys = \"g\"\ncontext = \"reader\"\ncommand = \"next-page\"\n";
+    assert!(
+        resolve_config(prefix, Platform::Mac, Preset::Vim)
+            .err()
+            .unwrap()
+            .contains("ambiguous sequences")
+    );
+}
+
+#[test]
+fn mac_menu_rejects_promoting_bare_reader_keys_after_rebind() {
+    for (preset, changed, bare) in [
+        (Preset::Standard, "cmd-alt-right", "right"),
+        (Preset::Vim, "cmd-alt-right", "n"),
+        (Preset::Vim, "cmd-f", "/"),
+        (Preset::Standard, "cmd-b", "escape"),
+    ] {
+        let config = format!(
+            "[[keyboard.bindings]]\nkeys = \"{changed}\"\ncontext = \"{}\"\ncommand = \"zoom-in\"\n",
+            if changed == "cmd-b" || changed == "cmd-f" {
+                "global"
+            } else {
+                "reader"
+            }
+        );
+        let error = resolve_config(&config, Platform::Mac, preset)
+            .err()
+            .unwrap();
+        assert!(error.contains("bare macOS menu accelerator"), "{error}");
+        assert!(error.contains(bare), "{error}");
+        assert!(resolve_config(&config, Platform::Linux, preset).is_ok());
+    }
+    // Moving both slots keeps the menu from inheriting an unintended bare key.
+    let config = r#"
+[[keyboard.bindings]]
+keys = "cmd-alt-right"
+context = "reader"
+command = "zoom-in"
+[[keyboard.bindings]]
+keys = "right"
+context = "reader"
+command = "previous-page"
+"#;
+    let map = resolve_config(config, Platform::Mac, Preset::Standard).unwrap();
+    assert_eq!(
+        map.action("cmd-alt-right", Context::Reader),
+        Some("kver::ZoomIn")
+    );
+    assert_eq!(
+        map.action("right", Context::Reader),
+        Some("kver::PreviousPage")
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn reloaded_shortcut_dispatches_in_reader_but_not_in_palette(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install(cx);
+    });
+    let (handle, document) = cx.update(|cx| {
+        gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            cx.new(|cx| {
+                super::super::document_window::DocumentWindow::new(
+                    Some("examples/readme-sample.pdf".into()),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .unwrap()
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        reload(
+            cx,
+            Some("[[keyboard.bindings]]\nkeys = \"ctrl-e\"\ncontext = \"reader\"\ncommand = \"next-page\"\n".into()),
+            Preset::Standard,
+        )
+        .unwrap();
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("ctrl-e", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.reader().read(cx).page_index(), 1);
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.press("cmd-shift-p", cx);
+        window.render_frame(cx);
+        window.press("ctrl-e", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.reader().read(cx).page_index(), 1);
+        assert!(document.palette_open());
+    });
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn unsafe_menu_edit_does_not_replace_live_shortcuts(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install(cx);
+        let unsafe_edit = "[[keyboard.bindings]]\nkeys = \"cmd-alt-right\"\ncontext = \"reader\"\ncommand = \"zoom-in\"\n";
+        assert!(reload(cx, Some(unsafe_edit.into()), Preset::Standard)
+            .unwrap_err()
+            .contains("bare macOS menu accelerator"));
+        let bindings = cx.key_bindings();
+        let bindings = bindings.borrow();
+        let first = bindings.bindings_for_action(&NextPage).next().unwrap();
+        assert_eq!(
+            first.match_keystrokes(&parse("cmd-alt-right", Platform::Mac.os()).unwrap()),
+            Some(false)
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn valid_reload_replaces_bindings_and_invalid_reload_keeps_last_valid(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install(cx);
+        // A component can register its own keys after the product keymap.
+        cx.bind_keys([KeyBinding::new("ctrl-y", NewWindow, Some("Component"))]);
+        let valid = "[[keyboard.bindings]]\nkeys = \"ctrl-e\"\ncontext = \"reader\"\ncommand = \"next-page\"\n";
+        assert!(reload(cx, Some(valid.into()), Preset::Standard).unwrap());
+        let keys = parse("ctrl-e", Platform::Mac.os()).unwrap();
+        let reader = [KeyContext::parse(key_context::READER).unwrap()];
+        assert_eq!(
+            cx.key_bindings().borrow().bindings_for_input(&keys, &reader).0[0]
+                .action().name(),
+            "kver::NextPage"
+        );
+        assert!(reload(cx, Some("[[keyboard.bindings]]\nkeys = \"??\"\ncommand = \"bad\"\n".into()), Preset::Standard).is_err());
+        assert_eq!(
+            cx.key_bindings().borrow().bindings_for_input(&keys, &reader).0[0]
+                .action().name(),
+            "kver::NextPage"
+        );
+        assert!(reload(cx, None, Preset::Standard).unwrap());
+        assert!(cx.key_bindings().borrow().bindings_for_input(&keys, &reader).0.is_empty());
+        assert!(cx.key_bindings().borrow().bindings().any(|binding| {
+            binding.match_keystrokes(&parse("ctrl-y", Platform::Mac.os()).unwrap()) == Some(false)
+        }));
+    });
+}
+
+#[test]
+fn file_edits_recover_and_leave_unrelated_toml_intact() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("config.toml");
+    let original = "# personal note\n[reader]\ninitial_zoom = \"fit_page\"\n";
+    std::fs::write(&path, original).unwrap();
+    let first = read_config(&path).unwrap().unwrap();
+    assert_eq!(
+        resolve_config(&first, Platform::Mac, Preset::Standard)
+            .unwrap()
+            .action("right", Context::Reader),
+        Some("kver::NextPage")
+    );
+    let broken = format!(
+        "{original}[[keyboard.bindings]]\nkeys = \"ctrl-e\"\ncommand = \"not-a-command\"\n"
+    );
+    std::fs::write(&path, broken).unwrap();
+    assert!(
+        resolve_config(
+            &read_config(&path).unwrap().unwrap(),
+            Platform::Mac,
+            Preset::Standard
+        )
+        .is_err()
+    );
+    let fixed = format!(
+        "{original}[[keyboard.bindings]]\nkeys = \"ctrl-e\"\ncontext = \"reader\"\ncommand = \"next-page\"\n"
+    );
+    std::fs::write(&path, &fixed).unwrap();
+    let recovered = read_config(&path).unwrap().unwrap();
+    assert_eq!(recovered, fixed);
+    assert_eq!(
+        resolve_config(&recovered, Platform::Mac, Preset::Standard)
+            .unwrap()
+            .action("ctrl-e", Context::Reader),
+        Some("kver::NextPage")
+    );
+    assert_eq!(
+        crate::settings::load(&path).unwrap().initial_zoom(),
+        crate::settings::InitialZoom::FitPage
+    );
+    crate::settings::save(
+        &path,
+        crate::settings::SettingsChange::Appearance(crate::settings::Appearance::Dark),
+    )
+    .unwrap();
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("# personal note"));
+    assert_eq!(
+        resolve_config(&saved, Platform::Mac, Preset::Standard)
+            .unwrap()
+            .action("ctrl-e", Context::Reader),
+        Some("kver::NextPage")
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn override_keeps_modified_native_menu_key_ahead_of_reader_alias(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install(cx);
+        reload(
+            cx,
+            Some("[[keyboard.bindings]]\nkeys = \"cmd-alt-right\"\ncontext = \"reader\"\ncommand = \"next-page\"\n".into()),
+            Preset::Standard,
+        ).unwrap();
+        let bindings = cx.key_bindings();
+        let bindings = bindings.borrow();
+        let first = bindings.bindings_for_action(&NextPage).next().unwrap();
+        assert_eq!(
+            first.match_keystrokes(&parse("cmd-alt-right", Platform::Mac.os()).unwrap()),
+            Some(false)
+        );
+    });
 }
 
 #[gpui_kit::test]

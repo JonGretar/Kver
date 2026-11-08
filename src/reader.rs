@@ -1193,7 +1193,7 @@ impl Render for ReaderView {
             .track_focus(&self.focus)
             .when(
                 !self.marks_open(cx) && self.focus.is_focused(window),
-                |reader| reader.key_context("Reader"),
+                |reader| reader.key_context(crate::key_context::READER),
             )
             .on_action(cx.listener(|this, action: &SetLocalMark, _, cx| {
                 if !this.pages.is_empty() {

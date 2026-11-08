@@ -579,7 +579,7 @@ impl Render for SettingsView {
             .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .key_context("KverSettings")
+            .key_context(crate::key_context::SETTINGS)
             .on_action(|_: &CloseSettings, window, _| window.remove_window())
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .child(

@@ -20,14 +20,24 @@ module trade-offs and the [glossary](../GLOSSARY.md) for reading-domain terms.
 registers OS open/reopen entry points before launch, initializes GPUI Kit and
 shared state, and creates the initial reader window. Settings and history
 receive the same resolved application paths.
-`src/app/keymap.rs` installs all Kver default bindings before the native
-menus snapshot their shortcuts. It owns physical keys and context expressions;
-features still declare Actions and attach handlers to their focused regions.
-GPUI owns dispatch and pending multi-keystroke sequences. User overrides and
+`src/app/keymap.rs` resolves embedded common, platform-filtered, and preset
+entries in that order before installing Actions and building native menus.
+Standard is selected by default; until the separate preset tickets define new
+keys, the embedded Standard and Vim entries preserve the existing reader keys.
+The policy addresses a slot by product context and complete key sequence. A
+later layer replaces that slot; an explicit contextual unbind masks the same
+key inherited from its parent (including a global key) only in that context.
+Other contexts retain the inherited binding.
+Duplicate slots within a layer and one-key/multi-key prefix collisions in
+overlapping contexts are diagnostics, not implicit GPUI ordering rules.
+Reader, Sidebar, Contents, Settings, and About are stable product contexts;
+the sidebar contains Contents, while Reader and the auxiliary windows do not
+overlap. `src/key_context.rs` shares their GPUI names with the focused views.
+Features still own their Actions and handlers. GPUI owns dispatch, pending
+sequences, Escape cancellation, and focus invalidation. User file loading and
 keymap reloads are not implemented. Line scrolling uses the reader's
-`ScrollDown`/`ScrollUp` Actions; the application keymap binds Down/J and Up/K
-only in the focused Reader context, rather than interpreting those keys in
-the view.
+`ScrollDown`/`ScrollUp` Actions; Down/J and Up/K are bound only while Reader
+owns focus, rather than being interpreted by the view.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
 `src/app/windows.rs` creates document windows, cycles focus, and owns

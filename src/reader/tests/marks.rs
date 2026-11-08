@@ -68,10 +68,18 @@ fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
     reader.update(cx, |reader, cx| reader.select_page(2, cx));
     cx.simulate_keystrokes(window, "m escape p");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
-    cx.simulate_keystrokes(window, "m cmd-f");
+    cx.simulate_keystrokes(window, "m");
+    cx.update(|cx| {
+        cx.update_window(window, |_, frame, _| {
+            assert!(frame.has_pending_keystrokes())
+        })
+        .unwrap();
+    });
+    cx.simulate_keystrokes(window, "cmd-f");
     cx.update(|cx| {
         cx.update_window(window, |_, frame, cx| {
             frame.render_frame(cx);
+            assert!(!frame.has_pending_keystrokes());
             frame.input("e", cx);
         })
         .unwrap();

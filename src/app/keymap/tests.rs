@@ -121,7 +121,13 @@ fn platform_filters_entries_before_duplicate_detection() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
         for preset in [Preset::Standard, Preset::Vim] {
             let map = resolve(platform, preset).unwrap();
-            assert_eq!(map.action("right", Context::Reader), Some("kver::NextPage"));
+            assert_eq!(
+                map.action("right", Context::Reader),
+                Some(match preset {
+                    Preset::Standard => "kver::NextPage",
+                    Preset::Vim => "kver::ScrollRight",
+                })
+            );
             assert_eq!(map.action("cmd-o", Context::Global), Some("kver::OpenPdf"));
             assert_eq!(
                 map.action("ctrl-o", Context::Reader),
@@ -199,6 +205,22 @@ fn overlapping_prefixes_and_duplicate_slots_are_reported() {
             context: Context::Contents,
         }),
     );
+    for (key, continuation) in [("'", "' a"), ("d", "d m a"), ("d m", "d m a"), ("g", "g g")] {
+        assert_eq!(
+            resolve_with(
+                Platform::Mac,
+                Preset::Vim,
+                [Entry::bind(key, Context::Reader, NextPage)],
+            )
+            .err(),
+            Some(Diagnostic::PrefixConflict {
+                first: key.into(),
+                second: continuation.into(),
+                context: Context::Reader,
+            }),
+            "{key}"
+        );
+    }
 }
 
 #[test]
@@ -243,6 +265,98 @@ fn every_mark_letter_has_set_jump_and_delete_bindings() {
             assert_eq!(matches[0].entry.context, Context::Reader);
         }
     }
+}
+
+#[test]
+fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_contexts() {
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        let map = resolve(platform, Preset::Vim).unwrap();
+        for (keys, action) in [
+            ("cmd-w", "kver::CloseWindow"),
+            ("cmd-n", "kver::NewWindow"),
+            ("cmd-o", "kver::OpenPdf"),
+            ("cmd-f", "kver::ShowFind"),
+        ] {
+            assert_eq!(map.action(keys, Context::Global), Some(action));
+            assert_eq!(map.action(keys, Context::Reader), Some(action));
+        }
+        for (keys, action) in [
+            ("j", "kver::ScrollDown"),
+            ("k", "kver::ScrollUp"),
+            ("h", "kver::ScrollLeft"),
+            ("l", "kver::ScrollRight"),
+            ("left", "kver::ScrollLeft"),
+            ("right", "kver::ScrollRight"),
+            ("space", "kver::ScrollHalfScreenDown"),
+            ("shift-space", "kver::ScrollHalfScreenUp"),
+            ("g g", "kver::GoToDocumentStart"),
+            ("shift-g", "kver::GoToDocumentEnd"),
+            ("n", "kver::NextPage"),
+            ("p", "kver::PreviousPage"),
+            ("w", "kver::FitWidth"),
+            ("f", "kver::FitPage"),
+            ("s", "kver::SinglePage"),
+            ("c", "kver::Continuous"),
+        ] {
+            assert_eq!(map.action(keys, Context::Reader), Some(action), "{keys}");
+            assert_eq!(map.action(keys, Context::Contents), None, "{keys}");
+            assert_eq!(map.action(keys, Context::Global), None, "{keys}");
+        }
+        assert_eq!(map.action("/", Context::Reader), Some("kver::ShowFind"));
+        assert_eq!(
+            map.action("ctrl-o", Context::Reader),
+            Some("kver::NavigateBack")
+        );
+        assert_eq!(
+            map.action("ctrl-i", Context::Reader),
+            Some("kver::NavigateForward")
+        );
+        assert_eq!(
+            map.action("m a", Context::Reader),
+            Some("kver::SetLocalMark")
+        );
+        assert_eq!(
+            map.action("' a", Context::Reader),
+            Some("kver::JumpLocalMark")
+        );
+        assert_eq!(
+            map.action("d m a", Context::Reader),
+            Some("kver::DeleteLocalMark")
+        );
+    }
+    let mac = resolve(Platform::Mac, Preset::Vim).unwrap();
+    assert_eq!(mac.action("cmd-q", Context::Global), Some("kver::Quit"));
+    assert_eq!(
+        mac.action("cmd-`", Context::Global),
+        Some("kver::NextWindow")
+    );
+    assert_eq!(
+        mac.action("cmd-shift-`", Context::Global),
+        Some("kver::PreviousWindow")
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn vim_install_keeps_native_menu_accelerators_modified(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install_preset(cx, Preset::Vim);
+        let bindings = cx.key_bindings();
+        let bindings = bindings.borrow();
+        for (action, keys) in [
+            (&NextPage as &dyn gpui_kit::Action, "cmd-alt-right"),
+            (&PreviousPage as &dyn gpui_kit::Action, "cmd-alt-left"),
+            (&CloseWindow as &dyn gpui_kit::Action, "cmd-w"),
+            (&Quit as &dyn gpui_kit::Action, "cmd-q"),
+        ] {
+            let first = bindings.bindings_for_action(action).next().unwrap();
+            assert_eq!(
+                first.match_keystrokes(&parse(keys, Platform::Mac.os()).unwrap()),
+                Some(false),
+            );
+        }
+    });
 }
 
 #[test]

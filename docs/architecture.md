@@ -25,10 +25,16 @@ entries in that order before installing Actions and building native menus.
 Standard is selected by default. Its reader-only arrows move by line or turn a
 page, Page Up/Down scroll by most of the measured viewport, Command/Ctrl plus
 or minus changes zoom, and modified page-turn keys follow the platform.
-The previous bare-letter shortcuts and multi-key local-mark sequences remain
-in the Vim placeholder for #104, not in Standard; Standard uses the marks
-dialog and palette. Both presets inherit application commands and the
-Reader/Contents-only Ctrl-O/I jumplist bindings.
+Vim keeps reader-only `j/k` for vertical steps, `h/l` and Left/Right for
+horizontal steps, `n/p` for page turns, Space/Shift-Space for half-screen
+vertical scrolling, `gg/G` for document bounds, `/` for Find, `=/−` for
+zoom, `w/f` for fit, `s/c` for reading mode, and local-mark sequences.
+Horizontal keys do nothing when the current page fits the viewport.
+Standard leaves those letters free and uses the marks dialog and palette.
+Both presets inherit application commands (including macOS Command-Q/W)
+and the Reader/Contents-only Ctrl-O/I jumplist bindings. The selected
+preset can be installed through the same resolver; choosing it in Settings
+and switching it live are separate work.
 The policy addresses a slot by product context and complete key sequence. A
 later layer replaces that slot; an explicit contextual unbind masks the same
 key inherited from its parent (including a global key) only in that context.
@@ -40,9 +46,10 @@ the sidebar contains Contents, while Reader and the auxiliary windows do not
 overlap. `src/key_context.rs` shares their GPUI names with the focused views.
 Features still own their Actions and handlers. GPUI owns dispatch, pending
 sequences, Escape cancellation, and focus invalidation. User file loading and
-keymap reloads are not implemented. Line scrolling uses the reader's
-`ScrollDown`/`ScrollUp` Actions; Down/J and Up/K are bound only while Reader
-owns focus, rather than being interpreted by the view.
+keymap reloads are not implemented. Scroll and document-bound commands are
+semantic reader Actions, bound only while Reader owns focus, rather than
+physical keys interpreted by the view. The scroll content expands to the
+widest visible page so GPUI can clamp horizontal offsets to real content.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
 `src/app/windows.rs` creates document windows, cycles focus, and owns
@@ -306,7 +313,7 @@ also checks the history deletion epoch. Lifecycle tests live beside the
 feature; composed keyboard, naming, and document-replacement tests live in
 `src/reader/tests/marks.rs`.
 
-In the Vim placeholder, GPUI's multi-keystroke bindings hold `m` then a letter
+In Vim, GPUI's multi-keystroke bindings hold `m` then a letter
 to set or replace, `'` then a letter to jump, and `d m` then a letter to delete
 while the reader is focused. A pending sequence takes priority over a one-key
 reader shortcut; no second letter handler competes with the normal keymap.

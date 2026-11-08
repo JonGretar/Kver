@@ -28,6 +28,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- In Vim mode, scroll sideways with H/L or Left/Right, move half a screen with Space/Shift-Space, go to the document's start/end with `gg`/G, and open Find with `/`. N/P still turn pages, and native application shortcuts remain available.
 - Use conventional Standard reader shortcuts for scrolling, pages, zoom, and
   window switching. Vim-style letters and mark sequences are no longer
   Standard shortcuts; marks remain available through the dialog and palette.

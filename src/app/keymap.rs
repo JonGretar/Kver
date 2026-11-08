@@ -18,9 +18,11 @@ use crate::{
     about::CloseAbout,
     key_context,
     reader::{
-        ActivateOutline, Continuous, Copy, DeleteLocalMark, FitPage, FitWidth, JumpLocalMark,
-        NextMatch, NextPage, PreviousMatch, PreviousPage, ScrollDown, ScrollScreenDown,
-        ScrollScreenUp, ScrollUp, SetLocalMark, ShowMarks, SinglePage, ZoomIn, ZoomOut,
+        ActivateOutline, Continuous, Copy, DeleteLocalMark, FitPage, FitWidth, GoToDocumentEnd,
+        GoToDocumentStart, JumpLocalMark, NextMatch, NextPage, PreviousMatch, PreviousPage,
+        ScrollDown, ScrollHalfScreenDown, ScrollHalfScreenUp, ScrollLeft, ScrollRight,
+        ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowMarks, SinglePage, ZoomIn,
+        ZoomOut,
     },
     reading_history::ShowRecent,
     settings_ui::{CloseSettings, ShowSettings},
@@ -333,12 +335,18 @@ pub fn resolve_with(
 
 /// Register the effective defaults once, before native menus snapshot keys.
 pub fn install(cx: &mut App) {
+    install_preset(cx, Preset::default());
+}
+
+/// Install a selected preset before building native menus. Preset selection
+/// and live switching are separate from the embedded policy.
+pub fn install_preset(cx: &mut App, preset: Preset) {
     let platform = match cx.platform_info().os {
         OperatingSystem::Mac => Platform::Mac,
         OperatingSystem::Windows => Platform::Windows,
         _ => Platform::Linux,
     };
-    let map = resolve(platform, Preset::default()).expect("embedded keyboard defaults are valid");
+    let map = resolve(platform, preset).expect("embedded keyboard defaults are valid");
     cx.bind_keys(map.bindings(cx));
 }
 
@@ -414,18 +422,25 @@ fn preset_defaults(preset: Preset) -> Vec<Entry> {
             Entry::bind("alt-left", Context::Contents, NavigateBack),
             Entry::bind("alt-right", Context::Contents, NavigateForward),
         ],
-        // #104 will choose the final Vim map. Until then preserve its previous
-        // reader controls and mark sequences, without leaking them into Standard.
+        // Keep bare reader keys inside Reader; native app/window commands and
+        // Contents navigation are inherited from common and platform layers.
         Preset::Vim => {
             let mut entries = vec![
-                Entry::bind("right", Context::Reader, NextPage),
+                Entry::bind("right", Context::Reader, ScrollRight),
                 Entry::bind("n", Context::Reader, NextPage),
-                Entry::bind("left", Context::Reader, PreviousPage),
+                Entry::bind("left", Context::Reader, ScrollLeft),
                 Entry::bind("p", Context::Reader, PreviousPage),
                 Entry::bind("down", Context::Reader, ScrollDown),
                 Entry::bind("j", Context::Reader, ScrollDown),
                 Entry::bind("up", Context::Reader, ScrollUp),
                 Entry::bind("k", Context::Reader, ScrollUp),
+                Entry::bind("h", Context::Reader, ScrollLeft),
+                Entry::bind("l", Context::Reader, ScrollRight),
+                Entry::bind("space", Context::Reader, ScrollHalfScreenDown),
+                Entry::bind("shift-space", Context::Reader, ScrollHalfScreenUp),
+                Entry::bind("g g", Context::Reader, GoToDocumentStart),
+                Entry::bind("shift-g", Context::Reader, GoToDocumentEnd),
+                Entry::bind("/", Context::Reader, ShowFind),
                 Entry::bind("=", Context::Reader, ZoomIn),
                 Entry::bind("shift-=", Context::Reader, ZoomIn),
                 Entry::bind("-", Context::Reader, ZoomOut),

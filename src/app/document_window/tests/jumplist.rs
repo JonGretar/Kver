@@ -658,6 +658,26 @@ fn native_navigate_menu_follows_active_window_and_find_focus(cx: &mut TestAppCon
     })
     .unwrap();
     assert_eq!(navigation(cx), (true, false));
+    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-m", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, true));
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+        .unwrap();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+    cx.update_window(window, |_, frame, cx| frame.press("escape", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, false));
+    cx.update(|cx| crate::reading_history::install(cx, None));
+    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-o", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, true));
+    cx.update_window(window, |_, frame, cx| frame.press("escape", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, false));
     let (other_window, other) = open(cx, None);
     cx.update_window(other_window, |_, frame, cx| {
         frame.render_frame(cx);

@@ -89,7 +89,8 @@ reader, not while typing in Find or using a dialog. The toolbar, menus, and
 command palette invoke the same reader commands. `Ctrl-O`/`Ctrl-I` go back and
 forward through semantic jumps when the reader or Contents has focus;
 Option-←/→ are Standard aliases for those commands. Command-Shift-M opens the
-marks dialog without requiring a letter sequence.
+marks dialog without requiring a letter sequence. Command-T opens Contents;
+Kver has no tabs.
 
 The prototype renders visible pages in background work. The illustrated,
 24-page field guide includes a contents page, bookmarks, images, tables, and a

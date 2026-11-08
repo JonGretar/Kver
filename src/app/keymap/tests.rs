@@ -255,6 +255,7 @@ fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
             ("cmd-n", "kver::NewWindow"),
             ("cmd-w", "kver::CloseWindow"),
             ("cmd-f", "kver::ShowFind"),
+            ("cmd-t", "kver::ShowContents"),
         ] {
             assert_eq!(map.action(keys, Context::Global), Some(action));
         }

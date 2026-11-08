@@ -3,6 +3,7 @@
 mod commands;
 mod contents;
 mod find;
+mod links;
 mod marks;
 mod navigation;
 mod rendering;
@@ -18,6 +19,7 @@ pub(crate) use find::FindPanel;
 pub use find::{NextMatch, PreviousMatch};
 // Preserve the former public name while callers adopt the narrowed view.
 pub use ReaderView as Preview;
+use links::PageLinks;
 use marks::MarksEvent;
 pub use marks::{
     DeleteLocalMark, JumpLocalMark, SetLocalMark, ShowDeleteMark, ShowJumpMark, ShowMarks,
@@ -78,6 +80,7 @@ pub struct ReaderView {
     rasters: PageRasters,
     document_generation: u64,
     selection: Selection,
+    links: PageLinks,
     page_index: usize,
     // A deliberate page turn remains current even if the viewport also shows
     // part of a neighboring page. Scrolling chooses a new current page.
@@ -130,6 +133,7 @@ impl ReaderView {
             rasters: PageRasters::default(),
             document_generation: 0,
             selection: Selection::default(),
+            links: PageLinks::default(),
             page_index: 0,
             selected_page: None,
             last_viewport: (f32::NAN, f32::NAN, f32::NAN),
@@ -155,6 +159,7 @@ impl ReaderView {
         self.marks_subscriptions.clear();
         self.find_highlight = None;
         self.selection.reset();
+        self.links.reset();
         self.path = Some(path);
         self.record_path = None;
         self.position_ready = false;
@@ -748,6 +753,7 @@ impl ReaderView {
         self.last_viewport = self.viewport();
         self.schedule(cx);
         self.schedule_text(cx);
+        self.schedule_links(cx);
         cx.notify();
     }
 
@@ -836,6 +842,7 @@ impl ReaderView {
         self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
+        self.schedule_links(cx);
         cx.notify();
     }
     pub(crate) fn navigate_outline(
@@ -853,6 +860,12 @@ impl ReaderView {
             self.zoom_mode = ZoomMode::Fixed;
             self.set_scale(zoom, Position { page, y: 0.0 }, 0.0);
         } else {
+            if let Some(fit) = destination.fit() {
+                self.zoom_mode = match fit {
+                    pdf::DestinationFit::Page => ZoomMode::FitPage,
+                    pdf::DestinationFit::Width => ZoomMode::FitWidth,
+                };
+            }
             let (_, width, height) = self.viewport();
             self.apply_fit(page, Position { page, y: 0.0 }, (width, height), 0.0);
         }
@@ -869,7 +882,31 @@ impl ReaderView {
         self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
+        self.schedule_links(cx);
         cx.notify();
+    }
+    fn activate_link(
+        &mut self,
+        generation: u64,
+        page: usize,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if generation != self.document_generation {
+            return false;
+        }
+        let Some(link) = self.links.destination(page, index) else {
+            return false;
+        };
+        if let Some(destination) = link.destination() {
+            self.selection.clear();
+            self.navigate_outline(destination, cx);
+            true
+        } else {
+            self.status = "This PDF link has an invalid or unsupported destination".into();
+            cx.notify();
+            false
+        }
     }
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
         self.change_scale(1.25, cx);
@@ -959,6 +996,35 @@ impl ReaderView {
         })
         .detach();
         cx.notify();
+    }
+
+    fn schedule_links(&mut self, cx: &mut Context<Self>) {
+        if self.pages.is_empty() {
+            return;
+        }
+        let Some(path) = self.path.as_ref() else {
+            return;
+        };
+        let (top, _, height) = self.viewport();
+        let visible = self.layout().visible_pages(top, height);
+        let Some(request) = self.links.request(visible, self.document_generation) else {
+            return;
+        };
+        let path = path.clone();
+        let work = cx
+            .background_executor()
+            .spawn(async move { pdf::page_links(&path, request.page()) });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if !this.links.finish(request, result) {
+                    return;
+                }
+                this.schedule_links(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 
@@ -1065,6 +1131,44 @@ impl Render for ReaderView {
                         .bg(gpui::rgba(0x278acb70)),
                 );
             }
+            if let Some(links) = self.links.visible(index) {
+                for (link_index, link) in links.iter().enumerate() {
+                    let [left, top, right, bottom] = link.page_rect();
+                    let id = gpui::ElementId::from(format!("pdf-link-{index}-{link_index}"));
+                    let focus = window
+                        .use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle().tab_stop(true));
+                    let generation = self.document_generation;
+                    let label = match link.destination() {
+                        Some(destination) => {
+                            format!("Follow PDF link to page {}", destination.page() + 1)
+                        }
+                        None => "Unsupported PDF link".to_owned(),
+                    };
+                    page = page.child(
+                        div()
+                            .id(id)
+                            .test_support()
+                            .role(gpui::Role::Button)
+                            .aria_label(label)
+                            .absolute()
+                            .left(px(left * self.scale))
+                            .top(px(top * self.scale))
+                            .w(px((right - left) * self.scale))
+                            .h(px((bottom - top) * self.scale))
+                            .cursor_pointer()
+                            .hover(|element| element.bg(cx.theme().primary.opacity(0.12)))
+                            .focus_visible(|element| {
+                                element.border_2().border_color(cx.theme().ring)
+                            })
+                            .track_focus(focus.read(cx))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if this.activate_link(generation, index, link_index, cx) {
+                                    window.focus(&this.focus, cx);
+                                }
+                            })),
+                    );
+                }
+            }
             page = page.on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
@@ -1085,6 +1189,7 @@ impl Render for ReaderView {
 
         div()
             .size_full()
+            .tab_group()
             .track_focus(&self.focus)
             .when(
                 !self.marks_open(cx) && self.focus.is_focused(window),

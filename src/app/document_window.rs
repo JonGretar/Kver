@@ -11,9 +11,9 @@ pub mod sidebar;
 use std::path::PathBuf;
 
 use gpui_kit::{
-    Action, App, Context, Entity, Focusable as _, Subscription, Task, Window,
+    Action, AnyWindowHandle, App, Context, Entity, Focusable as _, Subscription, Task, Window,
     base::TestSupportExt as _,
-    component::{ActiveTheme, theme::Theme},
+    component::{ActiveTheme, WindowExt as _, notification::Notification, theme::Theme},
     div,
     prelude::*,
 };
@@ -48,6 +48,8 @@ pub struct DocumentWindow {
     recent: Option<Entity<RecentPicker>>,
     recent_subscription: Option<Subscription>,
     recent_open: Option<PendingRecentOpen>,
+    linked_open_request: u64,
+    initial_link_page: Option<usize>,
     palette: Option<CommandPalette>,
     sidebar: Option<Entity<ReaderSidebar>>,
     panel_subscriptions: Vec<Subscription>,
@@ -64,8 +66,25 @@ struct PendingRecentOpen {
     request: u64,
 }
 
+struct LinkedOpen {
+    request: u64,
+    generation: u64,
+    path: PathBuf,
+    page: usize,
+    source_window: AnyWindowHandle,
+}
+
 impl DocumentWindow {
     pub fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_page(path, None, window, cx)
+    }
+
+    pub(crate) fn new_with_page(
+        path: Option<PathBuf>,
+        page: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let appearance_subscription = cx.observe_window_appearance(window, |_, window, cx| {
             if settings_ui::state(cx).read(cx).appearance() == Appearance::System {
                 Theme::sync_system_appearance(Some(window), cx);
@@ -94,6 +113,8 @@ impl DocumentWindow {
             recent: None,
             recent_subscription: None,
             recent_open: None,
+            linked_open_request: 0,
+            initial_link_page: page,
             palette: None,
             sidebar: None,
             panel_subscriptions: Vec::new(),
@@ -285,8 +306,88 @@ impl DocumentWindow {
 
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.file_picker = None;
+        self.initial_link_page = None;
         self.reader
             .update(cx, |reader, cx| reader.open_path(path, cx));
+    }
+
+    fn open_linked_document(
+        &mut self,
+        generation: u64,
+        path: PathBuf,
+        page: usize,
+        source_window: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        if self.reader.read(cx).document_generation() != generation {
+            return;
+        }
+        self.linked_open_request = self.linked_open_request.wrapping_add(1);
+        let request = self.linked_open_request;
+        let check = path.clone();
+        let open = LinkedOpen {
+            request,
+            generation,
+            path,
+            page,
+            source_window,
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let pages = crate::pdf::document_pages(&check)?;
+                    if page >= pages.len() {
+                        return Err(format!(
+                            "PDF link page {} is outside the target document",
+                            page + 1
+                        ));
+                    }
+                    Ok::<(), String>(())
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_linked_open(open, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_linked_open(
+        &mut self,
+        open: LinkedOpen,
+        result: Result<(), String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.linked_open_request != open.request
+            || self.reader.read(cx).document_generation() != open.generation
+        {
+            return;
+        }
+        // Future settings can supply this policy without changing PDF decoding
+        // or the ReaderView's link activation contract.
+        let replace_active = self.linked_pdf_replaces_active();
+        let result = result.and_then(|()| {
+            if replace_active {
+                self.open_path(open.path.clone(), cx);
+                self.initial_link_page = Some(open.page);
+                Ok(())
+            } else {
+                windows::open_link(cx, open.path.clone(), open.page).map(|_| ())
+            }
+        });
+        if let Err(error) = result {
+            let message = format!("Cannot open linked PDF {}: {error}", open.path.display());
+            self.reader.update(cx, |reader, cx| {
+                reader.report_link_error(message.clone(), cx)
+            });
+            let _ = cx.update_window(open.source_window, |_, window, cx| {
+                window.push_notification(Notification::warning(message), cx);
+            });
+        }
+    }
+
+    fn linked_pdf_replaces_active(&self) -> bool {
+        false
     }
 
     pub fn open_dialog(&mut self, cx: &mut Context<Self>) {
@@ -359,16 +460,33 @@ impl DocumentWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let DocumentEvent::OpenLinkedDocument {
+            generation,
+            path,
+            page,
+        } = event
+        {
+            self.open_linked_document(*generation, path.clone(), *page, window.window_handle(), cx);
+            return;
+        }
         let generation = match event {
             DocumentEvent::Replaced { generation } | DocumentEvent::Opened { generation, .. } => {
                 *generation
             }
+            DocumentEvent::OpenLinkedDocument { .. } => unreachable!(),
         };
         if generation != self.reader.read(cx).document_generation() {
             return;
         }
         if matches!(event, DocumentEvent::Replaced { .. }) {
             self.jumplist.clear();
+            self.initial_link_page = None;
+        }
+        if let DocumentEvent::Opened { result: Ok(()), .. } = event
+            && let Some(page) = self.initial_link_page.take()
+        {
+            self.reader
+                .update(cx, |reader, cx| reader.select_page(page, cx));
         }
         self.sync_sidebar_document(cx);
         if self

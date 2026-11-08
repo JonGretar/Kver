@@ -104,6 +104,11 @@ pub(crate) enum DocumentEvent {
         generation: u64,
         result: Result<(), String>,
     },
+    OpenLinkedDocument {
+        generation: u64,
+        path: PathBuf,
+        page: usize,
+    },
 }
 
 impl gpui::EventEmitter<DocumentEvent> for ReaderView {}
@@ -534,6 +539,10 @@ impl ReaderView {
 
     pub fn status(&self) -> &str {
         &self.status
+    }
+    pub(crate) fn report_link_error(&mut self, error: String, cx: &mut Context<Self>) {
+        self.status = error;
+        cx.notify();
     }
     pub fn page_index(&self) -> usize {
         self.page_index
@@ -1005,14 +1014,27 @@ impl ReaderView {
         let Some(link) = self.links.destination(page, index) else {
             return false;
         };
-        if let Some(destination) = link.destination() {
-            self.selection.clear();
-            self.navigate_outline(destination, cx);
-            true
-        } else {
-            self.status = "This PDF link has an invalid or unsupported destination".into();
-            cx.notify();
-            false
+        match link.target().cloned() {
+            Some(pdf::LinkDestination::SameDocument(destination)) => {
+                self.selection.clear();
+                self.navigate_outline(destination, cx);
+                true
+            }
+            Some(pdf::LinkDestination::AnotherDocument { path, page }) => {
+                cx.emit(DocumentEvent::OpenLinkedDocument {
+                    generation,
+                    path,
+                    page,
+                });
+                false // Focus stays in the source window until the new one is ready.
+            }
+            None => {
+                self.report_link_error(
+                    "This PDF link has an invalid or unsupported destination".into(),
+                    cx,
+                );
+                false
+            }
         }
     }
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
@@ -1245,9 +1267,15 @@ impl Render for ReaderView {
                     let focus = window
                         .use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle().tab_stop(true));
                     let generation = self.document_generation;
-                    let label = match link.destination() {
-                        Some(destination) => {
+                    let label = match link.target() {
+                        Some(pdf::LinkDestination::SameDocument(destination)) => {
                             format!("Follow PDF link to page {}", destination.page() + 1)
+                        }
+                        Some(pdf::LinkDestination::AnotherDocument { path, .. }) => {
+                            format!(
+                                "Open {} in a new window",
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            )
                         }
                         None => "Unsupported PDF link".to_owned(),
                     };
@@ -1268,6 +1296,10 @@ impl Render for ReaderView {
                                 element.border_2().border_color(cx.theme().ring)
                             })
                             .track_focus(focus.read(cx))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                // Following a link must not begin a selection in its page.
+                                cx.stop_propagation();
+                            })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if this.activate_link(generation, index, link_index, cx) {
                                     window.focus(&this.focus, cx);

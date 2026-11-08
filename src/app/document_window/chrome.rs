@@ -163,6 +163,11 @@ pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
             div()
                 .id("reader-status")
                 .test_support()
+                .aria_label(if let Some(count) = reader.page_count() {
+                    format!("Page {} of {}", reader.page_index() + 1, count)
+                } else {
+                    reader.status().to_owned()
+                })
                 .min_w(px(0.0))
                 .truncate()
                 .child(if let Some(count) = reader.page_count() {

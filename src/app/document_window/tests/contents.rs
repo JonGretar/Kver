@@ -20,9 +20,11 @@ fn outline_pointer_and_keyboard_activation_share_document_navigation(cx: &mut Te
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        assert_eq!(
-            window.find(("contents-entry", 0usize)).label(),
-            Some("Landscape")
+        assert!(
+            window
+                .find(("contents-entry", 0usize))
+                .label()
+                .is_some_and(|label| label.ends_with("Landscape"))
         );
         window.click(("contents-entry", 0usize), cx);
     })

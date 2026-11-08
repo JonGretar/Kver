@@ -1,4 +1,4 @@
-// Rebuild with: typst compile examples/field-guide.typ examples/field-guide.pdf
+// Rebuild with: typst compile --creation-timestamp 0 examples/field-guide.typ examples/field-guide.pdf
 // A self-contained, fixed-break, 24-page illustrated PDF for manual reader checks.
 #set page(
   paper: "us-letter",
@@ -38,6 +38,13 @@ make the opening, middle, and ending easy to locate and compare.
 Follow a contents link or PDF bookmark to a chapter. Compare the two
 landscapes, then inspect the table and graph at different zoom levels.
 The links on the cover and within the articles also navigate this PDF.
+
+#block(fill: pale, inset: 14pt, width: 100%)[
+  *Quick jumps within this guide* \
+  #link(<guide-transect>)[Field log] ·
+  #link(<guide-measurements>)[Measurements] ·
+  #link(<guide-appendix>)[Appendix]
+]
 
 #let chapters = (
   (
@@ -264,3 +271,7 @@ rendering at different zoom levels.
 The illustrations were drawn for this example. No external photographs,
 measurements, or live services are needed. Regenerate the PDF using the
 Typst command at the start of this source file.
+
+#v(18pt)
+#link(<guide-cover>)[Return to the cover] ·
+#link(<guide-measurements>)[Revisit the measurements]

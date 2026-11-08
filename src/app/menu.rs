@@ -2,11 +2,13 @@
 
 use std::cell::Cell;
 
-use gpui_kit::{AnyWindowHandle, App, AppContext as _};
+use gpui_kit::{AnyWindowHandle, App, AppContext as _, Global};
 #[cfg(target_os = "macos")]
 use gpui_kit::{Menu, MenuItem};
 
 use super::document_window::OpenPdf;
+#[cfg(target_os = "macos")]
+use super::document_window::{NavigateBack, NavigateForward};
 #[cfg(target_os = "macos")]
 use super::windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 #[cfg(target_os = "macos")]
@@ -21,10 +23,18 @@ use crate::settings_ui::ShowSettings;
 
 pub use super::commands::{AboutKver, CheckForUpdates, Quit};
 
+struct MenuState {
+    updates_available: bool,
+}
+impl Global for MenuState {}
+
 /// Install handlers and native menus after the application keymap.
 pub fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     let updates_available = crate::updater::install(cx);
+    #[cfg(not(target_os = "macos"))]
+    let updates_available = false;
+    cx.set_global(MenuState { updates_available });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {
         if let Some(handle) = about_window.get()
@@ -50,41 +60,63 @@ pub fn install(cx: &mut App) {
         }
     });
     #[cfg(target_os = "macos")]
-    cx.set_menus([
-        Menu::new("Kver").items([
-            MenuItem::action("About Kver", AboutKver),
-            MenuItem::action("Check for Updates…", CheckForUpdates).disabled(!updates_available),
-            MenuItem::separator(),
-            MenuItem::action("Settings…", ShowSettings),
-            MenuItem::separator(),
-            MenuItem::action("Quit Kver", Quit),
-        ]),
-        Menu::new("File").items([
-            MenuItem::action("New Window", NewWindow),
-            MenuItem::action("Open PDF…", OpenPdf),
-            MenuItem::action("Open Recent…", ShowRecent),
-        ]),
-        Menu::new("Edit").items([
-            MenuItem::action("Copy", Copy),
-            MenuItem::action("Find", ShowFind),
-        ]),
-        Menu::new("Window").items([
-            MenuItem::action("Close Window", CloseWindow),
-            MenuItem::action("Next Window", NextWindow),
-            MenuItem::action("Previous Window", PreviousWindow),
-        ]),
-        Menu::new("View").items([
-            MenuItem::action("Find", ShowFind),
-            MenuItem::action("Contents", ShowContents),
-            MenuItem::action("Toggle Sidebar", ToggleSidebar),
-            MenuItem::separator(),
-            MenuItem::action("Single Page", SinglePage),
-            MenuItem::action("Continuous", Continuous),
-            MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
-            MenuItem::action("Next Page", NextPage),
-            MenuItem::action("Previous Page", PreviousPage),
-        ]),
-    ]);
+    cx.on_window_closed(|cx, _| {
+        if cx.windows().is_empty() {
+            refresh_navigation(cx, false, false);
+        }
+    })
+    .detach();
+    refresh_navigation(cx, false, false);
+}
+
+/// Native menus snapshot both the resolved keymap and the active window's
+/// availability. Rebuild when either the jumplist or its input context changes.
+pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(state) = cx.try_global::<MenuState>() {
+        cx.set_menus([
+            Menu::new("Kver").items([
+                MenuItem::action("About Kver", AboutKver),
+                MenuItem::action("Check for Updates…", CheckForUpdates)
+                    .disabled(!state.updates_available),
+                MenuItem::separator(),
+                MenuItem::action("Settings…", ShowSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit Kver", Quit),
+            ]),
+            Menu::new("File").items([
+                MenuItem::action("New Window", NewWindow),
+                MenuItem::action("Open PDF…", OpenPdf),
+                MenuItem::action("Open Recent…", ShowRecent),
+            ]),
+            Menu::new("Edit").items([
+                MenuItem::action("Copy", Copy),
+                MenuItem::action("Find", ShowFind),
+            ]),
+            Menu::new("Navigate").items([
+                MenuItem::action("Back", NavigateBack).disabled(!can_back),
+                MenuItem::action("Forward", NavigateForward).disabled(!can_forward),
+            ]),
+            Menu::new("Window").items([
+                MenuItem::action("Close Window", CloseWindow),
+                MenuItem::action("Next Window", NextWindow),
+                MenuItem::action("Previous Window", PreviousWindow),
+            ]),
+            Menu::new("View").items([
+                MenuItem::action("Find", ShowFind),
+                MenuItem::action("Contents", ShowContents),
+                MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                MenuItem::separator(),
+                MenuItem::action("Single Page", SinglePage),
+                MenuItem::action("Continuous", Continuous),
+                MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
+                MenuItem::action("Next Page", NextPage),
+                MenuItem::action("Previous Page", PreviousPage),
+            ]),
+        ]);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (cx, can_back, can_forward);
 }
 
 #[cfg(test)]

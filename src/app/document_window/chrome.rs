@@ -14,8 +14,8 @@ use gpui_kit::{
 };
 use std::path::Path;
 
-use super::OpenPdf;
 use super::sidebar::ToggleSidebar;
+use super::{NavigateBack, NavigateForward, OpenPdf};
 use crate::{
     reader::{
         Continuous, FitPage, FitWidth, NextPage, PreviousPage, ReaderView, ReadingMode, SinglePage,
@@ -24,7 +24,13 @@ use crate::{
     settings_ui::ShowSettings,
 };
 
-pub(super) fn reading_toolbar(reader: &ReaderView, sidebar_open: bool, window: &Window) -> Toolbar {
+pub(super) fn reading_toolbar(
+    reader: &ReaderView,
+    sidebar_open: bool,
+    can_back: bool,
+    can_forward: bool,
+    window: &Window,
+) -> Toolbar {
     let has_document = reader.page_count().is_some();
     let show_fit_labels =
         f32::from(window.bounds().size.width) >= 35.0 * f32::from(window.rem_size());
@@ -42,6 +48,27 @@ pub(super) fn reading_toolbar(reader: &ReaderView, sidebar_open: bool, window: &
             has_document,
             sidebar_open,
         ))
+        .content(gpui_kit::component::separator::Separator::vertical().h_5())
+        .content(
+            ToolbarGroup::new("history-controls")
+                .label("Navigation history")
+                .child(reader_button(
+                    "navigate-back",
+                    "Back",
+                    Some(IconName::ArrowLeft),
+                    Box::new(NavigateBack),
+                    can_back,
+                    false,
+                ))
+                .child(reader_button(
+                    "navigate-forward",
+                    "Forward",
+                    Some(IconName::ArrowRight),
+                    Box::new(NavigateForward),
+                    can_forward,
+                    false,
+                )),
+        )
         .content(gpui_kit::component::separator::Separator::vertical().h_5())
         .content(
             ToolbarGroup::new("page-controls")

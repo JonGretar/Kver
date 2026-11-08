@@ -292,6 +292,81 @@ fn keyboard_traversal_restores_both_locations_without_appending(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
+fn toolbar_back_and_forward_use_jumplist_actions_and_disable_at_boundaries(
+    cx: &mut TestAppContext,
+) {
+    let (_root, window, document) = linked_window(cx);
+    cx.simulate_window_resize(
+        window,
+        gpui_kit::size(gpui_kit::px(360.), gpui_kit::px(480.)),
+    );
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert!(frame.find("navigate-back").visible());
+        assert!(frame.find("navigate-forward").visible());
+        assert!(frame.find("settings-button").visible());
+        assert!(
+            frame.find("navigate-forward").bounds().right()
+                <= frame.find("previous-page").bounds().left()
+        );
+        assert!(
+            frame.find("settings-button").bounds().right()
+                <= frame.find("document-window").bounds().right()
+        );
+    })
+    .unwrap();
+    cx.simulate_window_resize(
+        window,
+        gpui_kit::size(gpui_kit::px(920.), gpui_kit::px(800.)),
+    );
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert_eq!(frame.find("navigate-back").disabled(), Some(true));
+        assert_eq!(frame.find("navigate-forward").disabled(), Some(true));
+        frame.click("navigate-back", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| {
+        assert!(document.jumplist.entries.is_empty())
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert_eq!(frame.find("navigate-forward").disabled(), Some(true));
+        frame.click("navigate-back", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.jumplist.cursor, 0);
+        assert_eq!(document.reader().read(cx).page_index(), 0);
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert_eq!(frame.find("navigate-back").disabled(), Some(true));
+        frame.click("navigate-back", cx);
+        frame.click("navigate-forward", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.jumplist.cursor, 1);
+        assert_eq!(document.reader().read(cx).page_index(), 1);
+        assert_eq!(document.jumplist.entries.len(), 2);
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert_eq!(frame.find("navigate-forward").disabled(), Some(true));
+        frame.click("navigate-forward", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 1));
+}
+
+#[gpui_kit::test]
 fn new_jump_after_back_discards_forward_branch(cx: &mut TestAppContext) {
     let (_root, window, document) = linked_window(cx);
     let reader = document.read_with(cx, |document, _| document.reader().clone());
@@ -358,7 +433,13 @@ fn invalid_entries_are_removed_and_obsolete_generation_cannot_restore(cx: &mut T
             .entries
             .push(reader.read(cx).jump_location().unwrap());
         document.jumplist.cursor = 1;
-        document.traverse_jumplist(-1, cx);
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.dispatch_action(Box::new(NavigateBack), cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| {
         assert_eq!(document.jumplist.entries.len(), 1);
     });
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
@@ -451,4 +532,145 @@ fn forward_shortcut_does_not_steal_find_input_focus(cx: &mut TestAppContext) {
     })
     .unwrap();
     document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+}
+
+#[gpui_kit::test]
+fn palette_traversal_tracks_boundaries_and_dispatches_window_actions(cx: &mut TestAppContext) {
+    let (_root, window, document) = linked_window(cx);
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("cmd-shift-p", cx);
+        frame.render_frame(cx);
+        frame.input("Back", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    document.read_with(cx, |document, cx| {
+        assert!(document.palette_open());
+        assert_eq!(document.jumplist.cursor, 0);
+        assert!(!document.palette.as_ref().unwrap().has_selection(cx));
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.press("escape", cx);
+        frame.press("escape", cx);
+    })
+    .unwrap();
+    assert!(!document.read_with(cx, |document, _| document.palette_open()));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.jumplist.entries.len(), 2)
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.press("cmd-shift-p", cx);
+        frame.render_frame(cx);
+        frame.input("Back", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.jumplist.cursor, 0);
+        assert_eq!(document.jumplist.entries.len(), 2);
+        assert!(!document.palette_open());
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("cmd-shift-p", cx);
+        frame.render_frame(cx);
+        frame.input("Forward", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, cx| {
+        assert!(document.jumplist.can_forward());
+        assert_eq!(document.palette_query(cx).as_deref(), Some("Forward"));
+        assert!(document.palette.as_ref().unwrap().has_selection(cx));
+    });
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.jumplist.cursor, 1);
+        assert!(!document.palette_open());
+        assert!(!document.jumplist.can_forward());
+    });
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn native_navigate_menu_follows_active_window_and_find_focus(cx: &mut TestAppContext) {
+    use gpui_kit::OwnedMenuItem;
+    fn navigation(cx: &TestAppContext) -> (bool, bool) {
+        cx.update(|cx| {
+            let menus = cx.get_menus().unwrap();
+            let navigate = menus.iter().find(|menu| menu.name == "Navigate").unwrap();
+            let disabled = |name| {
+                let OwnedMenuItem::Action { disabled, action, .. } = navigate
+                    .items
+                    .iter()
+                    .find(|item| matches!(item, OwnedMenuItem::Action { name: label, .. } if label == name))
+                    .unwrap()
+                else { unreachable!() };
+                assert_eq!(action.name(), format!("kver::Navigate{name}"));
+                *disabled
+            };
+            (disabled("Back"), disabled("Forward"))
+        })
+    }
+    let (_root, window, document) = linked_window(cx);
+    cx.update(crate::app::menu::install);
+    cx.update_window(window, |_, frame, _| frame.activate_window())
+        .unwrap();
+    assert_eq!(navigation(cx), (true, true));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("pdf-link-0-0", cx);
+    })
+    .unwrap();
+    assert_eq!(navigation(cx), (false, true));
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-o", cx))
+        .unwrap();
+    assert_eq!(navigation(cx), (true, false));
+    cx.update_window(window, |_, frame, cx| frame.press("cmd-f", cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert_eq!(frame.find("find-query").focused(), Some(true));
+        frame.press("ctrl-i", cx);
+        assert_eq!(frame.find("find-query").focused(), Some(true));
+    })
+    .unwrap();
+    assert_eq!(navigation(cx), (true, true));
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("escape", cx);
+    })
+    .unwrap();
+    assert_eq!(navigation(cx), (true, false));
+    let (other_window, other) = open(cx, None);
+    cx.update_window(other_window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.activate_window();
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(cx.update(|cx| cx.active_window()), Some(other_window));
+    assert_eq!(navigation(cx), (true, true));
+    cx.update_window(window, |_, frame, _| frame.activate_window())
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, false));
+    other.read_with(cx, |document, _| {
+        assert!(document.jumplist.entries.is_empty())
+    });
 }

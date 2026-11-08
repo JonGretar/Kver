@@ -18,7 +18,10 @@ use gpui_kit::{
     prelude::*,
 };
 
-use super::windows::{self, CloseWindow, NextWindow, PreviousWindow};
+use super::{
+    menu,
+    windows::{self, CloseWindow, NextWindow, PreviousWindow},
+};
 use crate::{
     reader::{
         Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpEvent,
@@ -59,6 +62,7 @@ pub struct DocumentWindow {
     _document_subscription: Subscription,
     _jump_subscription: Subscription,
     _appearance_subscription: Subscription,
+    _activation_subscription: Subscription,
 }
 
 struct PendingRecentOpen {
@@ -92,16 +96,22 @@ impl DocumentWindow {
             }
             cx.notify();
         });
+        let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
+            this.refresh_navigation_menu(window, cx);
+        });
         let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
         let document_subscription =
             cx.subscribe_in(&reader, window, |this, _, event, window, cx| {
                 this.on_document_event(event, window, cx);
             });
-        let jump_subscription = cx.subscribe(&reader, |this, _, jump: &JumpEvent, cx| {
-            if this.reader.read(cx).jump_location().as_ref() == Some(&jump.to) {
-                this.jumplist.record(jump);
-            }
-        });
+        let jump_subscription =
+            cx.subscribe_in(&reader, window, |this, _, jump: &JumpEvent, window, cx| {
+                if this.reader.read(cx).jump_location().as_ref() == Some(&jump.to) {
+                    this.jumplist.record(jump);
+                    this.refresh_navigation_menu(window, cx);
+                    cx.notify();
+                }
+            });
         let reader_observation = cx.observe(&reader, |_, _, cx| cx.notify());
         let settings = settings_ui::state(cx);
         let settings_observation = cx.observe_in(&settings, window, |this, _, window, cx| {
@@ -124,6 +134,7 @@ impl DocumentWindow {
             _document_subscription: document_subscription,
             _jump_subscription: jump_subscription,
             _appearance_subscription: appearance_subscription,
+            _activation_subscription: activation_subscription,
         }
     }
 
@@ -147,6 +158,7 @@ impl DocumentWindow {
         }
         self.reader.update(cx, |reader, cx| reader.hide_marks(cx));
         self.palette = Some(CommandPalette::new(window, cx));
+        self.refresh_navigation_menu(window, cx);
         cx.notify();
     }
 
@@ -155,6 +167,7 @@ impl DocumentWindow {
         // or Recent before Command's deferred confirmation runs.
         if self.palette.take().is_some() {
             self.restore_focus(window, cx);
+            self.refresh_navigation_menu(window, cx);
             cx.notify();
         }
     }
@@ -191,7 +204,14 @@ impl DocumentWindow {
             let sidebar = cx.new(|cx| ReaderSidebar::new(window, cx));
             let contents = sidebar.read(cx).contents().clone();
             let find = sidebar.read(cx).find().clone();
+            let query_focus = find.read(cx).query_focus(cx);
             self.panel_subscriptions = vec![
+                cx.on_focus(&query_focus, window, |this, window, cx| {
+                    this.refresh_navigation_menu(window, cx);
+                }),
+                cx.on_blur(&query_focus, window, |this, window, cx| {
+                    this.refresh_navigation_menu(window, cx);
+                }),
                 cx.observe_in(&sidebar, window, |this, _, window, cx| {
                     this.schedule_refit(window, cx)
                 }),
@@ -227,6 +247,7 @@ impl DocumentWindow {
         if let Some(sidebar) = &self.sidebar {
             sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
         }
+        self.refresh_navigation_menu(window, cx);
     }
 
     fn sync_sidebar_document(&self, cx: &mut Context<Self>) {
@@ -278,6 +299,26 @@ impl DocumentWindow {
             .is_some_and(|sidebar| sidebar.read(cx).find().read(cx).has_matches())
     }
 
+    fn refresh_navigation_menu(&self, window: &Window, cx: &App) {
+        if cx.active_window() != Some(window.window_handle()) {
+            return;
+        }
+        let find_has_focus = self.sidebar.as_ref().is_some_and(|sidebar| {
+            sidebar
+                .read(cx)
+                .find()
+                .read(cx)
+                .query_focus(cx)
+                .is_focused(window)
+        });
+        let accepts_shortcut = !find_has_focus && self.palette.is_none();
+        menu::refresh_navigation(
+            cx,
+            accepts_shortcut && self.jumplist.can_back(),
+            accepts_shortcut && self.jumplist.can_forward(),
+        );
+    }
+
     fn show_marks(&mut self, view: MarksView, window: &mut Window, cx: &mut Context<Self>) {
         if self.recent.is_some() {
             return;
@@ -305,11 +346,13 @@ impl DocumentWindow {
             .dispatch_action(action, window, cx);
     }
 
-    fn traverse_jumplist(&mut self, direction: i32, cx: &mut Context<Self>) {
+    fn traverse_jumplist(&mut self, direction: i32, window: &mut Window, cx: &mut Context<Self>) {
         self.jumplist.traverse(direction, |location| {
             self.reader
                 .update(cx, |reader, cx| reader.restore_jump(location, cx))
         });
+        self.refresh_navigation_menu(window, cx);
+        cx.notify();
     }
 
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -489,6 +532,8 @@ impl DocumentWindow {
         if matches!(event, DocumentEvent::Replaced { .. }) {
             self.jumplist.clear();
             self.initial_link_page = None;
+            self.refresh_navigation_menu(window, cx);
+            cx.notify();
         }
         if let DocumentEvent::Opened { result: Ok(()), .. } = event
             && let Some(page) = self.initial_link_page.take()
@@ -529,10 +574,15 @@ impl Render for DocumentWindow {
         let reader = self.reader.read(cx);
         let title = chrome::title_bar(reader.path(), cx);
         let marks = reader.marks_overlay();
-        let toolbar = settings
-            .read(cx)
-            .show_toolbar()
-            .then(|| chrome::reading_toolbar(reader, self.sidebar_panel(cx).is_some(), window));
+        let toolbar = settings.read(cx).show_toolbar().then(|| {
+            chrome::reading_toolbar(
+                reader,
+                self.sidebar_panel(cx).is_some(),
+                self.jumplist.can_back(),
+                self.jumplist.can_forward(),
+                window,
+            )
+        });
         let statusbar = settings
             .read(cx)
             .show_statusbar()
@@ -593,10 +643,12 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<SetLocalMark>))
             .on_action(cx.listener(Self::route_reader_action::<JumpLocalMark>))
             .on_action(cx.listener(Self::route_reader_action::<DeleteLocalMark>))
-            .on_action(cx.listener(|this, _: &NavigateBack, _, cx| this.traverse_jumplist(-1, cx)))
-            .on_action(
-                cx.listener(|this, _: &NavigateForward, _, cx| this.traverse_jumplist(1, cx)),
-            )
+            .on_action(cx.listener(|this, _: &NavigateBack, window, cx| {
+                this.traverse_jumplist(-1, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NavigateForward, window, cx| {
+                this.traverse_jumplist(1, window, cx)
+            }))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &NextWindow, window, cx| windows::cycle(window, cx, 1))
             .on_action(|_: &PreviousWindow, window, cx| windows::cycle(window, cx, -1))
@@ -643,6 +695,8 @@ impl Render for DocumentWindow {
                         mode_override: reader.mode_override(),
                         has_selection: reader.selected_text().is_some(),
                         has_matches: self.has_matches(cx),
+                        can_back: self.jumplist.can_back(),
+                        can_forward: self.jumplist.can_forward(),
                     },
                     cx,
                 ))

@@ -71,6 +71,9 @@ panels, window chrome, the palette, or Recent dialogs. The former public
 `src/reader/commands.rs` declares document commands independently of physical
 bindings. `src/reader/selection.rs` owns text selection and its page-text cache
 as ordinary Rust state, without a separate entity or view back-reference.
+`src/reader/links.rs` retains visible-page link metadata and one current
+background request; replacing a document invalidates that request before its
+reply can affect the new document.
 `src/reader/navigation.rs` owns shared layout and navigation-coordinate rules.
 `src/reader/rendering.rs` owns raster request selection, reply validation, and
 visible bitmap retention. The reader coordinates navigation commands,
@@ -84,9 +87,10 @@ Window-only composition, command routing, and focus tests remain beside
 `DocumentWindow`.
 `src/pdf.rs` isolates Hayro:
 it returns page dimensions, page geometry, positioned text, document outline
-entries and destinations, and premultiplied BGRA pixels, not Hayro types, to
-the reader. The adapter currently reads and
-parses the document for each raster and text request. Reusing a parsed
+entries and destinations, page-local link rectangles with backend-neutral
+destinations, and premultiplied BGRA pixels, not Hayro types, to
+the reader. The adapter currently reads and parses the document for each
+raster, text, and visible-page link request. Reusing a parsed
 document or prefetching pages should be driven by measurements, not a new
 worker architecture upfront.
 See the [rendering validation](rendering-validation.md) for the backend choice
@@ -100,6 +104,12 @@ page-to-window transforms, fit scales, refit anchors, and positions to save.
 It retains no separate mutable viewport and depends on neither GPUI nor the
 PDF backend. Find, outline, and saved-position jumps retain their distinct
 placement policies while using the same page-local-to-scroll conversion.
+Same-document PDF links share the outline destination parser and navigation
+path. Link rectangles retain PDF document coordinates and derive rotated,
+cropped page geometry for hit targets. `/XYZ` positions use that geometry;
+`/Fit` and `/FitH` switch to the corresponding fit modes. Visible link targets
+are Tab-focusable and activate with Enter; unsupported destinations leave the
+reader in place and report non-modal status.
 `ReaderView` applies those results to its scroll handle, invalidates bitmaps
 when scale changes, and coordinates selection and persistence.
 Pure rules are tested under `src/reader/navigation/`; reader integration

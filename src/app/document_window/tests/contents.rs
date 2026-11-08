@@ -22,7 +22,7 @@ fn outline_pointer_and_keyboard_activation_share_document_navigation(cx: &mut Te
         window.render_frame(cx);
         assert_eq!(
             window.find(("contents-entry", 0usize)).label(),
-            Some("1 Landscape")
+            Some("Landscape")
         );
         window.click(("contents-entry", 0usize), cx);
     })

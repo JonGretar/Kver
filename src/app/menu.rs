@@ -2,9 +2,9 @@
 
 use std::cell::Cell;
 
-use gpui_kit::{AnyWindowHandle, App, AppContext as _, Global};
+use gpui_kit::{AnyWindowHandle, App, AppContext as _};
 #[cfg(target_os = "macos")]
-use gpui_kit::{Menu, MenuItem};
+use gpui_kit::{Global, Menu, MenuItem};
 
 use super::document_window::OpenPdf;
 #[cfg(target_os = "macos")]
@@ -23,17 +23,18 @@ use crate::settings_ui::ShowSettings;
 
 pub use super::commands::{AboutKver, CheckForUpdates, Quit};
 
+#[cfg(target_os = "macos")]
 struct MenuState {
     updates_available: bool,
 }
+#[cfg(target_os = "macos")]
 impl Global for MenuState {}
 
 /// Install handlers and native menus after the application keymap.
 pub fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     let updates_available = crate::updater::install(cx);
-    #[cfg(not(target_os = "macos"))]
-    let updates_available = false;
+    #[cfg(target_os = "macos")]
     cx.set_global(MenuState { updates_available });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {

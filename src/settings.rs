@@ -7,6 +7,8 @@ use std::{
 use directories::ProjectDirs;
 use toml_edit::{DocumentMut, Item, Table, value};
 
+use crate::app::keymap::Preset;
+
 /// Stable identity shared by configuration and future local per-document data.
 const QUALIFIER: &str = "com";
 const ORGANIZATION: &str = "JonGretar";
@@ -163,6 +165,7 @@ pub struct AppSettings {
     initial_zoom: InitialZoom,
     reopen_last_windows_on_startup: bool,
     reading_view: ReadingView,
+    keyboard_preset: Preset,
 }
 
 impl AppSettings {
@@ -247,9 +250,19 @@ impl AppSettings {
         self
     }
 
+    pub fn keyboard_preset(self) -> Preset {
+        self.keyboard_preset
+    }
+
+    pub fn with_keyboard_preset(mut self, preset: Preset) -> Self {
+        self.keyboard_preset = preset;
+        self
+    }
+
     fn from_document(document: &DocumentMut) -> Result<Self, String> {
         let application = table_in(document, "application")?;
         let reader = table_in(document, "reader")?;
+        let keyboard = table_in(document, "keyboard")?;
         Ok(Self {
             appearance: appearance_in(document)?,
             show_toolbar: bool_in(
@@ -284,6 +297,14 @@ impl AppSettings {
                         .ok_or("Settings [reader].reading_view must be a string")?,
                 )?,
             },
+            keyboard_preset: match keyboard.and_then(|table| table.get("preset")) {
+                None => Preset::default(),
+                Some(value) => Preset::parse(
+                    value
+                        .as_str()
+                        .ok_or("Settings [keyboard].preset must be a string")?,
+                )?,
+            },
         })
     }
 }
@@ -300,6 +321,7 @@ impl Default for AppSettings {
             initial_zoom: InitialZoom::default(),
             reopen_last_windows_on_startup: false,
             reading_view: ReadingView::default(),
+            keyboard_preset: Preset::default(),
         }
     }
 }
@@ -316,6 +338,7 @@ pub enum SettingsChange {
     InitialZoom(InitialZoom),
     ReopenLastWindowsOnStartup(bool),
     ReadingView(ReadingView),
+    KeyboardPreset(Preset),
 }
 
 impl SettingsChange {
@@ -338,6 +361,7 @@ impl SettingsChange {
                 value(reopen),
             ),
             Self::ReadingView(view) => ("reader", "reading_view", value(view.key())),
+            Self::KeyboardPreset(preset) => ("keyboard", "preset", value(preset.key())),
         };
         if document.get(section).is_none() {
             document[section] = Item::Table(Table::new());
@@ -572,6 +596,41 @@ pub fn save(path: &Path, change: SettingsChange) -> Result<AppSettings, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_preset_round_trips_without_losing_other_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(
+            &path,
+            "# keep\n[application]\nappearance = 'dark'\n[future]\nvalue = 42\n",
+        )
+        .unwrap();
+        assert_eq!(
+            super::load(&path).unwrap().keyboard_preset(),
+            Preset::Standard
+        );
+        assert_eq!(
+            super::save(&path, SettingsChange::KeyboardPreset(Preset::Vim))
+                .unwrap()
+                .keyboard_preset(),
+            Preset::Vim
+        );
+        assert_eq!(super::load(&path).unwrap().keyboard_preset(), Preset::Vim);
+        assert!(fs::read_to_string(&path).unwrap().contains("# keep\n"));
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("[future]\nvalue = 42")
+        );
+        fs::write(&path, "[keyboard]\npreset = 'emacs'\n").unwrap();
+        assert!(
+            super::load(&path)
+                .unwrap_err()
+                .contains("Unknown keyboard preset")
+        );
+        assert!(super::save(&path, SettingsChange::KeyboardPreset(Preset::Standard)).is_err());
+    }
 
     fn save(path: &Path, appearance: Appearance) -> Result<AppSettings, String> {
         super::save(path, SettingsChange::Appearance(appearance))

@@ -3,6 +3,35 @@ use super::*;
 use crate::{app::keymap::install as bind_reader_keys, reader::ZoomMode};
 
 #[gpui_kit::test]
+fn vim_palette_and_find_keys_stay_in_the_reader_context(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| crate::app::keymap::select_preset(cx, crate::app::keymap::Preset::Vim));
+    let (window, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press(":", cx);
+    })
+    .unwrap();
+    assert!(document.read_with(cx, |document, _| document.palette_open()));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("escape", cx);
+    })
+    .unwrap();
+    assert!(!document.read_with(cx, |document, _| document.palette_open()));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("/", cx);
+        frame.render_frame(cx);
+        assert_eq!(frame.find("find-query").focused(), Some(true));
+        frame.press(":", cx);
+        assert!(!document.read(cx).palette_open());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn unavailable_palette_commands_do_not_run_and_escape_restores_reader_focus(
     cx: &mut TestAppContext,
 ) {

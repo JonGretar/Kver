@@ -26,8 +26,9 @@ use crate::{
     reader::{
         Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpEvent,
         JumpLocalMark, MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView,
-        ScrollDown, ScrollUp, SetLocalMark, ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark,
-        ShowMarks, ShowSetMark, SinglePage, ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
+        ScrollDown, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowContents,
+        ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage, ToggleSidebar,
+        UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::{
         ShowRecent,
@@ -58,6 +59,7 @@ pub struct DocumentWindow {
     sidebar: Option<Entity<ReaderSidebar>>,
     panel_subscriptions: Vec<Subscription>,
     _reader_observation: Subscription,
+    _reader_focus_subscription: Subscription,
     _settings_observation: Subscription,
     _document_subscription: Subscription,
     _jump_subscription: Subscription,
@@ -100,6 +102,20 @@ impl DocumentWindow {
             this.refresh_navigation_menu(window, cx);
         });
         let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
+        let reader_focus_subscription = cx.on_focus(
+            &reader.read(cx).focus_handle(cx),
+            window,
+            |this, window, cx| {
+                this.refresh_navigation_menu(window, cx);
+                // A document-owned modal restores focus just before it unmounts.
+                // Re-evaluate after its dismissal so its native menu item is
+                // not left disabled for the rest of the reader session.
+                let owner = cx.weak_entity();
+                window.on_next_frame(move |window, cx| {
+                    let _ = owner.update(cx, |this, cx| this.refresh_navigation_menu(window, cx));
+                });
+            },
+        );
         let document_subscription =
             cx.subscribe_in(&reader, window, |this, _, event, window, cx| {
                 this.on_document_event(event, window, cx);
@@ -130,6 +146,7 @@ impl DocumentWindow {
             sidebar: None,
             panel_subscriptions: Vec::new(),
             _reader_observation: reader_observation,
+            _reader_focus_subscription: reader_focus_subscription,
             _settings_observation: settings_observation,
             _document_subscription: document_subscription,
             _jump_subscription: jump_subscription,
@@ -311,7 +328,13 @@ impl DocumentWindow {
                 .query_focus(cx)
                 .is_focused(window)
         });
-        let accepts_shortcut = !find_has_focus && self.palette.is_none();
+        let marks_open = self
+            .reader
+            .read(cx)
+            .marks_overlay()
+            .is_some_and(|marks| marks.read(cx).is_open());
+        let accepts_shortcut =
+            !find_has_focus && self.palette.is_none() && self.recent.is_none() && !marks_open;
         menu::refresh_navigation(
             cx,
             accepts_shortcut && self.jumplist.can_back(),
@@ -328,6 +351,7 @@ impl DocumentWindow {
             .update(cx, |reader, cx| reader.show_marks(view, window, cx))
         {
             self.palette = None;
+            self.refresh_navigation_menu(window, cx);
             cx.notify();
         }
     }
@@ -480,28 +504,32 @@ impl DocumentWindow {
         self.palette = None;
         let excluded = self.reader.read(cx).record_path().map(ToOwned::to_owned);
         let picker = cx.new(|cx| RecentPicker::new(excluded, window, cx));
-        self.recent_subscription = Some(cx.subscribe(&picker, |this, picker, event, cx| {
-            if this.recent.as_ref() != Some(&picker) {
-                return;
-            }
-            match event {
-                RecentPickerEvent::Open { path, request } => {
-                    this.open_path(path.clone(), cx);
-                    this.recent_open = Some(PendingRecentOpen {
-                        generation: this.reader.read(cx).document_generation(),
-                        picker: picker.downgrade(),
-                        request: *request,
-                    });
+        let recent_subscription =
+            cx.subscribe_in(&picker, window, |this, picker, event, window, cx| {
+                if this.recent.as_ref() != Some(picker) {
+                    return;
                 }
-                RecentPickerEvent::Closed => {
-                    this.recent = None;
-                    this.recent_subscription = None;
+                match event {
+                    RecentPickerEvent::Open { path, request } => {
+                        this.open_path(path.clone(), cx);
+                        this.recent_open = Some(PendingRecentOpen {
+                            generation: this.reader.read(cx).document_generation(),
+                            picker: picker.downgrade(),
+                            request: *request,
+                        });
+                    }
+                    RecentPickerEvent::Closed => {
+                        this.recent = None;
+                        this.recent_subscription = None;
+                    }
                 }
-            }
-            cx.notify();
-        }));
+                this.refresh_navigation_menu(window, cx);
+                cx.notify();
+            });
+        self.recent_subscription = Some(recent_subscription);
         self.recent = Some(picker.clone());
         picker.update(cx, |picker, cx| picker.show(window, cx));
+        self.refresh_navigation_menu(window, cx);
         cx.notify();
     }
 
@@ -621,6 +649,8 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<PreviousPage>))
             .on_action(cx.listener(Self::route_reader_action::<ScrollDown>))
             .on_action(cx.listener(Self::route_reader_action::<ScrollUp>))
+            .on_action(cx.listener(Self::route_reader_action::<ScrollScreenDown>))
+            .on_action(cx.listener(Self::route_reader_action::<ScrollScreenUp>))
             .on_action(cx.listener(Self::route_reader_action::<ZoomIn>))
             .on_action(cx.listener(Self::route_reader_action::<ZoomOut>))
             .on_action(cx.listener(Self::route_reader_action::<FitWidth>))

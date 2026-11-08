@@ -100,7 +100,7 @@ fn selection_copy_survives_zoom_and_scrolling_in_its_window(cx: &mut TestAppCont
     cx.run_until_parked();
     for zoomed in [false, true] {
         if zoomed {
-            cx.simulate_keystrokes(window, "=");
+            cx.simulate_keystrokes(window, "cmd-=");
             cx.run_until_parked();
             reader.read_with(cx, |reader, _| {
                 assert!(reader.scale() > 1.0);
@@ -116,7 +116,7 @@ fn selection_copy_survives_zoom_and_scrolling_in_its_window(cx: &mut TestAppCont
         });
         other.read_with(cx, |reader, _| assert_eq!(reader.selected_text(), None));
     }
-    cx.simulate_keystrokes(window, "n");
+    cx.simulate_keystrokes(window, "right");
     cx.run_until_parked();
     reader.read_with(cx, |reader, _| {
         assert_eq!(reader.page_index(), 1);
@@ -127,7 +127,10 @@ fn selection_copy_survives_zoom_and_scrolling_in_its_window(cx: &mut TestAppCont
         cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
         Some("KVER ".into())
     );
-    cx.simulate_keystrokes(window, "s");
+    cx.update_window(window, |_, frame, cx| {
+        frame.dispatch_action(Box::new(SinglePage), cx)
+    })
+    .unwrap();
     reader.read_with(cx, |reader, _| {
         assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
         assert_eq!(

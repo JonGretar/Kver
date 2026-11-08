@@ -76,7 +76,7 @@ fn keyboard_activation_and_fits_use_same_destination_path(cx: &mut TestAppContex
         frame.press("enter", cx);
         assert_eq!(reader.read(cx).page_index(), 1);
         assert!(reader.read(cx).focus.is_focused(frame));
-        frame.press("p", cx);
+        frame.press("left", cx);
     })
     .unwrap();
     reader.read_with(cx, |reader, _| {

@@ -264,7 +264,7 @@ fn keyboard_traversal_restores_both_locations_without_appending(cx: &mut TestApp
     reader.update(cx, |reader, cx| reader.select_page(0, cx));
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("ctrl-o", cx);
+        frame.press("alt-left", cx);
     })
     .unwrap();
     reader.read_with(cx, |reader, _| {
@@ -277,7 +277,7 @@ fn keyboard_traversal_restores_both_locations_without_appending(cx: &mut TestApp
         assert!(!document.jumplist.can_back());
         assert_eq!(document.jumplist.entries.len(), 2);
     });
-    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("alt-right", cx))
         .unwrap();
     reader.read_with(cx, |reader, _| {
         assert!(reader.jump_location().unwrap().equivalent(&destination));
@@ -529,6 +529,7 @@ fn forward_shortcut_does_not_steal_find_input_focus(cx: &mut TestAppContext) {
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         frame.press("ctrl-i", cx);
+        frame.press("alt-right", cx);
     })
     .unwrap();
     document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
@@ -656,6 +657,26 @@ fn native_navigate_menu_follows_active_window_and_find_focus(cx: &mut TestAppCon
         frame.press("escape", cx);
     })
     .unwrap();
+    assert_eq!(navigation(cx), (true, false));
+    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-m", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, true));
+    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+        .unwrap();
+    document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
+    cx.update_window(window, |_, frame, cx| frame.press("escape", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, false));
+    cx.update(|cx| crate::reading_history::install(cx, None));
+    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-o", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(navigation(cx), (true, true));
+    cx.update_window(window, |_, frame, cx| frame.press("escape", cx))
+        .unwrap();
+    cx.run_until_parked();
     assert_eq!(navigation(cx), (true, false));
     let (other_window, other) = open(cx, None);
     cx.update_window(other_window, |_, frame, cx| {

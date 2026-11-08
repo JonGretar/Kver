@@ -22,8 +22,13 @@ shared state, and creates the initial reader window. Settings and history
 receive the same resolved application paths.
 `src/app/keymap.rs` resolves embedded common, platform-filtered, and preset
 entries in that order before installing Actions and building native menus.
-Standard is selected by default; until the separate preset tickets define new
-keys, the embedded Standard and Vim entries preserve the existing reader keys.
+Standard is selected by default. Its reader-only arrows move by line or turn a
+page, Page Up/Down scroll by most of the measured viewport, Command/Ctrl plus
+or minus changes zoom, and modified page-turn keys follow the platform.
+The previous bare-letter shortcuts and multi-key local-mark sequences remain
+in the Vim placeholder for #104, not in Standard; Standard uses the marks
+dialog and palette. Both presets inherit application commands and the
+Reader/Contents-only Ctrl-O/I jumplist bindings.
 The policy addresses a slot by product context and complete key sequence. A
 later layer replaces that slot; an explicit contextual unbind masks the same
 key inherited from its parent (including a global key) only in that context.
@@ -301,12 +306,12 @@ also checks the history deletion epoch. Lifecycle tests live beside the
 feature; composed keyboard, naming, and document-replacement tests live in
 `src/reader/tests/marks.rs`.
 
-GPUI's multi-keystroke bindings hold `m` then a letter to set or replace,
-`'` then a letter to jump, and `d m` then a letter to delete while the reader
-is focused. The pending keymap sequence takes priority over ordinary one-key
-reader shortcuts (such as `p` for Previous Page); no second letter handler
-competes with the normal keymap. The command palette exposes the corresponding
-operations and an Open marks popup; Command-Shift-M opens that popup directly.
+In the Vim placeholder, GPUI's multi-keystroke bindings hold `m` then a letter
+to set or replace, `'` then a letter to jump, and `d m` then a letter to delete
+while the reader is focused. A pending sequence takes priority over a one-key
+reader shortcut; no second letter handler competes with the normal keymap.
+Both presets expose these operations through the command palette and Open
+marks popup; Command-Shift-M opens that popup directly.
 The popup lists only set local letters, their page-local positions, and optional
 names. Jumps reuse the saved-position coordinate transform, clamping offsets
 within a changed page and rejecting missing pages.

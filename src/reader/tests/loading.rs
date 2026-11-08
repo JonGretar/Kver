@@ -118,7 +118,7 @@ fn opening_zoom_uses_settings_per_document_without_refitting_other_windows(
     let position = second
         .read_with(cx, |reader, _| reader.reading_position())
         .unwrap();
-    cx.simulate_keystrokes(second.into(), "w");
+    cx.simulate_keystrokes(second.into(), "cmd-alt-w");
     cx.run_until_parked();
     second
         .read_with(cx, |reader, _| {
@@ -128,7 +128,7 @@ fn opening_zoom_uses_settings_per_document_without_refitting_other_windows(
             assert!((after.1 - position.1).abs() < 2.0);
         })
         .unwrap();
-    cx.simulate_keystrokes(second.into(), "=");
+    cx.simulate_keystrokes(second.into(), "cmd-=");
     cx.run_until_parked();
     second
         .read_with(cx, |reader, _| {

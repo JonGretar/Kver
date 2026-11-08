@@ -46,7 +46,7 @@ fn resizing_sidebar_refits_pdf_and_preserves_panel_across_documents(cx: &mut Tes
     .unwrap();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-alt-w", cx);
+        window.dispatch_action(Box::new(crate::reader::FitWidth), cx);
     })
     .unwrap();
     cx.run_until_parked();

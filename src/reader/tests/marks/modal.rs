@@ -113,7 +113,7 @@ fn clicking_outside_marks_after_delete_dismisses_popup(cx: &mut TestAppContext) 
             "clicking outside the marks surface must dismiss it"
         )
     });
-    cx.simulate_keystrokes(window, "j");
+    cx.simulate_keystrokes(window, "down");
     assert_eq!(
         reader.read_with(cx, |reader, _| reader.reading_position()),
         (0, 100.0)

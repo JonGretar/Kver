@@ -9,6 +9,8 @@ gpui::actions!(
         PreviousPage,
         ScrollDown,
         ScrollUp,
+        ScrollScreenDown,
+        ScrollScreenUp,
         ZoomIn,
         ZoomOut,
         FitWidth,

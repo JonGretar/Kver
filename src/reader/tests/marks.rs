@@ -17,7 +17,12 @@ fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
     let pdf = RecentStore::normalize(&pdf).unwrap();
     cx.update(|cx| {
         gpui_kit::init(cx);
-        bind_reader_keys(cx);
+        let map = crate::app::keymap::resolve(
+            crate::app::keymap::Platform::Mac,
+            crate::app::keymap::Preset::Vim,
+        )
+        .unwrap();
+        cx.bind_keys(map.bindings(cx));
         recent::install(cx, Some(paths.clone()));
         settings_ui::install_with_paths(cx, Some(paths.clone()));
     });

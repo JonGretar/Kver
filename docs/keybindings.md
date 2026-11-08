@@ -2,7 +2,9 @@
 
 Edit `~/Library/Application Support/com.JonGretar.Kver/config.toml` on macOS
 to customize keys. Create the file if it does not exist; keep any existing
-settings in it. Kver applies valid edits while it runs.
+settings in it. Kver applies valid edits while it runs. Choose Standard or
+Vim in **Kver → Settings → Keyboard**, or set `preset = "vim"` under `[keyboard]`
+in the same file.
 
 ## Add a key sequence
 

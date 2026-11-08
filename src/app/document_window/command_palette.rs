@@ -19,6 +19,10 @@ use super::{
 };
 use crate::{
     app::windows::{NewWindow, NextWindow, PreviousWindow},
+    app::{
+        keymap::{self, Context as KeyContext},
+        shortcut_label,
+    },
     reader::{
         Continuous, Copy, FitPage, FitWidth, NextMatch, NextPage, PreviousMatch, PreviousPage,
         ReadingMode, ShowDeleteMark, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage,
@@ -89,36 +93,40 @@ impl CommandPalette {
             command("New Window", NewWindow, true),
             command("Next Window", NextWindow, cx.windows().len() >= 2),
             command("Previous Window", PreviousWindow, cx.windows().len() >= 2),
-            command(
+            reader_command(
                 "Next Page",
                 NextPage,
                 has_document && available.page_ix + 1 < available.page_count,
+                cx,
             ),
-            command(
+            reader_command(
                 "Previous Page",
                 PreviousPage,
                 has_document && available.page_ix > 0,
+                cx,
             ),
-            command(
+            reader_command(
                 "Single page",
                 SinglePage,
                 has_document && available.mode_override != Some(ReadingMode::SinglePage),
+                cx,
             ),
-            command(
+            reader_command(
                 "Continuous",
                 Continuous,
                 has_document && available.mode_override != Some(ReadingMode::Continuous),
+                cx,
             ),
             command(
                 "Use default reading mode",
                 UseDefaultReadingMode,
                 has_document && available.mode_override.is_some(),
             ),
-            command("Zoom In", ZoomIn, has_document),
-            command("Zoom Out", ZoomOut, has_document),
-            command("Fit Width", FitWidth, has_document),
-            command("Fit Page", FitPage, has_document),
-            command("Copy", Copy, available.has_selection),
+            reader_command("Zoom In", ZoomIn, has_document, cx),
+            reader_command("Zoom Out", ZoomOut, has_document, cx),
+            reader_command("Fit Width", FitWidth, has_document, cx),
+            reader_command("Fit Page", FitPage, has_document, cx),
+            reader_command("Copy", Copy, available.has_selection, cx),
         ];
         [
             div()
@@ -160,6 +168,45 @@ fn command(label: &'static str, action: impl Action, enabled: bool) -> CommandIt
         .label(label)
         .action(Box::new(action))
         .disabled(!enabled)
+}
+
+fn reader_command(
+    label: &'static str,
+    action: impl Action,
+    enabled: bool,
+    cx: &App,
+) -> CommandItem {
+    let preset = keymap::active_preset(cx);
+    let fallback;
+    let map = if let Some(map) = keymap::active_map(cx) {
+        map
+    } else {
+        fallback = keymap::resolve(keymap::platform(cx), preset).expect("embedded keyboard policy");
+        &fallback
+    };
+    let shortcut = map
+        .shortcuts(&action, KeyContext::Reader)
+        .last()
+        .map(|keys| shortcut_label::format(keys, cx));
+    let item = command(label, action, enabled);
+    match shortcut {
+        None => item,
+        Some(shortcut) => item.child(move |_, cx| {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .w_full()
+                .child(label)
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(shortcut.clone()),
+                )
+        }),
+    }
 }
 
 fn dismiss(window: &mut Window, cx: &mut App) {

@@ -27,18 +27,21 @@ page, Page Up/Down scroll by most of the measured viewport, Command/Ctrl plus
 or minus changes zoom, and modified page-turn keys follow the platform.
 Vim keeps reader-only `j/k` for vertical steps, `h/l` and Left/Right for
 horizontal steps, `n/p` for page turns, Space/Shift-Space for half-screen
-vertical scrolling, `gg/G` for document bounds, `/` for Find, `=/−` for
+vertical scrolling, `gg/G` for document bounds, `o/O` for Open PDF/Recent,
+`/` for Find, `:` for the command palette, `=/−` for
 zoom, `w/f` for fit, `s/c` for reading mode, and local-mark sequences.
 Horizontal keys do nothing when the current page fits the viewport.
 Standard leaves those letters free and uses the marks dialog and palette.
 Both presets inherit application commands (including macOS Command-Q/W)
-and the Reader/Contents-only Ctrl-O/I jumplist bindings. The selected
-preset can be installed through the same resolver; choosing it in Settings
-is separate work.
+and the Reader/Contents-only Ctrl-O/I jumplist bindings. Settings persists
+`[keyboard].preset`; switching replaces only product bindings, preserving
+Kit's bindings, and refreshes native menus. Keyboard Settings shows context-
+and task-grouped bindings. The command palette shows contextual reader hints
+alongside its Action-derived global hints.
 The policy addresses a slot by product context and complete key sequence. A
 later layer replaces that slot; an internal contextual unbind can mask an
 inherited key, but user-file unbinding is deferred. Other contexts retain
-their bindings. On macOS, edits that would promote a bare reader key to the
+their bindings. On macOS, edits that would promote a reader typing key to the
 first shortcut for a native menu action are rejected.
 Duplicate slots within a layer and one-key/multi-key prefix collisions in
 overlapping contexts are diagnostics, not implicit GPUI ordering rules.

@@ -154,8 +154,9 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
     let _ = (cx, can_back, can_forward);
 }
 
-/// Re-snapshot accelerators without losing the active window's menu state.
-pub(crate) fn refresh_bindings(cx: &App) {
+/// Re-snapshot accelerators after a keymap change without discarding the
+/// active window's navigation availability.
+pub(crate) fn refresh_shortcuts(cx: &App) {
     #[cfg(target_os = "macos")]
     if let Some(state) = cx.try_global::<MenuState>() {
         refresh_navigation(cx, state.can_back.get(), state.can_forward.get());

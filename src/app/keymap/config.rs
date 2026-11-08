@@ -102,11 +102,16 @@ pub fn resolve_config(
             };
             let default_is_modified =
                 default.sequence.len() == 1 && default.sequence[0].modifiers.modified();
-            let current_is_bare =
-                current.sequence.len() == 1 && !current.sequence[0].modifiers.modified();
-            if default_is_modified && current_is_bare {
+            // Shift alone still types into a text field. Only Command,
+            // Control, Option, or Function prevents a reader-only key from
+            // becoming an ordinary typing shortcut in a native menu.
+            let current_is_typing_key = current.sequence.len() == 1 && {
+                let modifiers = current.sequence[0].modifiers;
+                !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function
+            };
+            if default_is_modified && current_is_typing_key {
                 return Err(format!(
-                    "Rebinding the modified shortcut for {} would make {:?} a bare macOS menu accelerator; also rebind {:?} or keep a modified shortcut for this command",
+                    "Rebinding the modified shortcut for {} would make {:?} a reader-only macOS menu accelerator while typing; also rebind {:?} or keep a modified shortcut for this command",
                     action.name(),
                     current.entry.keys,
                     current.entry.keys

@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Choose Standard or Vim keyboard shortcuts in Settings, see active shortcuts grouped by task and focus context, and reset the preset to Standard. The command palette shows reader shortcut hints; Vim also opens PDFs with `o`, recent PDFs with Shift-O, and the palette with `:`.
 - Return to earlier locations and move forward again from toolbar buttons, the Navigate menu, or the command palette; unavailable directions are disabled.
 - Return to earlier link, Find, Contents, and local-mark locations with Control-O, and move forward again with Control-I. A new jump after going back replaces the abandoned forward path.
 - Open supported links to another local PDF in a new window at the linked page, leaving the original document in place; missing or invalid targets show an error.

@@ -67,8 +67,9 @@ with diagnostics. Kver keeps the last valid keymap active until the file is
 fixed. A valid edit also updates native menu shortcuts and command-palette
 shortcut hints.
 
-On macOS, Kver rejects a rebind if it would make a bare reader key into a
-native menu accelerator. For example, changing `cmd-alt-right` away from
+On macOS, Kver rejects a rebind if it would make a reader-only typing key
+(including a Shift-only key) into a native menu accelerator. For example,
+changing `cmd-alt-right` away from
 Next Page while `right` remains its first reader key is unsafe. Rebind
 `right` too, or keep the modified shortcut.
 

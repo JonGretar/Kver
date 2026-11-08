@@ -36,16 +36,6 @@ use crate::{
     settings_ui::{CloseSettings, ShowSettings},
 };
 
-struct InstalledKeymap {
-    product_start: usize,
-    product_len: usize,
-    content: Option<String>,
-    preset: Preset,
-    platform: Platform,
-    reported_error: Option<String>,
-}
-impl Global for InstalledKeymap {}
-
 // GPUI resolves a pending sequence before one-key shortcuts such as p/n/s/c.
 const MARK_KEY_SEQUENCES: [(char, &str, &str, &str); 26] = [
     ('a', "m a", "' a", "d m a"),
@@ -128,6 +118,32 @@ pub enum Preset {
     #[default]
     Standard,
     Vim,
+}
+
+impl Preset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::Vim => "Vim",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Vim => "vim",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "standard" => Ok(Self::Standard),
+            "vim" => Ok(Self::Vim),
+            _ => Err(format!(
+                "Unknown keyboard preset {value:?}; use standard or vim"
+            )),
+        }
+    }
 }
 
 /// One user-facing key slot. A missing action is an explicit unbind, not an
@@ -219,6 +235,48 @@ pub struct ResolvedKeymap {
     platform: Platform,
 }
 
+struct InstalledKeymap {
+    product_start: usize,
+    product_len: usize,
+    content: Option<String>,
+    preset: Preset,
+    platform: Platform,
+    path: Option<PathBuf>,
+    reported_error: Option<String>,
+    resolved: ResolvedKeymap,
+}
+impl Global for InstalledKeymap {}
+
+pub fn active_preset(cx: &App) -> Preset {
+    cx.try_global::<InstalledKeymap>()
+        .map_or(Preset::default(), |map| map.preset)
+}
+
+pub fn platform(cx: &App) -> Platform {
+    match cx.platform_info().os {
+        OperatingSystem::Mac => Platform::Mac,
+        OperatingSystem::Windows => Platform::Windows,
+        _ => Platform::Linux,
+    }
+}
+
+/// Rebuild the complete map rather than accumulating keys from prior presets.
+pub fn select_preset(cx: &mut App, preset: Preset) -> Result<bool, String> {
+    let Some(state) = cx.try_global::<InstalledKeymap>() else {
+        return Ok(false);
+    };
+    let content = match &state.path {
+        Some(path) => read_config(path)?,
+        None => state.content.clone(),
+    };
+    reload(cx, content, preset)
+}
+
+pub fn active_map(cx: &App) -> Option<&ResolvedKeymap> {
+    cx.try_global::<InstalledKeymap>()
+        .map(|state| &state.resolved)
+}
+
 impl ResolvedKeymap {
     /// Return the effective command, including contextual unbinding and fallback.
     pub fn action(&self, keys: &str, context: Context) -> Option<&str> {
@@ -232,6 +290,29 @@ impl ResolvedKeymap {
                     .find(|slot| slot.sequence == sequence && slot.entry.context == candidate)
             })
             .and_then(|slot| slot.entry.action.as_ref().map(|action| action.name()))
+    }
+
+    pub fn shortcuts(&self, action: &dyn Action, context: Context) -> Vec<&str> {
+        self.slots
+            .iter()
+            .filter_map(|slot| {
+                let bound = slot.entry.action.as_ref()?;
+                (bound.name() == action.name()
+                    && context.inherits_from(slot.entry.context)
+                    && self.action(&slot.entry.keys, context) == Some(action.name()))
+                .then_some(slot.entry.keys.as_str())
+            })
+            .collect()
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = (Context, &str, &str)> {
+        self.slots.iter().filter_map(|slot| {
+            Some((
+                slot.entry.context,
+                slot.entry.action.as_ref()?.name(),
+                slot.entry.keys.as_str(),
+            ))
+        })
     }
 
     /// Bind only the resolved policy, rather than adding each layer to GPUI.
@@ -429,8 +510,7 @@ pub fn install(cx: &mut App) {
     install_with_paths(cx, Preset::default(), None);
 }
 
-/// Install a selected preset before building native menus. Preset selection
-/// and live switching are separate from the embedded policy.
+/// Install a selected preset before building native menus.
 pub fn install_preset(cx: &mut App, preset: Preset) {
     install_with_paths(cx, preset, None);
 }
@@ -464,7 +544,9 @@ pub fn install_with_paths(cx: &mut App, preset: Preset, paths: Option<AppPaths>)
         content: if valid { content } else { None },
         preset,
         platform,
+        path: path.clone(),
         reported_error: None,
+        resolved: map,
     });
     if let Some(path) = path {
         cx.spawn(async move |cx| {
@@ -528,7 +610,8 @@ pub fn reload(cx: &mut App, content: Option<String>, preset: Preset) -> Result<b
     state.content = content;
     state.preset = preset;
     state.reported_error = None;
-    super::menu::refresh_bindings(cx);
+    state.resolved = map;
+    super::menu::refresh_shortcuts(cx);
     Ok(true)
 }
 
@@ -647,7 +730,10 @@ fn preset_defaults(preset: Preset) -> Vec<Entry> {
                 Entry::bind("shift-space", Context::Reader, ScrollHalfScreenUp),
                 Entry::bind("g g", Context::Reader, GoToDocumentStart),
                 Entry::bind("shift-g", Context::Reader, GoToDocumentEnd),
+                Entry::bind("o", Context::Reader, OpenPdf),
+                Entry::bind("shift-o", Context::Reader, ShowRecent),
                 Entry::bind("/", Context::Reader, ShowFind),
+                Entry::bind(":", Context::Reader, ShowCommandPalette),
                 Entry::bind("=", Context::Reader, ZoomIn),
                 Entry::bind("shift-=", Context::Reader, ZoomIn),
                 Entry::bind("-", Context::Reader, ZoomOut),

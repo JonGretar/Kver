@@ -22,6 +22,10 @@ use gpui_kit::{
 };
 
 use crate::{
+    app::{
+        keymap::{self, Preset},
+        shortcut_label,
+    },
     reader_windows::CloseWindow,
     recent,
     settings::{self, AppPaths, AppSettings, Appearance, InitialZoom, ReadingView, SettingsChange},
@@ -86,6 +90,10 @@ impl SettingsState {
         self.settings.reading_view()
     }
 
+    pub fn keyboard_preset(&self) -> crate::app::keymap::Preset {
+        self.settings.keyboard_preset()
+    }
+
     pub fn ready(&self) -> bool {
         self.ready
     }
@@ -101,6 +109,7 @@ impl SettingsState {
             SettingsChange::ShowStatusbar(show) => self.settings.with_show_statusbar(show),
             SettingsChange::InitialZoom(choice) => self.settings.with_initial_zoom(choice),
             SettingsChange::ReadingView(choice) => self.settings.with_reading_view(choice),
+            SettingsChange::KeyboardPreset(choice) => self.settings.with_keyboard_preset(choice),
             SettingsChange::ReopenLastWindowsOnStartup(reopen) => {
                 self.settings.with_reopen_last_windows_on_startup(reopen)
             }
@@ -119,7 +128,9 @@ impl SettingsState {
         }
         self.revision += 1;
         if self.paths.is_none() {
-            self.apply_settings(updated, cx);
+            if let Err(error) = self.apply_settings(updated, cx) {
+                self.error = Some(error);
+            }
             self.error = Some(
                 "Settings cannot be saved: no user configuration directory is available.".into(),
             );
@@ -151,7 +162,11 @@ impl SettingsState {
             .detach();
         }
         if self.paths.is_none() {
-            self.apply_settings(self.settings.with_remember_reading_history(remember), cx);
+            if let Err(error) =
+                self.apply_settings(self.settings.with_remember_reading_history(remember), cx)
+            {
+                self.error = Some(error);
+            }
             self.error = Some(
                 "Settings cannot be saved: no user configuration directory is available.".into(),
             );
@@ -162,7 +177,14 @@ impl SettingsState {
         cx.notify();
     }
 
-    fn apply_settings(&mut self, updated: AppSettings, cx: &mut Context<Self>) {
+    fn apply_settings(
+        &mut self,
+        updated: AppSettings,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if self.settings.keyboard_preset() != updated.keyboard_preset() {
+            crate::app::keymap::select_preset(cx, updated.keyboard_preset())?;
+        }
         if self.settings.appearance() != updated.appearance() {
             updated.appearance().apply(cx);
         }
@@ -183,6 +205,7 @@ impl SettingsState {
         }
         self.settings = updated;
         cx.notify();
+        Ok(())
     }
 
     fn start_save(&mut self, cx: &mut Context<Self>) {
@@ -214,8 +237,7 @@ impl SettingsState {
                 } else {
                     match result {
                         Ok(updated) => {
-                            this.apply_settings(updated, cx);
-                            this.error = None;
+                            this.error = this.apply_settings(updated, cx).err();
                         }
                         Err(error) => {
                             if let Some(history) = recent::history(cx) {
@@ -249,8 +271,11 @@ impl SettingsState {
         }
         match result {
             Ok(updated) => {
-                if self.settings != updated {
-                    self.apply_settings(updated, cx);
+                if self.settings != updated
+                    && let Err(error) = self.apply_settings(updated, cx)
+                {
+                    self.error = Some(error);
+                    return;
                 }
                 if self.error.take().is_some() {
                     cx.notify();
@@ -369,7 +394,7 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
                 let focus = cx.focus_handle().tab_stop(true);
                 let choice_focus = cx.focus_handle().tab_stop(true);
                 let zoom_focus = cx.focus_handle().tab_stop(true);
-                focus.focus(window, cx);
+                let preset_focus = cx.focus_handle().tab_stop(true);
                 let settings = state(cx);
                 cx.observe(&settings, |_, _, cx| cx.notify()).detach();
                 let navigation = cx.new(|cx| {
@@ -387,15 +412,18 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
                         TreeItem::new("persistence", "Persistence")
                             .expanded(true)
                             .child(TreeItem::new("reading-history", "Reading History")),
+                        TreeItem::new("keyboard", "Keyboard"),
                     ]);
                     tree.set_selected_index(Some(0), cx);
                     tree
                 });
                 cx.observe(&navigation, |_, _, cx| cx.notify()).detach();
+                navigation.update(cx, |tree, cx| tree.focus(window, cx));
                 SettingsView {
                     focus,
                     choice_focus,
                     zoom_focus,
+                    preset_focus,
                     navigation,
                     settings,
                     clearing: false,
@@ -412,6 +440,7 @@ struct SettingsView {
     focus: FocusHandle,
     choice_focus: FocusHandle,
     zoom_focus: FocusHandle,
+    preset_focus: FocusHandle,
     navigation: Entity<TreeState>,
     settings: Entity<SettingsState>,
     clearing: bool,
@@ -428,6 +457,7 @@ impl SettingsView {
         {
             Some("reader" | "reading-experience") => SettingsPage::Reader,
             Some("persistence" | "reading-history") => SettingsPage::Persistence,
+            Some("keyboard") => SettingsPage::Keyboard,
             _ => SettingsPage::Application,
         }
     }
@@ -533,6 +563,7 @@ enum SettingsPage {
     Application,
     Reader,
     Persistence,
+    Keyboard,
 }
 
 impl SettingsPage {
@@ -541,6 +572,7 @@ impl SettingsPage {
             Self::Application => "Application",
             Self::Reader => "Reader",
             Self::Persistence => "Persistence",
+            Self::Keyboard => "Keyboard",
         }
     }
 }
@@ -550,6 +582,11 @@ impl Render for SettingsView {
         let page = self.page(cx);
         let settings = self.settings.read(cx);
         let selected = settings.appearance();
+        let preset = settings.keyboard_preset();
+        let preset_state = self.settings.clone();
+        let preset_reset_state = self.settings.clone();
+        let preset_reset_focus = self.preset_focus.clone();
+        let keyboard_page = page == SettingsPage::Keyboard;
         let quit_on_close = settings.quit_when_last_window_closes();
         let initial_zoom = settings.initial_zoom();
         let error = settings.error.clone();
@@ -636,7 +673,44 @@ impl Render for SettingsView {
                                     .font_medium()
                                     .child(page.label()),
                             )
-                            .children((page != SettingsPage::Persistence).then(||
+                            .children(keyboard_page.then(|| {
+                                div().p_4().flex().flex_col().gap_4()
+                                    .child(preference_row(
+                                        "Keyboard preset",
+                                        "Changes shortcuts, not commands.",
+                                        div().flex().items_center().gap_2()
+                                            .when(preset != Preset::Standard, |row| row.child(
+                                                Button::new("keyboard-preset-reset")
+                                                    .small().ghost().icon(IconName::Undo2)
+                                                    .accessibility_label("Reset keyboard preset to Standard")
+                                                    .tooltip("Reset keyboard preset to Standard")
+                                                    .on_click(move |_, window, cx| {
+                                                        preset_reset_state.update(cx, |state, cx| state.choose(SettingsChange::KeyboardPreset(Preset::Standard), cx));
+                                                        window.focus(&preset_reset_focus, cx);
+                                                    }),
+                                            ))
+                                            .child(Button::new("keyboard-preset-choice")
+                                                .small().outline().label(preset.label())
+                                                .accessibility_label(format!("Keyboard preset: {}", preset.label()))
+                                                .dropdown_caret(true)
+                                                .track_focus(&self.preset_focus)
+                                                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |mut menu, _, _| {
+                                                    for choice in [Preset::Standard, Preset::Vim] {
+                                                        let state = preset_state.clone();
+                                                        menu = menu.item(PopupMenuItem::new(choice.label())
+                                                            .checked(choice == preset)
+                                                            .on_click(move |_, _, cx| {
+                                                                state.update(cx, |state, cx| state.choose(SettingsChange::KeyboardPreset(choice), cx));
+                                                            }));
+                                                    }
+                                                    menu
+                                                })),
+                                        cx,
+                                    ))
+                                    .child(div().text_sm().font_medium().child("Shortcuts"))
+                                    .child(shortcut_help(cx, preset))
+                            }))
+                            .children((page != SettingsPage::Persistence && !keyboard_page).then(||
                                 div()
                                     .p_4()
                                     .flex()
@@ -1031,6 +1105,201 @@ fn preference_row(
         .child(control)
 }
 
+fn shortcut_help(cx: &App, preset: Preset) -> impl IntoElement {
+    use keymap::Context as KeyContext;
+    let platform = keymap::platform(cx);
+    let fallback;
+    let map = if let Some(map) = keymap::active_map(cx) {
+        map
+    } else {
+        fallback = keymap::resolve(platform, preset).expect("embedded keyboard policy");
+        &fallback
+    };
+    let platform_name = match platform {
+        keymap::Platform::Mac => "macOS",
+        keymap::Platform::Linux => "Linux",
+        keymap::Platform::Windows => "Windows",
+    };
+    let mut sections = div()
+        .id("shortcut-help")
+        .test_support()
+        .role(gpui::Role::Group)
+        .aria_label(format!(
+            "{} keyboard shortcuts for {platform_name}",
+            preset.label()
+        ))
+        .flex()
+        .flex_col()
+        .gap_4();
+    for (context, context_label) in [
+        (KeyContext::Global, "Anywhere"),
+        (KeyContext::Reader, "Reader"),
+        (KeyContext::Sidebar, "Sidebar"),
+        (KeyContext::Contents, "Contents"),
+        (KeyContext::Settings, "Settings"),
+        (KeyContext::About, "About"),
+    ] {
+        let mut groups = div().flex().flex_col().gap_3();
+        let mut any = false;
+        for (task, task_label) in [
+            ("Open", "Open and windows"),
+            ("Navigate", "Navigate and scroll"),
+            ("Find", "Find and contents"),
+            ("View", "View and zoom"),
+            ("Marks", "Marks"),
+            ("Other", "Other"),
+        ] {
+            let mut rows: Vec<(&str, Vec<&str>)> = Vec::new();
+            for (_, action, keys) in map
+                .entries()
+                .filter(|(scope, _, _)| *scope == context)
+                .filter(|(_, action, _)| shortcut_task(action) == task)
+            {
+                if let Some((_, shortcuts)) = rows.iter_mut().find(|(name, _)| *name == action) {
+                    shortcuts.push(keys);
+                } else {
+                    rows.push((action, vec![keys]));
+                }
+            }
+            if rows.is_empty() {
+                continue;
+            }
+            any = true;
+            let mut group = div().flex().flex_col().gap_1().child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(task_label),
+            );
+            for (action, keys) in rows {
+                let shortcuts = displayed_shortcuts(action, &keys, cx);
+                let label = shortcut_label(action);
+                group = group.child(
+                    div()
+                        .id(format!(
+                            "shortcut-{context:?}-{}",
+                            action.rsplit("::").next().unwrap_or(action)
+                        ))
+                        .test_support()
+                        .aria_label(format!("{label}: {shortcuts}"))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .text_sm()
+                        .child(label)
+                        .child(
+                            div()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(shortcuts),
+                        ),
+                );
+            }
+            groups = groups.child(group);
+        }
+        if any {
+            sections = sections.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .pb_2()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .font_medium()
+                            .child(context_label),
+                    )
+                    .child(groups),
+            );
+        }
+    }
+    sections
+}
+
+fn displayed_shortcuts(action: &str, keys: &[&str], cx: &App) -> String {
+    let mark = match action.rsplit("::").next().unwrap_or(action) {
+        "SetLocalMark" => Some(("m ", "m <LETTER>")),
+        "JumpLocalMark" => Some(("' ", "' <LETTER>")),
+        "DeleteLocalMark" => Some(("d m ", "d m <LETTER>")),
+        _ => None,
+    };
+    let full_alphabet = mark.is_some_and(|(prefix, _)| {
+        ('a'..='z').all(|letter| keys.contains(&format!("{prefix}{letter}").as_str()))
+    });
+    let mut displayed = Vec::new();
+    if let Some((_, pattern)) = mark.filter(|_| full_alphabet) {
+        displayed.push(pattern.to_owned());
+    }
+    for key in keys {
+        if full_alphabet
+            && mark.is_some_and(|(prefix, _)| {
+                key.strip_prefix(prefix).is_some_and(|letter| {
+                    letter.len() == 1 && letter.bytes().all(|byte| byte.is_ascii_lowercase())
+                })
+            })
+        {
+            continue;
+        }
+        displayed.push(shortcut_label::format(key, cx));
+    }
+    displayed.join(", ")
+}
+
+fn shortcut_task(action: &str) -> &'static str {
+    let name = action.rsplit("::").next().unwrap_or(action);
+    if name.contains("Mark") {
+        "Marks"
+    } else if name.contains("Window")
+        || matches!(
+            name,
+            "OpenPdf"
+                | "ShowRecent"
+                | "Quit"
+                | "ShowSettings"
+                | "CloseSettings"
+                | "CloseAbout"
+                | "ShowCommandPalette"
+        )
+    {
+        "Open"
+    } else if name.contains("Find")
+        || name.contains("Match")
+        || name.contains("Contents")
+        || name == "ToggleSidebar"
+        || name == "ActivateOutline"
+    {
+        "Find"
+    } else if name.contains("Zoom")
+        || name.contains("Fit")
+        || name.contains("Page") && matches!(name, "SinglePage")
+        || matches!(name, "Continuous")
+    {
+        "View"
+    } else if name.contains("Scroll")
+        || name.contains("Page")
+        || name.contains("Navigate")
+        || name.contains("Document")
+    {
+        "Navigate"
+    } else {
+        "Other"
+    }
+}
+
+fn shortcut_label(action: &str) -> String {
+    let name = action.rsplit("::").next().unwrap_or(action);
+    let mut label = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if index > 0 && ch.is_uppercase() {
+            label.push(' ');
+        }
+        label.push(ch);
+    }
+    label.replace("Pdf", "PDF")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1060,6 +1329,252 @@ mod tests {
         cx.background_executor
             .advance_clock(Duration::from_millis(400));
         cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn keyboard_preset_can_be_changed_and_reset_without_pointer(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keymap::install(cx);
+            install_with_paths(
+                cx,
+                Some(AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                // Opening Settings focuses its page navigation.
+                for _ in 0..12 {
+                    if frame.try_find("keyboard-preset-choice").is_some() {
+                        break;
+                    }
+                    frame.press("down", cx);
+                }
+                assert!(frame.try_find("keyboard-preset-choice").is_some());
+                assert!(frame.try_find("shortcut-help").is_some());
+                let page_keys = if keymap::platform(cx) == keymap::Platform::Mac {
+                    vec!["cmd-alt-right", "right", "alt-down"]
+                } else {
+                    vec!["cmd-alt-right", "right", "ctrl-pagedown"]
+                };
+                assert_eq!(
+                    frame.find("shortcut-Reader-NextPage").label(),
+                    Some(
+                        format!(
+                            "Next Page: {}",
+                            page_keys
+                                .iter()
+                                .map(|key| shortcut_label::format(key, cx))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                        .as_str()
+                    )
+                );
+                for _ in 0..8 {
+                    if frame.find("keyboard-preset-choice").focused() == Some(true) {
+                        break;
+                    }
+                    frame.press("tab", cx);
+                }
+                assert_eq!(frame.find("keyboard-preset-choice").focused(), Some(true));
+                assert_eq!(
+                    frame.find("keyboard-preset-choice").label(),
+                    Some("Keyboard preset: Standard")
+                );
+                frame.press("enter", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.press("down", cx);
+                frame.press("down", cx);
+                frame.press("enter", cx);
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(state(cx).read(cx).keyboard_preset(), Preset::Vim);
+            assert_eq!(keymap::active_preset(cx), Preset::Vim);
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(
+                    frame.find("keyboard-preset-choice").label(),
+                    Some("Keyboard preset: Vim")
+                );
+                assert_eq!(
+                    frame.find("shortcut-Reader-SetLocalMark").label(),
+                    Some("Set Local Mark: m <LETTER>")
+                );
+                assert_eq!(
+                    frame.find("shortcut-Reader-JumpLocalMark").label(),
+                    Some("Jump Local Mark: ' <LETTER>")
+                );
+                assert_eq!(
+                    frame.find("shortcut-Reader-DeleteLocalMark").label(),
+                    Some("Delete Local Mark: d m <LETTER>")
+                );
+                assert_eq!(
+                    frame.find("shortcut-Reader-NextPage").label(),
+                    Some(
+                        format!(
+                            "Next Page: {}, n",
+                            shortcut_label::format("cmd-alt-right", cx)
+                        )
+                        .as_str()
+                    )
+                );
+                assert_eq!(frame.find("keyboard-preset-choice").focused(), Some(true));
+                for _ in 0..8 {
+                    if frame.find("keyboard-preset-reset").focused() == Some(true) {
+                        break;
+                    }
+                    frame.press("shift-tab", cx);
+                }
+                assert_eq!(frame.find("keyboard-preset-reset").focused(), Some(true));
+                frame.press("enter", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_eq!(state(cx).read(cx).keyboard_preset(), Preset::Standard);
+            assert_eq!(keymap::active_preset(cx), Preset::Standard);
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert!(frame.try_find("keyboard-preset-reset").is_none());
+                assert_eq!(frame.find("keyboard-preset-choice").focused(), Some(true));
+                frame.press("escape", cx);
+            })
+            .unwrap();
+        });
+        assert_eq!(
+            settings::load(&config).unwrap().keyboard_preset(),
+            Preset::Standard
+        );
+    }
+
+    #[gpui_kit::test]
+    fn keyboard_help_and_preset_follow_live_user_bindings(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[keyboard]\npreset = 'vim'\n[[keyboard.bindings]]\nkeys = 'ctrl-e'\ncontext = 'reader'\ncommand = 'next-page'\n",
+        )
+        .unwrap();
+        let paths = AppPaths::for_locations(config, root.path().join("data"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keymap::install_with_paths(cx, Preset::Standard, Some(paths.clone()));
+            install_with_paths(cx, Some(paths));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            assert_eq!(keymap::active_preset(cx), Preset::Vim);
+            assert_eq!(
+                keymap::active_map(cx)
+                    .unwrap()
+                    .action("ctrl-e", keymap::Context::Reader),
+                Some("kver::NextPage")
+            );
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                for _ in 0..12 {
+                    if frame.try_find("shortcut-Reader-NextPage").is_some() {
+                        break;
+                    }
+                    frame.press("down", cx);
+                }
+                assert!(
+                    frame
+                        .find("shortcut-Reader-NextPage")
+                        .label()
+                        .unwrap()
+                        .contains(&shortcut_label::format("ctrl-e", cx))
+                );
+            })
+            .unwrap();
+        });
+        cx.update(|cx| {
+            state(cx).update(cx, |settings, cx| {
+                settings.choose(SettingsChange::KeyboardPreset(Preset::Standard), cx);
+            });
+        });
+        cx.run_until_parked();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(keymap::active_preset(cx), Preset::Standard);
+            assert_eq!(
+                keymap::active_map(cx)
+                    .unwrap()
+                    .action("ctrl-e", keymap::Context::Reader),
+                Some("kver::NextPage")
+            );
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert!(
+                    frame
+                        .find("shortcut-Reader-NextPage")
+                        .label()
+                        .unwrap()
+                        .contains(&shortcut_label::format("ctrl-e", cx))
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[gpui_kit::test]
+    fn invalid_preset_and_override_combination_keeps_last_valid_keymap(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[keyboard]\npreset = 'standard'\n[[keyboard.bindings]]\nkeys = 'g'\ncontext = 'reader'\ncommand = 'next-page'\n",
+        )
+        .unwrap();
+        let paths = AppPaths::for_locations(config.clone(), root.path().join("data"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keymap::install_with_paths(cx, Preset::Standard, Some(paths.clone()));
+            install_with_paths(cx, Some(paths));
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            state(cx).update(cx, |settings, cx| {
+                settings.choose(SettingsChange::KeyboardPreset(Preset::Vim), cx);
+            });
+        });
+        cx.run_until_parked();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(keymap::active_preset(cx), Preset::Standard);
+            assert_eq!(state(cx).read(cx).keyboard_preset(), Preset::Standard);
+            assert!(state(cx).read(cx).error().unwrap().contains("ambiguous"));
+        });
+        std::fs::write(&config, "[keyboard]\npreset = 'vim'\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(state(cx).read(cx).keyboard_preset(), Preset::Vim);
+            assert_eq!(keymap::active_preset(cx), Preset::Vim);
+        });
     }
 
     #[gpui_kit::test]

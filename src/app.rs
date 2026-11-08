@@ -7,6 +7,7 @@ pub mod commands;
 pub mod document_window;
 pub mod keymap;
 pub mod menu;
+pub(crate) mod shortcut_label;
 pub mod windows;
 
 use std::path::PathBuf;

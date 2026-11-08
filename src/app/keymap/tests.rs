@@ -134,10 +134,12 @@ fn mac_menu_rejects_promoting_bare_reader_keys_after_rebind() {
         (Preset::Vim, "cmd-alt-right", "n"),
         (Preset::Vim, "cmd-f", "/"),
         (Preset::Standard, "cmd-b", "escape"),
+        (Preset::Vim, "cmd-o", "o"),
+        (Preset::Vim, "cmd-shift-o", "shift-o"),
     ] {
         let config = format!(
             "[[keyboard.bindings]]\nkeys = \"{changed}\"\ncontext = \"{}\"\ncommand = \"zoom-in\"\n",
-            if changed == "cmd-b" || changed == "cmd-f" {
+            if matches!(changed, "cmd-b" | "cmd-f" | "cmd-o" | "cmd-shift-o") {
                 "global"
             } else {
                 "reader"
@@ -146,7 +148,10 @@ fn mac_menu_rejects_promoting_bare_reader_keys_after_rebind() {
         let error = resolve_config(&config, Platform::Mac, preset)
             .err()
             .unwrap();
-        assert!(error.contains("bare macOS menu accelerator"), "{error}");
+        assert!(
+            error.contains("reader-only macOS menu accelerator"),
+            "{error}"
+        );
         assert!(error.contains(bare), "{error}");
         assert!(resolve_config(&config, Platform::Linux, preset).is_ok());
     }
@@ -229,7 +234,7 @@ fn unsafe_menu_edit_does_not_replace_live_shortcuts(cx: &mut TestAppContext) {
         let unsafe_edit = "[[keyboard.bindings]]\nkeys = \"cmd-alt-right\"\ncontext = \"reader\"\ncommand = \"zoom-in\"\n";
         assert!(reload(cx, Some(unsafe_edit.into()), Preset::Standard)
             .unwrap_err()
-            .contains("bare macOS menu accelerator"));
+            .contains("reader-only macOS menu accelerator"));
         let bindings = cx.key_bindings();
         let bindings = bindings.borrow();
         let first = bindings.bindings_for_action(&NextPage).next().unwrap();
@@ -422,6 +427,57 @@ fn installed_contextual_action_wins_over_global_action(cx: &mut TestAppContext) 
                 .name(),
             "kver::NextPage"
         );
+    });
+}
+
+#[gpui_kit::test]
+fn switching_presets_replaces_reader_bindings_without_losing_kit_or_app_keys(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        let kit_bindings = cx.key_bindings().borrow().bindings().count();
+        install(cx);
+        let reader = [KeyContext::parse(key_context::READER).unwrap()];
+        let assert_reader = |cx: &App, keys: &str, expected: &str| {
+            let input = parse(keys, Platform::Mac.os()).unwrap();
+            let map = cx.key_bindings();
+            let bindings = map.borrow();
+            assert_eq!(
+                bindings.bindings_for_input(&input, &reader).0[0]
+                    .action()
+                    .name(),
+                expected
+            );
+        };
+        assert_reader(cx, "right", "kver::NextPage");
+        select_preset(cx, Preset::Vim).unwrap();
+        assert_eq!(active_preset(cx), Preset::Vim);
+        assert_reader(cx, "right", "kver::ScrollRight");
+        assert_reader(cx, "n", "kver::NextPage");
+        assert_reader(cx, "cmd-o", "kver::OpenPdf");
+        let vim_count = cx.key_bindings().borrow().bindings().count();
+        select_preset(cx, Preset::Standard).unwrap();
+        assert_eq!(active_preset(cx), Preset::Standard);
+        assert_reader(cx, "right", "kver::NextPage");
+        let input = parse("n", Platform::Mac.os()).unwrap();
+        assert!(
+            cx.key_bindings()
+                .borrow()
+                .bindings_for_input(&input, &reader)
+                .0
+                .is_empty()
+        );
+        assert_eq!(
+            cx.key_bindings().borrow().bindings().count(),
+            kit_bindings
+                + resolve(platform(cx), Preset::Standard)
+                    .unwrap()
+                    .bindings(cx)
+                    .len()
+        );
+        select_preset(cx, Preset::Vim).unwrap();
+        assert_eq!(cx.key_bindings().borrow().bindings().count(), vim_count);
     });
 }
 
@@ -620,6 +676,10 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             ("shift-g", "kver::GoToDocumentEnd"),
             ("n", "kver::NextPage"),
             ("p", "kver::PreviousPage"),
+            ("o", "kver::OpenPdf"),
+            ("shift-o", "kver::ShowRecent"),
+            ("/", "kver::ShowFind"),
+            (":", "kver::ShowCommandPalette"),
             ("w", "kver::FitWidth"),
             ("f", "kver::FitPage"),
             ("s", "kver::SinglePage"),
@@ -629,7 +689,14 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             assert_eq!(map.action(keys, Context::Contents), None, "{keys}");
             assert_eq!(map.action(keys, Context::Global), None, "{keys}");
         }
-        assert_eq!(map.action("/", Context::Reader), Some("kver::ShowFind"));
+        for key in ["o", "shift-o", "/", ":"] {
+            assert_eq!(map.action(key, Context::Sidebar), None, "{key}");
+            assert_eq!(map.action(key, Context::Settings), None, "{key}");
+        }
+        let standard = resolve(platform, Preset::Standard).unwrap();
+        for key in ["o", "shift-o", "/", ":"] {
+            assert_eq!(standard.action(key, Context::Reader), None, "{key}");
+        }
         assert_eq!(
             map.action("ctrl-o", Context::Reader),
             Some("kver::NavigateBack")

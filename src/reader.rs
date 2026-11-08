@@ -1193,8 +1193,13 @@ impl Render for ReaderView {
         let layout = self.layout();
         let range = layout.visible_pages(top, height);
         let (top_space, end_space) = layout.spacers(range.clone());
+        let widest_page = self.pages[range.clone()]
+            .iter()
+            .map(|(width, _)| width * self.scale)
+            .fold(0.0_f32, f32::max);
         let mut content = div()
             .w_full()
+            .min_w(px(widest_page))
             .flex()
             .flex_col()
             .child(div().h(px(top_space)).flex_shrink_0());
@@ -1368,6 +1373,15 @@ impl Render for ReaderView {
                     this.previous_page(cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &GoToDocumentStart, _, cx| {
+                this.select_page(0, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GoToDocumentEnd, _, cx| {
+                if let Some(last) = this.pages.len().checked_sub(1) {
+                    this.select_page(last, cx);
+                    this.scroll_by(f32::MAX, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| {
                 if !this.pages.is_empty() {
                     this.zoom_in(cx);
@@ -1403,6 +1417,18 @@ impl Render for ReaderView {
             }))
             .on_action(cx.listener(|this, _: &ScrollDown, _, cx| this.scroll_by(100.0, cx)))
             .on_action(cx.listener(|this, _: &ScrollUp, _, cx| this.scroll_by(-100.0, cx)))
+            .on_action(
+                cx.listener(|this, _: &ScrollLeft, _, cx| this.scroll_horizontal_by(-100.0, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ScrollRight, _, cx| this.scroll_horizontal_by(100.0, cx)),
+            )
+            .on_action(cx.listener(|this, _: &ScrollHalfScreenDown, _, cx| {
+                this.scroll_by(this.viewport().2 * 0.5, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ScrollHalfScreenUp, _, cx| {
+                this.scroll_by(-this.viewport().2 * 0.5, cx)
+            }))
             .on_action(cx.listener(|this, _: &ScrollScreenDown, _, cx| {
                 this.scroll_by(this.viewport().2 * 0.9, cx)
             }))
@@ -1518,6 +1544,22 @@ impl Render for ReaderView {
 }
 
 impl ReaderView {
+    fn scroll_horizontal_by(&mut self, amount: f32, cx: &mut Context<Self>) {
+        let Some((page_width, _)) = self.pages.get(self.page_index).copied() else {
+            return;
+        };
+        let (_, width, _) = self.viewport();
+        let max = (page_width * self.scale + PAGE_PADDING * 2.0 - width).max(0.0);
+        let old = -f32::from(self.scroll.offset().x);
+        let next = (old + amount).clamp(0.0, max);
+        if next == old {
+            return;
+        }
+        self.position_touched = true;
+        self.scroll_to(next, self.viewport().0);
+        self.sync_viewport(cx);
+    }
+
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
         if self.pages.is_empty() {

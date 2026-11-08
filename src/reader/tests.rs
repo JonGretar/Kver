@@ -17,6 +17,7 @@ mod positions;
 mod reading_mode;
 mod rendering;
 mod selection;
+mod vim;
 use rendering::cached_pages;
 
 fn recent_test_window(

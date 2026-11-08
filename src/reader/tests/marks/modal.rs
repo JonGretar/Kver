@@ -119,3 +119,159 @@ fn clicking_outside_marks_after_delete_dismisses_popup(cx: &mut TestAppContext) 
         (0, 100.0)
     );
 }
+
+#[gpui_kit::test]
+fn standard_marks_set_jump_and_delete_through_dialogs(cx: &mut TestAppContext) {
+    let (_root, store, pdf, window, reader) = open_marks(cx);
+    reader.update(cx, |reader, cx| reader.select_page(1, cx));
+    // Open Marks starts with the Set command selected, even when marks exist.
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(
+            reader.marks.as_ref().unwrap().read(cx).view(),
+            Some(MarksView::Set)
+        );
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("c    Unset", cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(
+            reader.marks.as_ref().unwrap().read(cx).query(cx),
+            "c    Unset"
+        );
+    });
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(store.marks(&pdf).unwrap()[&'c'].position.page, 1);
+    reader.read_with(cx, |reader, cx| assert!(!reader.marks_open(cx)));
+
+    reader.update(cx, |reader, cx| reader.select_page(2, cx));
+    cx.simulate_keystrokes(window, "cmd-shift-m");
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("c    Page", cx);
+    })
+    .unwrap();
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(reader.page_index(), 1);
+        assert!(!reader.marks_open(cx));
+    });
+
+    cx.simulate_keystrokes(window, "cmd-shift-p");
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("Delete local mark", cx);
+    })
+    .unwrap();
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(
+            reader.marks.as_ref().unwrap().read(cx).view(),
+            Some(MarksView::Delete)
+        );
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("c    Page", cx);
+    })
+    .unwrap();
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert!(!store.marks(&pdf).unwrap().contains_key(&'c'));
+}
+
+#[gpui_kit::test]
+fn standard_name_cancel_and_save_restore_search_focus(cx: &mut TestAppContext) {
+    let (_root, store, pdf, window, reader) = open_marks(cx);
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("tab", cx);
+        assert_eq!(frame.find("name-mark:a").focused(), Some(true));
+        frame.press("space", cx);
+        reader.read_with(cx, |reader, cx| {
+            assert_eq!(
+                reader.marks.as_ref().unwrap().read(cx).view(),
+                Some(MarksView::Name('a'))
+            );
+        });
+        frame.input("Draft", cx);
+        frame.press("escape", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(store.marks(&pdf).unwrap()[&'a'].label, None);
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("a", cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(reader.marks.as_ref().unwrap().read(cx).query(cx), "a");
+        assert_eq!(reader.reading_position(), (0, 0.0));
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.click("name-mark:a", cx);
+        frame.input("Chapter", cx);
+        frame.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        store.marks(&pdf).unwrap()[&'a'].label.as_deref(),
+        Some("Chapter")
+    );
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("b", cx);
+        frame.press("down", cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(reader.marks.as_ref().unwrap().read(cx).query(cx), "ab");
+        assert_eq!(reader.reading_position(), (0, 0.0));
+    });
+    cx.simulate_keystrokes(window, "escape escape");
+    reader.read_with(cx, |reader, cx| assert!(!reader.marks_open(cx)));
+    cx.simulate_keystrokes(window, "down");
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        (0, 100.0)
+    );
+}
+
+#[gpui_kit::test]
+fn standard_keyboard_delete_keeps_search_focused(cx: &mut TestAppContext) {
+    let (_root, store, pdf, window, reader) = open_marks(cx);
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.press("tab", cx);
+        frame.press("tab", cx);
+        assert_eq!(frame.find("delete-mark:a").focused(), Some(true));
+        frame.press("space", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(!store.marks(&pdf).unwrap().contains_key(&'a'));
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("b", cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(reader.marks.as_ref().unwrap().read(cx).query(cx), "b");
+    });
+}

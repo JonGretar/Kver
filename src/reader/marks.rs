@@ -550,7 +550,7 @@ impl Render for LocalMarks {
                                             .empty(|_, _, cx| {
                                                 div().p_4()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No local marks match. Set one with m then a letter.")
+                            .child("No local marks match. Clear search to choose Set local mark.")
                                             })
                                             .on_confirm({
                                                 let owner = command_owner.clone();

@@ -6,11 +6,18 @@ is not part of the routine workflow. Git and `jj` are both acceptable for
 version-control operations in this repository.
 
 Keep repository Markdown files for durable decisions, their reasons, and
-information needed to build or use Kver. Keep working conversations and
-requests for human checks in the Delta thread; ask the person directly there,
-launching the app yourself when possible. Put brief verification results and
-remaining limitations in the relevant GitHub issue or PR, not in architecture
-docs or a test diary.
+information needed to build or use Kver. Before creating a new Markdown file,
+identify who will use it after the task ends and why an existing document or
+issue is not the right home. Prefer updating the existing source of truth.
+Use `docs/architecture.md` for the current system structure and brief rationale,
+and [ADRs](../adr/README.md) only for decisions that meet their criteria.
+Keep reusable build, use, and validation instructions in how-to or reference
+docs; keep plans and task history in issues and PRs.
+
+Keep working conversations and requests for human checks in the Delta thread;
+ask the person directly there, launching the app yourself when possible.
+Put brief verification results and remaining limitations in the relevant
+GitHub issue or PR, not in architecture docs or a test diary.
 
 1. **Decide what to build.** Use `docs/roadmap.md` for release gates and
    `docs/features.md` for scope. For a multi-session feature, agree on a spec
@@ -18,7 +25,7 @@ docs or a test diary.
    [GitHub Issues](issue-tracker.md). Use `to-spec` to agree on the scope and
    test seams, then `to-tickets` to propose demoable slices and their genuine
    blockers. Publish only after the relevant approvals. Record settled domain
-   terms in `GLOSSARY.md` and consequential trade-offs in `docs/adr/`.
+   terms and qualifying decisions using the [domain docs rules](domain.md).
 2. **Choose a worktree.** Continue in the current thread for small serial work.
    For independent features, select **Isolated Delta Worktree** before the
    first message in a new Delta thread. Check its starting revision: it may

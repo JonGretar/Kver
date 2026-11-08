@@ -122,6 +122,16 @@ are Tab-focusable and activate with Enter; unsupported destinations leave the
 reader in place and report non-modal status.
 `ReaderView` applies those results to its scroll handle, invalidates bitmaps
 when scale changes, and coordinates selection and persistence.
+The Document window owns a session-only jumplist, separate from persisted
+Reading history. The reader emits a jump only after valid same-document link,
+Find, Contents, or local-mark navigation; the window records the before/after
+locations and coalesces equivalent destinations. Locations include document
+identity and generation, page-local PDF-point x/y, zoom mode and scale, and
+reading mode, never selection or highlights. Replacing the document clears
+the window's list; independent windows do not share one. Ordinary scrolling,
+zooming, fitting, and page turns change the live position without adding
+entries. Cursor movement and its command bindings are a separate navigation
+slice.
 Pure rules are tested under `src/reader/navigation/`; reader integration
 tests exercise the real input, rendering, and history paths.
 

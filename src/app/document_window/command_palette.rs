@@ -14,7 +14,7 @@ use gpui_kit::{
 };
 
 use super::{
-    OpenPdf,
+    NavigateBack, NavigateForward, OpenPdf,
     sidebar::{ShowContents, ShowFind, ToggleSidebar},
 };
 use crate::{
@@ -38,6 +38,8 @@ pub(crate) struct CommandAvailability {
     pub(crate) mode_override: Option<ReadingMode>,
     pub(crate) has_selection: bool,
     pub(crate) has_matches: bool,
+    pub(crate) can_back: bool,
+    pub(crate) can_forward: bool,
 }
 
 #[derive(Clone)]
@@ -81,6 +83,8 @@ impl CommandPalette {
             command("Next match", NextMatch, available.has_matches),
             command("Previous match", PreviousMatch, available.has_matches),
             command("Contents", ShowContents, has_document),
+            command("Back", NavigateBack, available.can_back),
+            command("Forward", NavigateForward, available.can_forward),
             command("Toggle Sidebar", ToggleSidebar, has_document),
             command("New Window", NewWindow, true),
             command("Next Window", NextWindow, cx.windows().len() >= 2),

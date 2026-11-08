@@ -10,7 +10,8 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
 };
 use gpui_kit::{
-    App, Context, Entity, EventEmitter, IntoElement, Subscription, Task, Window, div, prelude::*,
+    App, Context, Entity, EventEmitter, Focusable as _, IntoElement, Subscription, Task, Window,
+    div, prelude::*,
 };
 
 use crate::{
@@ -144,6 +145,10 @@ impl FindPanel {
     pub(crate) fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reset_query_if_needed(window, cx);
         self.query.update(cx, |query, cx| query.focus(window, cx));
+    }
+
+    pub(crate) fn query_focus(&self, cx: &App) -> gpui_kit::FocusHandle {
+        self.query.read(cx).focus_handle(cx)
     }
 
     fn reset_query_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {

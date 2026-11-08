@@ -134,6 +134,13 @@ entries. The window traverses stored locations without emitting another jump,
 removes entries the reader cannot restore, and truncates the forward branch on
 the next semantic jump. Reader- and Contents-scoped `Ctrl-O` and `Ctrl-I` are
 resolved through the application keymap, not interpreted by the reader.
+Back and Forward share these Actions across the Navigate menu and command
+palette, and toolbar controls beside ordinary page navigation. The toolbar and
+palette read availability from the window's jumplist; on macOS
+the menu is rebuilt when the active window, jumplist, or Find input focus
+changes. Native menu accelerators snapshot the resolved keymap, so navigation
+items are disabled while Find's text input owns focus to prevent `Ctrl-I`
+from bypassing its reader-only binding.
 Pure rules are tested under `src/reader/navigation/`; reader integration
 tests exercise the real input, rendering, and history paths.
 
@@ -440,7 +447,7 @@ with children remain expandable. Outline parsing starts on a background worker
 only when Contents first opens for a document. The reader applies destinations
 through its existing page/zoom/scroll model.
 
-On macOS, `src/app/menu.rs` installs native Kver, File, Edit, Window, and View
+On macOS, `src/app/menu.rs` installs native Kver, File, Edit, Navigate, Window, and View
 menus at startup. Application-wide About, update, and Quit Actions are declared
 in `src/app/commands.rs`. The former `app_menu` and `reader_windows` module
 paths, along with `reader_sidebar`, remain available as re-exports, not

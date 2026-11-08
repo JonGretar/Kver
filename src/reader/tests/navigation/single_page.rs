@@ -33,7 +33,10 @@ fn single_page_bounds_wheel_and_explicit_turns_on_real_page_geometry(cx: &mut Te
         );
     });
 
-    cx.simulate_keystrokes(window, "s");
+    cx.update_window(window, |_, frame, cx| {
+        frame.dispatch_action(Box::new(SinglePage), cx)
+    })
+    .unwrap();
     reader.read_with(cx, |reader, _| {
         assert_eq!(reader.reading_mode(), ReadingMode::SinglePage);
         assert_eq!(reader.layout().visible_pages(0.0, 700.0), 0..1);
@@ -121,7 +124,11 @@ fn single_page_bounds_wheel_and_explicit_turns_on_real_page_geometry(cx: &mut Te
     });
     cx.simulate_keystrokes(window, "right");
     assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 2);
-    cx.simulate_keystrokes(window, "left c");
+    cx.simulate_keystrokes(window, "left");
+    cx.update_window(window, |_, frame, cx| {
+        frame.dispatch_action(Box::new(Continuous), cx)
+    })
+    .unwrap();
     reader.read_with(cx, |reader, _| {
         assert_eq!(reader.page_index(), 1);
         assert_eq!(reader.reading_mode(), ReadingMode::Continuous);

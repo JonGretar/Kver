@@ -19,8 +19,8 @@ use crate::{
     key_context,
     reader::{
         ActivateOutline, Continuous, Copy, DeleteLocalMark, FitPage, FitWidth, JumpLocalMark,
-        NextMatch, NextPage, PreviousMatch, PreviousPage, ScrollDown, ScrollUp, SetLocalMark,
-        ShowMarks, SinglePage, ZoomIn, ZoomOut,
+        NextMatch, NextPage, PreviousMatch, PreviousPage, ScrollDown, ScrollScreenDown,
+        ScrollScreenUp, ScrollUp, SetLocalMark, ShowMarks, SinglePage, ZoomIn, ZoomOut,
     },
     reading_history::ShowRecent,
     settings_ui::{CloseSettings, ShowSettings},
@@ -356,31 +356,22 @@ fn common() -> Vec<Entry> {
         Entry::bind("cmd-t", Context::Global, ShowContents),
         Entry::bind("escape", Context::Sidebar, ToggleSidebar),
         Entry::bind("enter", Context::Contents, ActivateOutline),
-        Entry::bind("cmd-alt-right", Context::Global, NextPage),
-        Entry::bind("cmd-alt-left", Context::Global, PreviousPage),
-        Entry::bind("cmd-alt-=", Context::Global, ZoomIn),
-        Entry::bind("cmd-alt--", Context::Global, ZoomOut),
-        Entry::bind("cmd-alt-w", Context::Global, FitWidth),
-        Entry::bind("cmd-alt-f", Context::Global, FitPage),
+        // Native menus snapshot the first binding for an Action. Keep their
+        // page accelerators modified; bare reader arrows must never become
+        // menu key equivalents in a focused text control.
+        Entry::bind("cmd-alt-right", Context::Reader, NextPage),
+        Entry::bind("cmd-alt-left", Context::Reader, PreviousPage),
         Entry::bind("cmd-c", Context::Reader, Copy),
         Entry::bind("ctrl-o", Context::Reader, NavigateBack),
         Entry::bind("ctrl-i", Context::Reader, NavigateForward),
         Entry::bind("ctrl-o", Context::Contents, NavigateBack),
         Entry::bind("ctrl-i", Context::Contents, NavigateForward),
     ];
-    for (letter, set, jump, delete) in MARK_KEY_SEQUENCES {
-        entries.extend([
-            Entry::bind(set, Context::Reader, SetLocalMark(letter)),
-            Entry::bind(jump, Context::Reader, JumpLocalMark(letter)),
-            Entry::bind(delete, Context::Reader, DeleteLocalMark(letter)),
-        ]);
-    }
     entries.extend([
         Entry::bind("cmd-w", Context::Global, CloseWindow),
         Entry::bind("cmd-,", Context::Global, ShowSettings),
         Entry::bind("escape", Context::Settings, CloseSettings),
         Entry::bind("escape", Context::About, CloseAbout),
-        Entry::bind("cmd-q", Context::Global, Quit),
     ]);
     entries
 }
@@ -389,34 +380,69 @@ fn platform_defaults() -> Vec<Entry> {
     vec![
         Entry::bind("cmd-`", Context::Global, NextWindow).on(Platform::Mac),
         Entry::bind("cmd-shift-`", Context::Global, PreviousWindow).on(Platform::Mac),
-        Entry::bind("cmd-`", Context::Global, NextWindow).on(Platform::Linux),
-        Entry::bind("cmd-shift-`", Context::Global, PreviousWindow).on(Platform::Linux),
-        Entry::bind("cmd-`", Context::Global, NextWindow).on(Platform::Windows),
-        Entry::bind("cmd-shift-`", Context::Global, PreviousWindow).on(Platform::Windows),
+        Entry::bind("ctrl-f6", Context::Global, NextWindow).on(Platform::Linux),
+        Entry::bind("ctrl-shift-f6", Context::Global, PreviousWindow).on(Platform::Linux),
+        Entry::bind("ctrl-f6", Context::Global, NextWindow).on(Platform::Windows),
+        Entry::bind("ctrl-shift-f6", Context::Global, PreviousWindow).on(Platform::Windows),
+        Entry::bind("cmd-q", Context::Global, Quit).on(Platform::Mac),
+        Entry::bind("cmd-q", Context::Global, Quit).on(Platform::Linux),
     ]
 }
 
 fn preset_defaults(preset: Preset) -> Vec<Entry> {
     match preset {
-        // The Vim preset is built in #104; until then it shares the existing
-        // reader bindings so selecting it cannot silently remove commands.
-        Preset::Standard | Preset::Vim => vec![
+        Preset::Standard => vec![
             Entry::bind("right", Context::Reader, NextPage),
-            Entry::bind("n", Context::Reader, NextPage),
             Entry::bind("left", Context::Reader, PreviousPage),
-            Entry::bind("p", Context::Reader, PreviousPage),
             Entry::bind("down", Context::Reader, ScrollDown),
-            Entry::bind("j", Context::Reader, ScrollDown),
             Entry::bind("up", Context::Reader, ScrollUp),
-            Entry::bind("k", Context::Reader, ScrollUp),
-            Entry::bind("=", Context::Reader, ZoomIn),
-            Entry::bind("shift-=", Context::Reader, ZoomIn),
-            Entry::bind("-", Context::Reader, ZoomOut),
-            Entry::bind("w", Context::Reader, FitWidth),
-            Entry::bind("f", Context::Reader, FitPage),
-            Entry::bind("s", Context::Reader, SinglePage),
-            Entry::bind("c", Context::Reader, Continuous),
+            Entry::bind("pagedown", Context::Reader, ScrollScreenDown),
+            Entry::bind("pageup", Context::Reader, ScrollScreenUp),
+            Entry::bind("cmd-=", Context::Reader, ZoomIn),
+            Entry::bind("cmd-shift-=", Context::Reader, ZoomIn),
+            Entry::bind("cmd--", Context::Reader, ZoomOut),
+            Entry::bind("cmd-alt-w", Context::Reader, FitWidth),
+            Entry::bind("cmd-alt-f", Context::Reader, FitPage),
+            Entry::bind("alt-down", Context::Reader, NextPage).on(Platform::Mac),
+            Entry::bind("alt-up", Context::Reader, PreviousPage).on(Platform::Mac),
+            Entry::bind("ctrl-pagedown", Context::Reader, NextPage).on(Platform::Linux),
+            Entry::bind("ctrl-pageup", Context::Reader, PreviousPage).on(Platform::Linux),
+            Entry::bind("ctrl-pagedown", Context::Reader, NextPage).on(Platform::Windows),
+            Entry::bind("ctrl-pageup", Context::Reader, PreviousPage).on(Platform::Windows),
+            Entry::bind("alt-left", Context::Reader, NavigateBack),
+            Entry::bind("alt-right", Context::Reader, NavigateForward),
+            Entry::bind("alt-left", Context::Contents, NavigateBack),
+            Entry::bind("alt-right", Context::Contents, NavigateForward),
         ],
+        // #104 will choose the final Vim map. Until then preserve its previous
+        // reader controls and mark sequences, without leaking them into Standard.
+        Preset::Vim => {
+            let mut entries = vec![
+                Entry::bind("right", Context::Reader, NextPage),
+                Entry::bind("n", Context::Reader, NextPage),
+                Entry::bind("left", Context::Reader, PreviousPage),
+                Entry::bind("p", Context::Reader, PreviousPage),
+                Entry::bind("down", Context::Reader, ScrollDown),
+                Entry::bind("j", Context::Reader, ScrollDown),
+                Entry::bind("up", Context::Reader, ScrollUp),
+                Entry::bind("k", Context::Reader, ScrollUp),
+                Entry::bind("=", Context::Reader, ZoomIn),
+                Entry::bind("shift-=", Context::Reader, ZoomIn),
+                Entry::bind("-", Context::Reader, ZoomOut),
+                Entry::bind("w", Context::Reader, FitWidth),
+                Entry::bind("f", Context::Reader, FitPage),
+                Entry::bind("s", Context::Reader, SinglePage),
+                Entry::bind("c", Context::Reader, Continuous),
+            ];
+            for (letter, set, jump, delete) in MARK_KEY_SEQUENCES {
+                entries.extend([
+                    Entry::bind(set, Context::Reader, SetLocalMark(letter)),
+                    Entry::bind(jump, Context::Reader, JumpLocalMark(letter)),
+                    Entry::bind(delete, Context::Reader, DeleteLocalMark(letter)),
+                ]);
+            }
+            entries
+        }
     }
 }
 

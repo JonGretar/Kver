@@ -14,12 +14,12 @@ fn scroll_actions_share_keybindings_without_intercepting_find_input(cx: &mut Tes
     cx.update_window(window, |_, window, cx| window.render_frame(cx))
         .unwrap();
     cx.run_until_parked();
-    cx.simulate_keystrokes(window, "j down");
+    cx.simulate_keystrokes(window, "down down");
     assert_eq!(
         reader.read_with(cx, |reader, _| reader.reading_position()),
         (0, 200.0)
     );
-    cx.simulate_keystrokes(window, "k up");
+    cx.simulate_keystrokes(window, "up up");
     assert_eq!(
         reader.read_with(cx, |reader, _| reader.reading_position()),
         (0, 0.0)
@@ -79,13 +79,48 @@ fn reading_keys_navigate_and_zoom_without_screenshots(cx: &mut TestAppContext) {
         cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
             .unwrap();
     });
-    cx.simulate_keystrokes(window.into(), "right =");
+    cx.simulate_keystrokes(window.into(), "right cmd-=");
     window
         .read_with(cx, |reader, _| {
             assert_eq!(reader.page_index(), 1);
             assert_eq!(reader.scale(), 1.25);
         })
         .unwrap();
+}
+
+#[gpui_kit::test]
+fn standard_screen_scroll_respects_reader_focus_and_find_input(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let (window, reader) =
+        recent_test_window(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    let height = cx
+        .update_window(window, |_, frame, cx| {
+            frame.render_frame(cx);
+            reader.read(cx).viewport().2
+        })
+        .unwrap();
+    cx.simulate_keystrokes(window, "pagedown");
+    reader.read_with(cx, |reader, _| {
+        assert!((reader.viewport().0 - height * 0.9).abs() < 2.0);
+    });
+    cx.simulate_keystrokes(window, "pageup");
+    reader.read_with(cx, |reader, _| assert_eq!(reader.viewport().0, 0.0));
+    cx.simulate_keystrokes(window, "cmd-f");
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.input("j n f", cx);
+        frame.press("pagedown", cx);
+        frame.press("right", cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, _| {
+        assert_eq!(reader.viewport().0, 0.0);
+        assert_eq!(reader.page_index(), 0);
+    });
 }
 
 #[gpui_kit::test]
@@ -109,7 +144,7 @@ fn reader_navigation_is_window_local(cx: &mut TestAppContext) {
         cx.update_window(second.into(), |_, frame, cx| frame.render_frame(cx))
             .unwrap();
     });
-    cx.simulate_keystrokes(first.into(), "right =");
+    cx.simulate_keystrokes(first.into(), "right cmd-=");
     first
         .read_with(cx, |reader, _| {
             assert_eq!(reader.page_index(), 1);

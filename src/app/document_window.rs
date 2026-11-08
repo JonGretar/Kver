@@ -23,8 +23,9 @@ use crate::{
     reader::{
         Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpEvent,
         JumpLocalMark, MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView,
-        ScrollDown, ScrollUp, SetLocalMark, ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark,
-        ShowMarks, ShowSetMark, SinglePage, ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
+        ScrollDown, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowContents,
+        ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage, ToggleSidebar,
+        UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::{
         ShowRecent,
@@ -571,6 +572,8 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<PreviousPage>))
             .on_action(cx.listener(Self::route_reader_action::<ScrollDown>))
             .on_action(cx.listener(Self::route_reader_action::<ScrollUp>))
+            .on_action(cx.listener(Self::route_reader_action::<ScrollScreenDown>))
+            .on_action(cx.listener(Self::route_reader_action::<ScrollScreenUp>))
             .on_action(cx.listener(Self::route_reader_action::<ZoomIn>))
             .on_action(cx.listener(Self::route_reader_action::<ZoomOut>))
             .on_action(cx.listener(Self::route_reader_action::<FitWidth>))

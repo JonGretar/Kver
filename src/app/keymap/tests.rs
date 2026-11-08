@@ -121,7 +121,7 @@ fn platform_filters_entries_before_duplicate_detection() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
         for preset in [Preset::Standard, Preset::Vim] {
             let map = resolve(platform, preset).unwrap();
-            assert_eq!(map.action("n", Context::Reader), Some("kver::NextPage"));
+            assert_eq!(map.action("right", Context::Reader), Some("kver::NextPage"));
             assert_eq!(map.action("cmd-o", Context::Global), Some("kver::OpenPdf"));
             assert_eq!(
                 map.action("ctrl-o", Context::Reader),
@@ -150,7 +150,7 @@ fn overlapping_prefixes_and_duplicate_slots_are_reported() {
     assert_eq!(
         resolve_with(
             Platform::Mac,
-            Preset::Standard,
+            Preset::Vim,
             [Entry::bind("m", Context::Reader, NextPage)],
         )
         .err(),
@@ -220,7 +220,7 @@ fn defaults_have_no_duplicate_key_and_context_pairs() {
 
 #[test]
 fn every_mark_letter_has_set_jump_and_delete_bindings() {
-    let map = resolve(Platform::Mac, Preset::Standard).unwrap();
+    let map = resolve(Platform::Mac, Preset::Vim).unwrap();
     for letter in 'a'..='z' {
         let actions: [(Box<dyn gpui_kit::Action>, usize); 3] = [
             (Box::new(SetLocalMark(letter)), 2),
@@ -243,4 +243,105 @@ fn every_mark_letter_has_set_jump_and_delete_bindings() {
             assert_eq!(matches[0].entry.context, Context::Reader);
         }
     }
+}
+
+#[test]
+fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
+    assert_eq!(Preset::default(), Preset::Standard);
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        let map = resolve(platform, Preset::Standard).unwrap();
+        for (keys, action) in [
+            ("cmd-o", "kver::OpenPdf"),
+            ("cmd-n", "kver::NewWindow"),
+            ("cmd-w", "kver::CloseWindow"),
+            ("cmd-f", "kver::ShowFind"),
+        ] {
+            assert_eq!(map.action(keys, Context::Global), Some(action));
+        }
+        for (keys, action) in [
+            ("down", "kver::ScrollDown"),
+            ("up", "kver::ScrollUp"),
+            ("pagedown", "kver::ScrollScreenDown"),
+            ("pageup", "kver::ScrollScreenUp"),
+            ("right", "kver::NextPage"),
+            ("left", "kver::PreviousPage"),
+            ("cmd-=", "kver::ZoomIn"),
+            ("cmd--", "kver::ZoomOut"),
+            ("cmd-alt-w", "kver::FitWidth"),
+            ("cmd-alt-f", "kver::FitPage"),
+            ("alt-left", "kver::NavigateBack"),
+            ("alt-right", "kver::NavigateForward"),
+        ] {
+            assert_eq!(map.action(keys, Context::Reader), Some(action), "{keys}");
+        }
+        for key in [
+            "j", "k", "n", "p", "w", "f", "s", "c", "m a", "' a", "d m a",
+        ] {
+            assert_eq!(map.action(key, Context::Reader), None, "{key}");
+        }
+        assert_eq!(
+            map.action("ctrl-o", Context::Contents),
+            Some("kver::NavigateBack")
+        );
+        assert_eq!(
+            map.action("ctrl-i", Context::Contents),
+            Some("kver::NavigateForward")
+        );
+        assert_eq!(
+            map.action("alt-left", Context::Contents),
+            Some("kver::NavigateBack")
+        );
+        assert_eq!(
+            map.action("alt-right", Context::Contents),
+            Some("kver::NavigateForward")
+        );
+        assert_eq!(map.action("alt-left", Context::Sidebar), None);
+        assert_eq!(map.action("pagedown", Context::Sidebar), None);
+        match platform {
+            Platform::Mac => {
+                assert_eq!(
+                    map.action("cmd-`", Context::Global),
+                    Some("kver::NextWindow")
+                );
+                assert_eq!(
+                    map.action("alt-down", Context::Reader),
+                    Some("kver::NextPage")
+                );
+                assert_eq!(map.action("cmd-q", Context::Global), Some("kver::Quit"));
+            }
+            Platform::Linux | Platform::Windows => {
+                assert_eq!(
+                    map.action("ctrl-f6", Context::Global),
+                    Some("kver::NextWindow")
+                );
+                assert_eq!(
+                    map.action("ctrl-pagedown", Context::Reader),
+                    Some("kver::NextPage")
+                );
+                assert_eq!(map.action("cmd-`", Context::Global), None);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn native_page_menu_uses_modified_resolved_keys_not_bare_reader_arrows(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install(cx);
+        let bindings = cx.key_bindings();
+        let bindings = bindings.borrow();
+        for (action, keys) in [
+            (&NextPage as &dyn gpui_kit::Action, "cmd-alt-right"),
+            (&PreviousPage as &dyn gpui_kit::Action, "cmd-alt-left"),
+        ] {
+            let first = bindings.bindings_for_action(action).next().unwrap();
+            assert_eq!(
+                first.match_keystrokes(&parse(keys, Platform::Mac.os()).unwrap()),
+                Some(false)
+            );
+            assert!(first.predicate().is_some());
+        }
+    });
 }

@@ -1403,6 +1403,12 @@ impl Render for ReaderView {
             }))
             .on_action(cx.listener(|this, _: &ScrollDown, _, cx| this.scroll_by(100.0, cx)))
             .on_action(cx.listener(|this, _: &ScrollUp, _, cx| this.scroll_by(-100.0, cx)))
+            .on_action(cx.listener(|this, _: &ScrollScreenDown, _, cx| {
+                this.scroll_by(this.viewport().2 * 0.9, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ScrollScreenUp, _, cx| {
+                this.scroll_by(-this.viewport().2 * 0.9, cx)
+            }))
             .flex()
             .flex_col()
             .bg(cx.theme().background)

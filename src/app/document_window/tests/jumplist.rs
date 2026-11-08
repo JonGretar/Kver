@@ -264,7 +264,7 @@ fn keyboard_traversal_restores_both_locations_without_appending(cx: &mut TestApp
     reader.update(cx, |reader, cx| reader.select_page(0, cx));
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("ctrl-o", cx);
+        frame.press("alt-left", cx);
     })
     .unwrap();
     reader.read_with(cx, |reader, _| {
@@ -277,7 +277,7 @@ fn keyboard_traversal_restores_both_locations_without_appending(cx: &mut TestApp
         assert!(!document.jumplist.can_back());
         assert_eq!(document.jumplist.entries.len(), 2);
     });
-    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("alt-right", cx))
         .unwrap();
     reader.read_with(cx, |reader, _| {
         assert!(reader.jump_location().unwrap().equivalent(&destination));
@@ -448,6 +448,7 @@ fn forward_shortcut_does_not_steal_find_input_focus(cx: &mut TestAppContext) {
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         frame.press("ctrl-i", cx);
+        frame.press("alt-right", cx);
     })
     .unwrap();
     document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));

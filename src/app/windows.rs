@@ -1,21 +1,19 @@
-//! Reader window lifecycle and focus; document state remains in each Preview.
+//! Document-window lifecycle and focus; each window owns an independent reader.
 
 use std::path::PathBuf;
 
 use gpui_kit as gpui;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
-    App, AppContext as _, Bounds, Entity, KeyBinding, WeakEntity, Window, WindowBounds,
-    WindowOptions, px, size,
+    App, AppContext as _, Bounds, Entity, WeakEntity, Window, WindowBounds, WindowOptions, px, size,
 };
 
-use crate::reader::Preview;
+use super::document_window::DocumentWindow;
 use crate::settings_ui;
 
 gpui::actions!(kver, [CloseWindow, NewWindow, NextWindow, PreviousWindow]);
 
 pub fn install(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("cmd-w", CloseWindow, None)]);
     cx.on_action(|_: &NewWindow, cx| {
         if let Err(error) = open(cx, None) {
             eprintln!("Cannot open window: {error}");
@@ -41,11 +39,11 @@ fn should_quit(remaining_windows: usize, quit_when_last_window_closes: bool) -> 
 }
 
 /// Platform file-open requests can arrive after the launch window has closed.
-pub fn open_requested_path(cx: &mut App, initial: &WeakEntity<Preview>, path: PathBuf) {
-    if let Some(reader) = initial.upgrade()
-        && reader.read(cx).path().is_none()
+pub fn open_requested_path(cx: &mut App, initial: &WeakEntity<DocumentWindow>, path: PathBuf) {
+    if let Some(document) = initial.upgrade()
+        && document.read(cx).reader().read(cx).path().is_none()
     {
-        reader.update(cx, |reader, cx| reader.open_path(path, cx));
+        document.update(cx, |document, cx| document.open_path(path, cx));
     } else if let Err(error) = open(cx, Some(path)) {
         eprintln!("Cannot open window: {error}");
     }
@@ -61,7 +59,7 @@ pub fn reopen(cx: &mut App) {
     }
 }
 
-pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<Preview>, String> {
+pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<DocumentWindow>, String> {
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
     let (handle, reader) = gpui_kit::open_window(
         WindowOptions {
@@ -70,7 +68,7 @@ pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<Preview>, Stri
             ..TitleBar::window_options()
         },
         cx,
-        |window, cx| cx.new(|cx| Preview::new(path, window.scale_factor(), cx)),
+        |window, cx| cx.new(|cx| DocumentWindow::new(path, window, cx)),
     )
     .map_err(|error| error.to_string())?;
     cx.update_window(handle, |_, window, _| window.activate_window())
@@ -121,6 +119,32 @@ mod tests {
         cx.update(|cx| cx.dispatch_action(&NewWindow));
         cx.run_until_parked();
         assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+    }
+
+    #[gpui_kit::test]
+    fn platform_opens_reuse_only_the_empty_initial_document_window(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let initial = cx.update(|cx| open(cx, None).unwrap());
+        let reader = initial.read_with(cx, |document, _| document.reader().clone());
+        let first = PathBuf::from("examples/readme-sample.pdf");
+        cx.update(|cx| open_requested_path(cx, &initial.downgrade(), first.clone()));
+        assert_eq!(cx.update(|cx| cx.windows().len()), 1);
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.path(), Some(first.as_path()))
+        });
+        cx.update(|cx| {
+            open_requested_path(
+                cx,
+                &initial.downgrade(),
+                PathBuf::from("examples/missing.pdf"),
+            );
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.path(), Some(first.as_path()));
+            assert_eq!(reader.page_count(), Some(100));
+        });
     }
 
     #[gpui_kit::test]

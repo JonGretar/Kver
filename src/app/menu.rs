@@ -2,30 +2,30 @@
 
 use std::cell::Cell;
 
-use gpui_kit as gpui;
-use gpui_kit::{AnyWindowHandle, App, AppContext as _, KeyBinding};
+use gpui_kit::{AnyWindowHandle, App, AppContext as _};
 #[cfg(target_os = "macos")]
 use gpui_kit::{Menu, MenuItem};
 
-use crate::reader::OpenPdf;
+use super::document_window::OpenPdf;
+#[cfg(target_os = "macos")]
+use super::windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 #[cfg(target_os = "macos")]
 use crate::reader::{
-    Continuous, Copy, NextPage, PreviousPage, ShowContents, ShowFind, ShowRecent, SinglePage,
-    ToggleSidebar, UseDefaultReadingMode,
+    Continuous, Copy, NextPage, PreviousPage, ShowContents, ShowFind, SinglePage, ToggleSidebar,
+    UseDefaultReadingMode,
 };
 #[cfg(target_os = "macos")]
-use crate::reader_windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
+use crate::reading_history::ShowRecent;
 #[cfg(target_os = "macos")]
 use crate::settings_ui::ShowSettings;
 
-gpui::actions!(kver, [AboutKver, CheckForUpdates, Quit]);
+pub use super::commands::{AboutKver, CheckForUpdates, Quit};
 
+/// Install handlers and native menus after the application keymap.
 pub fn install(cx: &mut App) {
-    crate::about::bind_keys(cx);
     #[cfg(target_os = "macos")]
     let updates_available = crate::updater::install(cx);
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
-    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     cx.on_action(move |_: &AboutKver, cx| {
         if let Some(handle) = about_window.get()
             && (cx.active_window() == Some(handle)
@@ -43,7 +43,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &OpenPdf, cx| {
         if cx.windows().is_empty() {
-            match crate::reader_windows::open(cx, None) {
+            match super::windows::open(cx, None) {
                 Ok(reader) => reader.update(cx, |reader, cx| reader.open_dialog(cx)),
                 Err(error) => eprintln!("Cannot open window: {error}"),
             }
@@ -99,6 +99,7 @@ mod tests {
     fn about_kver_opens_one_window_and_can_reopen_after_dismissal(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
+            crate::app::keymap::install(cx);
             crate::reader_windows::install(cx);
             install(cx);
             cx.dispatch_action(&AboutKver);
@@ -152,11 +153,13 @@ mod tests {
     fn cmd_w_and_close_window_action_close_only_the_active_window(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
+            crate::app::keymap::install(cx);
             crate::reader_windows::install(cx);
             install(cx);
         });
-        let reader = cx
-            .add_window(|window, cx| crate::reader::Preview::new(None, window.scale_factor(), cx));
+        let reader = cx.add_window(|window, cx| {
+            super::super::document_window::DocumentWindow::new(None, window, cx)
+        });
         cx.update(|cx| cx.dispatch_action(&AboutKver));
         let about = cx.update(|cx| {
             assert_eq!(cx.windows().len(), 2);

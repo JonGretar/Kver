@@ -17,8 +17,8 @@ use gpui_kit::component::{
     tree::{TreeItem, TreeState, tree},
 };
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, KeyBinding,
-    Render, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, Render, Window,
+    WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
 
 use crate::{
@@ -305,10 +305,6 @@ pub fn install(cx: &mut App) {
 pub fn install_with_paths(cx: &mut App, paths: Option<AppPaths>) {
     let settings = cx.new(|_| SettingsState::new(paths.clone()));
     cx.set_global(SharedSettings(settings.clone()));
-    cx.bind_keys([
-        KeyBinding::new("cmd-,", ShowSettings, None),
-        KeyBinding::new("escape", CloseSettings, Some("KverSettings")),
-    ]);
     let open_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &ShowSettings, cx| {
         if let Some(handle) = open_window.get()
@@ -1038,10 +1034,7 @@ fn preference_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        reader::{Preview, ShowRecent},
-        recent::RecentStore,
-    };
+    use crate::{app::document_window::DocumentWindow, reader::ShowRecent, recent::RecentStore};
     use gpui_kit::{TestAppContext, test::TestWindowExt as _};
 
     fn choose(cx: &mut TestAppContext, window: AnyWindowHandle, option: usize) {
@@ -1140,7 +1133,7 @@ mod tests {
             (0..2)
                 .map(|_| {
                     gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                        cx.new(|cx| Preview::new(None, window.scale_factor(), cx))
+                        cx.new(|cx| DocumentWindow::new(None, window, cx))
                     })
                     .unwrap()
                     .0
@@ -1326,9 +1319,11 @@ mod tests {
         });
         cx.run_until_parked();
         let settings_window = cx.update(|cx| cx.windows()[0]);
-        let (reader_window, reader) = cx.update(|cx| {
+        let (reader_window, document) = cx.update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| Preview::new(Some(pdf.clone()), window.scale_factor(), cx))
+                cx.new(|cx| {
+                    crate::app::document_window::DocumentWindow::new(Some(pdf.clone()), window, cx)
+                })
             })
             .unwrap()
         });
@@ -1419,8 +1414,8 @@ mod tests {
             })
             .unwrap()
         });
-        reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.path(), Some(pdf.as_path()))
+        document.read_with(cx, |document, cx| {
+            assert_eq!(document.reader().read(cx).path(), Some(pdf.as_path()))
         });
         cx.update(|cx| {
             cx.update_window(settings_window, |_, frame, cx| {
@@ -1617,6 +1612,7 @@ mod tests {
         let config = root.path().join("config/config.toml");
         cx.update(|cx| {
             gpui_kit::init(cx);
+            crate::app::keymap::install(cx);
             install_with_paths(
                 cx,
                 Some(AppPaths::for_locations(
@@ -1797,7 +1793,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         cx.update(|cx| {
             gpui_kit::init(cx);
-            crate::reader::bind_reader_keys(cx);
+            crate::app::keymap::install(cx);
             install_with_paths(
                 cx,
                 Some(AppPaths::for_locations(
@@ -1806,8 +1802,7 @@ mod tests {
                 )),
             );
         });
-        let reader = cx
-            .add_window(|window, cx| crate::reader::Preview::new(None, window.scale_factor(), cx));
+        let reader = cx.add_window(|window, cx| DocumentWindow::new(None, window, cx));
         cx.update(|cx| {
             cx.update_window(reader.into(), |_, frame, cx| {
                 frame.render_frame(cx);

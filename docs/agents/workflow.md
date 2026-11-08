@@ -79,6 +79,50 @@ docs or a test diary.
    work changes.
    Add a user-facing `CHANGELOG.md` entry for notable changes.
 
+## Modal command lists
+
+Use Kit's modal behavior for searchable lists, pickers, and their confirmation
+dialogs. A focus trap alone does not block pointer events from reaching the
+reader underneath, implement outside-click dismissal, or repair focus when
+the focused control disappears.
+
+Choose the owner before composing the surface:
+
+- Use the styled `Dialog` through `WindowExt::open_dialog` for a window-managed
+  modal, as in [Open Recent](../../src/reading_history/recent_picker.rs).
+- For a document-owned surface whose lifetime must follow its entity, use
+  `gpui_kit::base::Dialog` with `DialogPopup` and supply the presentation, as in
+  [local marks](../../src/reader/marks.rs). Keep open state with that owner;
+  unmounting it must not close an unrelated dialog on the window's stack.
+
+Both choices reuse Kit's dismissal, focus-trapping, and pointer behavior.
+Keep application-specific list operations separate from that modal behavior;
+prefer these existing primitives over another application popup framework.
+Follow the GPUI Kit coding and design guides for their current interfaces.
+
+When a row action removes its own focused button, explicitly focus a surviving
+control, usually the search field, before removing the row. After a nested
+confirmation closes, restore the parent list's intended keyboard target rather
+than a disappearing trigger. If restoration waits for another frame, use a weak
+owner and check that the same popup is still open before moving focus.
+
+Test the composed window with real pointer and keyboard events:
+
+- Click search and non-input parts of the surface, then type and use arrows.
+- Delete a row, including the final row, then continue typing and navigating.
+- Cancel and confirm nested dialogs; check focus returns to the parent list.
+- Click the backdrop and use Escape; check the intended layer dismisses and
+  focus returns to a valid target.
+- Replace the document or supersede the popup during pending work; late replies
+  must not reopen it or steal focus.
+
+Typing, arrow navigation, and incidental clicks within a modal must not reach
+the PDF behind it. See the
+[marks modal regressions](../../src/reader/tests/marks/modal.rs) and
+the [Recent workflows](../../src/app/document_window/tests/recent_picker.rs).
+Apply the native-Mac validation requirement above; screenshots alone cannot
+establish pointer routing or keyboard ownership.
+
 ## Work tracking
 
 GitHub Issues is the source of truth for **what remains**, **what is active**,
@@ -89,6 +133,11 @@ summarizes milestone outcomes and current state; use issues for the finer
 task graph and live ownership. When tickets are published, replace the
 roadmap's "no open implementation tickets" note with a link to the spec or
 ticket set. Do not mirror each ticket's mutable status in the roadmap.
+
+Keep active implementation plans directly under `docs/plans/`. Retain completed
+plans with useful rationale under `docs/plans/completed/`, marked historical
+and linked to current architecture or ADRs. Completion of a plan does not imply
+that its changes have landed or been released.
 
 For a quick "what next?" answer, read the roadmap's **Where we are** and the
 linked spec's open child issues. Check each candidate's native blockers (or

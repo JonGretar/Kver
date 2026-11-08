@@ -8,8 +8,8 @@
 
 use gpui_kit::platform;
 use gpui_kit::{AppContext as _, HeadlessAppContext, px, size};
+use kver::app::document_window::DocumentWindow;
 use kver::assets::ReaderAssets;
-use kver::reader::Preview;
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -30,16 +30,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         platform::current_headless_renderer,
     );
     cx.update(gpui_kit::init);
+    let mut document = None;
     let window = cx.open_window(size(px(920.0), px(800.0)), |window, cx| {
-        cx.new(|cx| Preview::new(Some(pdf), window.scale_factor(), cx))
+        let view = cx.new(|cx| DocumentWindow::new(Some(pdf), window, cx));
+        document = Some(view.clone());
+        cx.new(|cx| gpui_kit::base::Root::new(view, window, cx))
     })?;
+    let document = document.expect("capture window created");
 
     let deadline = Instant::now() + Duration::from_secs(30);
     cx.allow_parking();
     loop {
         cx.run_until_parked();
         let (status, displayed) = cx.update(|app| {
-            let reader = window.read(app).expect("capture window is open");
+            let reader = document.read(app).reader().read(app);
             (reader.status().to_owned(), reader.displayed_page_index())
         });
         if status.starts_with("Page 1 of ") && displayed == Some(0) {
@@ -54,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     cx.forbid_parking();
 
-    // Interact with `window` or its `Preview` here before taking more captures.
+    // Interact with `window` or its `DocumentWindow` here before more captures.
     std::fs::create_dir_all(&captures)?;
     let image = captures.join("reader.png");
     cx.capture_screenshot(window.into())?.save(&image)?;

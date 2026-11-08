@@ -1,7 +1,7 @@
 //! One window-local sidebar host. Find and Contents own their own retained content.
 
 use gpui_kit::{
-    Axis, Context, DragMoveEvent, Empty, FocusHandle, IntoElement, Window, div, prelude::*,
+    Axis, Context, DragMoveEvent, Empty, Entity, FocusHandle, IntoElement, Window, div, prelude::*,
 };
 use gpui_kit::{
     base::{InteractiveElementExt as _, TestSupportExt as _},
@@ -13,8 +13,9 @@ use gpui_kit::{
     },
 };
 
-use crate::pdf::{OutlineDestination, OutlineEntry};
-use crate::{contents_panel::ContentsPanel, find_panel::FindPanel};
+use crate::reader::{ContentsPanel, FindPanel};
+
+gpui_kit::actions!(kver, [ShowContents, ShowFind, ToggleSidebar]);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SidebarPanel {
@@ -42,18 +43,18 @@ pub struct ReaderSidebar {
     active: Option<SidebarPanel>,
     last: SidebarPanel,
     width_rems: f32,
-    find: FindPanel,
-    contents: ContentsPanel,
+    find: Entity<FindPanel>,
+    contents: Entity<ContentsPanel>,
 }
 
 impl ReaderSidebar {
-    pub fn new(window: &mut Window, cx: &mut Context<crate::reader::Preview>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             active: None,
             last: SidebarPanel::default(),
             width_rems: DEFAULT_WIDTH_REMS,
-            find: FindPanel::new(window, cx),
-            contents: ContentsPanel::new(cx),
+            find: cx.new(|cx| FindPanel::new(window, cx)),
+            contents: cx.new(ContentsPanel::new),
         }
     }
 
@@ -64,14 +65,16 @@ impl ReaderSidebar {
         width_rems.clamp(MIN_WIDTH_REMS.min(maximum), maximum)
     }
 
-    pub(crate) fn resize(&mut self, position: f32, window: &Window) {
+    fn resize(&mut self, position: f32, window: &Window, cx: &mut Context<Self>) {
         let rem = f32::from(window.rem_size());
         let window_rems = f32::from(window.bounds().size.width) / rem;
         self.width_rems = Self::bounded_width(position / rem, window_rems);
+        cx.notify();
     }
 
-    pub(crate) fn reset_width(&mut self) {
+    fn reset_width(&mut self, cx: &mut Context<Self>) {
         self.width_rems = DEFAULT_WIDTH_REMS;
+        cx.notify();
     }
 
     pub fn active(&self) -> Option<SidebarPanel> {
@@ -82,59 +85,22 @@ impl ReaderSidebar {
         self.last
     }
 
-    pub(crate) fn find(&self) -> &FindPanel {
+    pub(crate) fn find(&self) -> &Entity<FindPanel> {
         &self.find
     }
 
-    pub(crate) fn find_mut(&mut self) -> &mut FindPanel {
-        &mut self.find
+    pub(crate) fn contents(&self) -> &Entity<ContentsPanel> {
+        &self.contents
     }
 
-    pub fn reset_document(&mut self, cx: &mut Context<crate::reader::Preview>) {
-        self.contents.reset(cx);
-    }
-
-    pub fn has_outline(&self) -> bool {
-        self.contents.has_outline()
-    }
-
-    pub fn install_outline(
-        &mut self,
-        result: Result<Vec<OutlineEntry>, String>,
-        cx: &mut Context<crate::reader::Preview>,
-    ) {
-        self.contents.install(result, cx);
-    }
-
-    pub fn focus_loaded_outline(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<crate::reader::Preview>,
-    ) {
-        if self.active == Some(SidebarPanel::Contents) {
-            self.contents.focus_loaded(window, cx);
-        }
-    }
-
-    pub fn outline_destination(&self, index: usize) -> Option<OutlineDestination> {
-        self.contents.destination(index)
-    }
-
-    pub fn selected_outline(&self, cx: &gpui_kit::App) -> Option<OutlineDestination> {
-        self.contents.selected_destination(cx)
-    }
-
-    pub fn open(
-        &mut self,
-        panel: SidebarPanel,
-        window: &mut Window,
-        cx: &mut Context<crate::reader::Preview>,
-    ) {
+    pub fn open(&mut self, panel: SidebarPanel, window: &mut Window, cx: &mut Context<Self>) {
         self.active = Some(panel);
         self.last = panel;
         match panel {
-            SidebarPanel::Find => self.find.focus(window, cx),
-            SidebarPanel::Contents => self.contents.focus(window, cx),
+            SidebarPanel::Find => self.find.update(cx, |find, cx| find.focus(window, cx)),
+            SidebarPanel::Contents => self
+                .contents
+                .update(cx, |contents, cx| contents.focus(window, cx)),
         }
         cx.notify();
     }
@@ -143,20 +109,19 @@ impl ReaderSidebar {
         &mut self,
         window: &mut Window,
         reader_focus: &FocusHandle,
-        cx: &mut Context<crate::reader::Preview>,
+        cx: &mut Context<Self>,
     ) {
         self.active = None;
         window.focus(reader_focus, cx);
         cx.notify();
     }
+}
 
-    pub fn render(
-        &self,
-        window: &Window,
-        total_pages: usize,
-        cx: &mut Context<crate::reader::Preview>,
-    ) -> impl IntoElement {
-        let active = self.active.expect("only render an open sidebar");
+impl Render for ReaderSidebar {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(active) = self.active else {
+            return Empty.into_any_element();
+        };
         let width_rems = Self::bounded_width(
             self.width_rems,
             f32::from(window.bounds().size.width) / f32::from(window.rem_size()),
@@ -167,14 +132,14 @@ impl ReaderSidebar {
                 .min_h_0()
                 .overflow_y_scrollbar()
                 .p_3()
-                .child(self.find.render(total_pages, cx))
+                .child(self.find.clone())
                 .into_any_element(),
             SidebarPanel::Contents => div()
                 .flex_1()
                 .min_h_0()
                 .flex()
                 .p_2()
-                .child(self.contents.render(cx))
+                .child(self.contents.clone())
                 .into_any_element(),
         };
         div()
@@ -183,7 +148,7 @@ impl ReaderSidebar {
             .relative()
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<ResizeSidebar>, window, cx| {
-                    this.resize_sidebar(
+                    this.resize(
                         f32::from(event.event.position.x - event.bounds.left()),
                         window,
                         cx,
@@ -215,8 +180,8 @@ impl ReaderSidebar {
                         .child(Tab::new().label("Find").flex_1())
                         .on_click(|ix, window, cx| {
                             let action: Box<dyn gpui_kit::Action> = match ix {
-                                0 => Box::new(crate::reader::ShowContents),
-                                _ => Box::new(crate::reader::ShowFind),
+                                0 => Box::new(ShowContents),
+                                _ => Box::new(ShowFind),
                             };
                             window.dispatch_action(action, cx);
                         }),
@@ -227,8 +192,22 @@ impl ReaderSidebar {
                     .inside(HandleEdge::Trailing)
                     .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| drag.clone()))
                     .on_double_click(cx.listener(|this, _, _, cx| {
-                        this.reset_sidebar_width(cx);
+                        this.reset_width(cx);
                     })),
             )
+            .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn width_preserves_room_for_the_document_even_in_narrow_windows() {
+        assert_eq!(ReaderSidebar::bounded_width(1., 100.), MIN_WIDTH_REMS);
+        assert_eq!(ReaderSidebar::bounded_width(100., 100.), MAX_WIDTH_REMS);
+        assert_eq!(ReaderSidebar::bounded_width(DEFAULT_WIDTH_REMS, 20.), 8.);
+        assert_eq!(ReaderSidebar::bounded_width(DEFAULT_WIDTH_REMS, 0.), 0.);
     }
 }

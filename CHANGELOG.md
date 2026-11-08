@@ -29,6 +29,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Apply valid edits to the settings file while Kver is open; keep the last working appearance and show an error during incomplete or invalid edits without overwriting the file.
 - Show Contents before Find in the sidebar and open Contents by default the first time the sidebar is shown.
 
+### Fixed
+
+- Keep marks search focused after deleting a row, prevent popup clicks from reaching the PDF, and dismiss the marks list when clicking outside it.
+- Keep opening a PDF when its window moves between displays with different pixel densities during loading.
+
 ## [0.3.1] - 2026-11-06
 
 ### Added

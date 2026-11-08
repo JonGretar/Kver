@@ -1,9 +1,11 @@
-//! Window-local outline state and presentation inside the shared sidebar.
+//! Lazy outline loading, tree interaction, and document-space navigation.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
-use crate::pdf::{OutlineDestination, OutlineEntry};
-use gpui_kit::{App, Context, FocusHandle, IntoElement, Window, div, prelude::*};
+use crate::pdf::{self, OutlineDestination, OutlineEntry};
+use gpui_kit::{
+    App, Context, EventEmitter, FocusHandle, IntoElement, Task, Window, div, prelude::*,
+};
 use gpui_kit::{
     base::{
         TestSupportExt as _,
@@ -18,44 +20,104 @@ use gpui_kit::{
     },
 };
 
+gpui_kit::actions!(kver, [ActivateOutline]);
+
+pub(crate) struct OutlineNavigation {
+    generation: u64,
+    destination: OutlineDestination,
+}
+
+impl OutlineNavigation {
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub(crate) fn destination(&self) -> OutlineDestination {
+        self.destination
+    }
+}
+
 pub(crate) struct ContentsPanel {
     focus: FocusHandle,
+    path: Option<PathBuf>,
+    generation: u64,
+    task: Option<Task<()>>,
     outline: Option<Result<Arc<Vec<OutlineEntry>>, String>>,
     tree: gpui_kit::Entity<TreeState>,
 }
 
+impl EventEmitter<OutlineNavigation> for ContentsPanel {}
+
 impl ContentsPanel {
-    pub(crate) fn new(cx: &mut Context<crate::reader::Preview>) -> Self {
+    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle().tab_stop(true),
+            path: None,
+            generation: 0,
+            task: None,
             outline: None,
             tree: cx.new(|cx| TreeState::new(cx)),
         }
     }
 
-    pub(crate) fn reset(&mut self, cx: &mut Context<crate::reader::Preview>) {
+    /// Supply the document owner's snapshot. Extraction remains lazy until
+    /// Contents opens (or its host requests a load for an already open panel).
+    pub(crate) fn set_document(
+        &mut self,
+        generation: u64,
+        path: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        self.generation = generation;
+        self.path = path;
+        self.task = None;
         self.outline = None;
         self.tree.update(cx, |tree, cx| tree.set_items(vec![], cx));
+        cx.notify();
     }
 
-    pub(crate) fn has_outline(&self) -> bool {
-        self.outline.is_some()
+    pub(crate) fn ensure_loaded(&mut self, cx: &mut Context<Self>) {
+        if self.outline.is_some() || self.task.is_some() {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let generation = self.generation;
+        let work = cx
+            .background_executor()
+            .spawn(async move { pdf::document_outline(&path) });
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.install(generation, result, cx) {
+                    // The new tree must render before its focus handle is tracked.
+                    cx.on_next_frame(window, |this, window, cx| this.focus_loaded(window, cx));
+                }
+            });
+        }));
     }
 
-    pub(crate) fn install(
+    fn install(
         &mut self,
+        generation: u64,
         result: Result<Vec<OutlineEntry>, String>,
-        cx: &mut Context<crate::reader::Preview>,
-    ) {
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if generation != self.generation {
+            return false;
+        }
         let items = result
             .as_ref()
             .map(|entries| outline_tree(entries))
             .unwrap_or_default();
         self.tree.update(cx, |tree, cx| tree.set_items(items, cx));
         self.outline = Some(result.map(Arc::new));
+        cx.notify();
+        true
     }
 
-    pub(crate) fn destination(&self, index: usize) -> Option<OutlineDestination> {
+    fn destination(&self, index: usize) -> Option<OutlineDestination> {
         self.outline
             .as_ref()?
             .as_ref()
@@ -64,12 +126,13 @@ impl ContentsPanel {
             .destination()
     }
 
-    pub(crate) fn selected_destination(&self, cx: &App) -> Option<OutlineDestination> {
+    fn selected_destination(&self, cx: &App) -> Option<OutlineDestination> {
         let id = &self.tree.read(cx).selected_item()?.id;
         self.destination(id.strip_prefix("contents-")?.parse().ok()?)
     }
 
-    pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<crate::reader::Preview>) {
+    pub(crate) fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure_loaded(cx);
         if self.has_navigable_entries() {
             self.tree.update(cx, |tree, cx| tree.focus(window, cx));
         } else {
@@ -85,17 +148,35 @@ impl ContentsPanel {
         })
     }
 
-    pub(crate) fn focus_loaded(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<crate::reader::Preview>,
-    ) {
+    fn focus_loaded(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.has_navigable_entries() && self.focus.is_focused(window) {
             self.tree.update(cx, |tree, cx| tree.focus(window, cx));
         }
     }
 
-    pub(crate) fn render(&self, cx: &mut Context<crate::reader::Preview>) -> impl IntoElement {
+    fn activate(&self, generation: u64, ix: usize, cx: &mut Context<Self>) {
+        if generation == self.generation
+            && let Some(destination) = self.destination(ix)
+        {
+            cx.emit(OutlineNavigation {
+                generation,
+                destination,
+            });
+        }
+    }
+
+    fn activate_selected(&self, cx: &mut Context<Self>) {
+        if let Some(destination) = self.selected_destination(cx) {
+            cx.emit(OutlineNavigation {
+                generation: self.generation,
+                destination,
+            });
+        }
+    }
+}
+
+impl Render for ContentsPanel {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let status = match &self.outline {
             None => Some(
                 div()
@@ -130,6 +211,7 @@ impl ContentsPanel {
             .cloned()
             .unwrap_or_default();
         let owner = cx.weak_entity();
+        let generation = self.generation;
         let tree_state = self.tree.clone();
         let content = tree(&self.tree, move |row_ix, entry, selected, _, _| {
             let ix = entry
@@ -211,7 +293,7 @@ impl ContentsPanel {
                     });
                     if navigable {
                         let _ =
-                            owner.update(cx, |reader, cx| reader.select_outline(ix, window, cx));
+                            owner.update(cx, |contents, cx| contents.activate(generation, ix, cx));
                     }
                 })
         })
@@ -222,6 +304,7 @@ impl ContentsPanel {
             .test_support()
             .track_focus(&self.focus)
             .key_context("ContentsPanel")
+            .on_action(cx.listener(|this, _: &ActivateOutline, _, cx| this.activate_selected(cx)))
             .role(gpui_kit::Role::Navigation)
             .aria_label("PDF contents")
             .flex_1()
@@ -270,3 +353,6 @@ fn outline_tree(entries: &[OutlineEntry]) -> Vec<TreeItem> {
     }
     roots
 }
+
+#[cfg(test)]
+mod tests;

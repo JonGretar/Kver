@@ -12,7 +12,7 @@ use objc2::{
 };
 use objc2_foundation::{NSBundle, NSError, NSString, ns_string};
 
-use crate::app_menu::CheckForUpdates;
+use crate::app::commands::CheckForUpdates;
 
 struct Updater {
     controller: Retained<AnyObject>,

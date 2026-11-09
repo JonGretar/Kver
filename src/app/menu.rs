@@ -128,26 +128,28 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 MenuItem::action("Copy", Copy),
                 MenuItem::action("Find", ShowFind),
             ]),
+                Menu::new("View").items([
+                MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                MenuItem::separator(),
+                MenuItem::action("Single Page", SinglePage),
+                MenuItem::action("Continuous", Continuous),
+                MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
+            ]),
             Menu::new("Navigate").items([
-                MenuItem::action("Back", NavigateBack).disabled(!can_back),
+                MenuItem::action("Contents", ShowContents),
+                MenuItem::separator(),
                 MenuItem::action("Forward", NavigateForward).disabled(!can_forward),
+                MenuItem::action("Back", NavigateBack).disabled(!can_back),
+                MenuItem::separator(),
+                MenuItem::action("Next Page", NextPage),
+                MenuItem::action("Previous Page", PreviousPage),
             ]),
             Menu::new("Window").items([
                 MenuItem::action("Close Window", CloseWindow),
                 MenuItem::action("Next Window", NextWindow),
                 MenuItem::action("Previous Window", PreviousWindow),
             ]),
-            Menu::new("View").items([
-                MenuItem::action("Find", ShowFind),
-                MenuItem::action("Contents", ShowContents),
-                MenuItem::action("Toggle Sidebar", ToggleSidebar),
-                MenuItem::separator(),
-                MenuItem::action("Single Page", SinglePage),
-                MenuItem::action("Continuous", Continuous),
-                MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
-                MenuItem::action("Next Page", NextPage),
-                MenuItem::action("Previous Page", PreviousPage),
-            ]),
+            
         ]);
     }
     #[cfg(not(target_os = "macos"))]

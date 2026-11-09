@@ -58,6 +58,10 @@ fn document_replacement_discards_outline_and_keeps_the_sidebar_open(cx: &mut Tes
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find("contents-empty").visible());
+        let empty = window.find("contents-empty").bounds();
+        let sidebar = window.find("reader-sidebar").bounds();
+        assert!(empty.left() >= sidebar.left() + window.rem_size());
+        assert!(empty.right() <= sidebar.right() - window.rem_size());
         assert!(window.try_find(("contents-entry", 0usize)).is_none());
         window.press("enter", cx);
     })

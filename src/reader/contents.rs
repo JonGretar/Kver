@@ -196,9 +196,20 @@ impl Render for ContentsPanel {
                 div()
                     .id("contents-empty")
                     .test_support()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("This PDF has no navigable contents.")
+                    .child(
+                        div()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child("No contents"),
+                    )
+                    .child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("This PDF doesn’t include a navigable table of contents."),
+                    )
                     .into_any_element(),
             ),
             Some(Ok(_)) => None,
@@ -310,7 +321,9 @@ impl Render for ContentsPanel {
             .flex_1()
             .min_h_0()
             .w_full()
-            .when_some(status, |panel, status| panel.child(status))
+            .when_some(status, |panel, status| {
+                panel.child(div().p_2().max_w_64().child(status))
+            })
             .child(content)
     }
 }

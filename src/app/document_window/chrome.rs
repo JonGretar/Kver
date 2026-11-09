@@ -1,11 +1,11 @@
 //! Window chrome is value-like presentation of the active document's identity.
 
-use gpui_kit::{App, SharedString, div, prelude::*, px};
+use gpui_kit::{App, SharedString, Window, div, prelude::*, px};
 use gpui_kit::{
     assets::IconName,
     base::{Disableable, TestSupportExt as _},
     component::{
-        ActiveTheme, Selectable, Sizable, TitleBar,
+        ActiveTheme, Selectable, Sizable, TITLE_BAR_HEIGHT, TitleBar,
         button::{Button, ButtonCustomVariant, ButtonVariants},
         menu::{DropdownMenu as _, PopupMenuItem},
         status_bar::StatusBar,
@@ -326,37 +326,66 @@ fn reader_button(
         .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
 }
 
-pub(super) fn title_bar(path: Option<&Path>, cx: &App) -> impl IntoElement + use<> {
+pub(super) fn title_bar(
+    path: Option<&Path>,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement + use<> {
     let filename = path.map(document_name).map(SharedString::from);
     let title = filename
         .clone()
         .unwrap_or_else(|| "A quiet place to read".into());
+    // Kit's native title-bar inset is physical, not part of interface zoom.
+    // Own it here so the title's coordinate space starts at the window edge.
+    let native_inset = if cfg!(target_os = "macos") {
+        px(80.)
+    } else {
+        px(12.)
+    };
+    let rem = window.rem_size();
+    let width = window.viewport_size().width;
+    let compact_open = !cfg!(target_os = "macos") && width < rem * 40.;
+    // Leave room for all three Kit window controls on platforms that draw them.
+    let window_controls = if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
+        px(0.)
+    } else {
+        TITLE_BAR_HEIGHT * 3.
+    };
+    let inset =
+        (native_inset + rem * 3.).max(window_controls + rem * if compact_open { 3. } else { 8. });
     TitleBar::new()
+        .relative()
+        .pl_0()
         .pr_3()
         .child(
             div()
+                .id("reader-brand")
+                .test_support()
+                .ml(native_inset)
+                .text_color(cx.theme().primary)
+                .font_weight(gpui_kit::FontWeight::BOLD)
+                .child("K /"),
+        )
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left(inset)
+                // Equal clearance at both edges centers on the window, not
+                // the asymmetric space between branding and Open PDF.
+                .w((width - inset * 2.).max(px(0.)))
+                .h(TITLE_BAR_HEIGHT)
                 .flex()
                 .items_center()
-                .gap_2()
-                // TitleBar's inner bar does not shrink; give the filename a
-                // zero basis so Open PDF stays visible.
-                .w_0()
-                .flex_1()
-                .min_w(px(0.0))
-                .child(
-                    div()
-                        .text_color(cx.theme().primary)
-                        .font_weight(gpui_kit::FontWeight::BOLD)
-                        .child("K /"),
-                )
                 .child(
                     div()
                         .id("document-name")
                         .test_support()
                         .aria_label(title.clone())
-                        .flex_1()
-                        .min_w(px(0.0))
+                        .w_full()
+                        .min_w_0()
                         .truncate()
+                        .text_center()
                         .text_sm()
                         .when_some(filename.clone(), |title, name| {
                             title.tooltip(move |window, cx| {
@@ -368,7 +397,10 @@ pub(super) fn title_bar(path: Option<&Path>, cx: &App) -> impl IntoElement + use
         )
         .child(
             Button::new("open-pdf")
-                .label("Open PDF…")
+                .when(!compact_open, |button| {
+                    button.label("Open PDF…").w(gpui_kit::rems(7.))
+                })
+                .accessibility_label("Open PDF…")
                 .icon(IconName::FolderOpen)
                 .ghost()
                 .small()

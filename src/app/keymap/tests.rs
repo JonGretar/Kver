@@ -151,7 +151,7 @@ fn mac_menu_rejects_promoting_bare_reader_keys_after_rebind() {
             .err()
             .unwrap();
         assert!(
-            error.contains("reader-only macOS menu accelerator"),
+            error.contains("typing-key macOS menu accelerator"),
             "{error}"
         );
         assert!(error.contains(bare), "{error}");
@@ -176,6 +176,33 @@ command = "previous-page"
     assert_eq!(
         map.action("right", Context::Reader),
         Some("kver::PreviousPage")
+    );
+}
+
+#[test]
+fn mac_menu_prefers_global_alias_and_rejects_a_typing_key() {
+    // GPUI's native menu prefers a later global binding over an earlier
+    // contextual one, so merely checking the first resolved slot misses this.
+    let global = "[[keyboard.bindings]]\nkeys = 'x'\ncontext = 'global'\ncommand = 'next-page'\n";
+    let error = resolve_config(global, Platform::Mac, Preset::Standard)
+        .err()
+        .unwrap();
+    assert!(
+        error.contains("typing-key macOS menu accelerator"),
+        "{error}"
+    );
+    assert!(error.contains("restrict this entry to reader"), "{error}");
+    let reader = global.replace("context = 'global'", "context = 'reader'");
+    assert!(resolve_config(&reader, Platform::Mac, Preset::Standard).is_ok());
+
+    // Vim already has a bare 's' as its Single Page fallback. An edit must
+    // not promote a different global typing key in its place.
+    let vim = "[[keyboard.bindings]]\nkeys = 'x'\ncontext = 'global'\ncommand = 'single-page'\n";
+    assert!(
+        resolve_config(vim, Platform::Mac, Preset::Vim)
+            .err()
+            .unwrap()
+            .contains("typing-key macOS menu accelerator")
     );
 }
 
@@ -236,7 +263,7 @@ fn unsafe_menu_edit_does_not_replace_live_shortcuts(cx: &mut TestAppContext) {
         let unsafe_edit = "[[keyboard.bindings]]\nkeys = \"cmd-alt-right\"\ncontext = \"reader\"\ncommand = \"zoom-in\"\n";
         assert!(reload(cx, Some(unsafe_edit.into()), Preset::Standard)
             .unwrap_err()
-            .contains("reader-only macOS menu accelerator"));
+            .contains("typing-key macOS menu accelerator"));
         let bindings = cx.key_bindings();
         let bindings = bindings.borrow();
         let first = bindings.bindings_for_action(&NextPage).next().unwrap();

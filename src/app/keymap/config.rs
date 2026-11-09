@@ -94,27 +94,29 @@ pub fn resolve_config(
         let defaults = resolve(platform, preset).expect("embedded keyboard defaults are valid");
         for command in super::super::menu::ACCELERATOR_COMMANDS {
             let action = command_action(command).expect("native menu command is registered");
-            let Some(default) = first_binding_for(&defaults, action.as_ref()) else {
+            let Some(default) = menu_binding_for(&defaults, action.as_ref()) else {
                 continue;
             };
-            let Some(current) = first_binding_for(&resolved, action.as_ref()) else {
+            let Some(current) = menu_binding_for(&resolved, action.as_ref()) else {
                 continue;
             };
-            let default_is_modified =
-                default.sequence.len() == 1 && default.sequence[0].modifiers.modified();
             // Shift alone still types into a text field. Only Command,
-            // Control, Option, or Function prevents a reader-only key from
+            // Control, Option, or Function prevents a key from
             // becoming an ordinary typing shortcut in a native menu.
             let current_is_typing_key = current.sequence.len() == 1 && {
                 let modifiers = current.sequence[0].modifiers;
                 !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function
             };
-            if default_is_modified && current_is_typing_key {
+            if current_is_typing_key && current.sequence != default.sequence {
+                let remedy = if current.entry.context == Context::Global {
+                    "use a modified shortcut or restrict this entry to reader"
+                } else {
+                    "also rebind this reader key or keep a modified shortcut for the command"
+                };
                 return Err(format!(
-                    "Rebinding the modified shortcut for {} would make {:?} a reader-only macOS menu accelerator while typing; also rebind {:?} or keep a modified shortcut for this command",
+                    "Binding {} to {:?} would make it a typing-key macOS menu accelerator; {remedy}",
                     action.name(),
                     current.entry.keys,
-                    current.entry.keys
                 ));
             }
         }
@@ -122,13 +124,20 @@ pub fn resolve_config(
     Ok(resolved)
 }
 
-fn first_binding_for<'a>(map: &'a ResolvedKeymap, action: &dyn Action) -> Option<&'a Slot> {
-    map.slots.iter().find(|slot| {
+fn menu_binding_for<'a>(map: &'a ResolvedKeymap, action: &dyn Action) -> Option<&'a Slot> {
+    let matches = |slot: &&Slot| {
         slot.entry
             .action
             .as_ref()
             .is_some_and(|candidate| candidate.partial_eq(action))
-    })
+    };
+    // GPUI's macOS menu chooses the first action binding whose predicate
+    // matches its default context; if none do, it falls back to the first
+    // binding. Product contexts do not match that default; Global does.
+    map.slots
+        .iter()
+        .find(|slot| slot.entry.context == Context::Global && matches(slot))
+        .or_else(|| map.slots.iter().find(matches))
 }
 
 macro_rules! commands {

@@ -1,5 +1,7 @@
 use super::*;
-use gpui_kit::{KeyContext, TestAppContext, test::TestWindowExt as _};
+#[cfg(target_os = "macos")]
+use gpui_kit::test::TestWindowExt as _;
+use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
 #[test]

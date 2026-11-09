@@ -603,12 +603,17 @@ impl Render for DocumentWindow {
         let title = chrome::title_bar(reader.path(), cx);
         let marks = reader.marks_overlay();
         let toolbar = settings.read(cx).show_toolbar().then(|| {
+            let sidebar_rems = self
+                .sidebar
+                .as_ref()
+                .map_or(0., |sidebar| sidebar.read(cx).width_rems(window));
             chrome::reading_toolbar(
                 reader,
                 self.sidebar_panel(cx).is_some(),
                 self.jumplist.can_back(),
                 self.jumplist.can_forward(),
-                window,
+                f32::from(window.bounds().size.width) / f32::from(window.rem_size()) - sidebar_rems,
+                cx,
             )
         });
         let statusbar = settings

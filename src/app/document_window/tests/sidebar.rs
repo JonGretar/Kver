@@ -105,3 +105,98 @@ fn resizing_sidebar_refits_pdf_and_preserves_panel_across_documents(cx: &mut Tes
         assert_eq!(document.sidebar_panel(cx), Some(SidebarPanel::Find));
     });
 }
+
+#[gpui_kit::test]
+fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{component::theme::Theme, size, test::TestQueryExt as _};
+
+    setup(cx);
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("cmd-t", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    for font_size in [16., 20.] {
+        cx.update(|cx| Theme::update(cx, |theme| theme.font_size = px(font_size)));
+        for width in [360., 600., 920., 1200.] {
+            cx.simulate_window_resize(handle, size(px(width), px(800.)));
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                let left = window.find("reader-sidebar").bounds().right();
+                for id in [
+                    "toggle-sidebar",
+                    "previous-page",
+                    "next-page",
+                    "settings-button",
+                ] {
+                    let control = window.find(id);
+                    assert!(control.visible(), "{id} at {width}/{font_size}");
+                    assert!(
+                        control.bounds().left() >= left,
+                        "{id} at {width}/{font_size}"
+                    );
+                    assert!(
+                        control.bounds().right() <= px(width),
+                        "{id} at {width}/{font_size}"
+                    );
+                }
+                for id in [
+                    "navigate-back",
+                    "navigate-forward",
+                    "reading-mode",
+                    "zoom-in",
+                    "zoom-out",
+                    "fit-width",
+                    "fit-page",
+                ] {
+                    if let Some(control) = window.try_find(id) {
+                        assert!(
+                            control.bounds().right()
+                                <= window.find("settings-button").bounds().left()
+                        );
+                    } else {
+                        assert!(window.find("reader-overflow").visible());
+                    }
+                }
+            })
+            .unwrap();
+        }
+    }
+    cx.update(|cx| Theme::update(cx, |theme| theme.font_size = px(16.)));
+    cx.simulate_window_resize(handle, size(px(360.), px(800.)));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("reader-overflow", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        // Disabled history commands do not activate or close the menu.
+        let back = window.find_by_label("Back").bounds().center();
+        window.pointer_down(back, gpui_kit::MouseButton::Left, cx);
+        window.pointer_up(back, gpui_kit::MouseButton::Left, cx);
+        let fit = window.find_by_label("Fit width").bounds().center();
+        window.pointer_down(fit, gpui_kit::MouseButton::Left, cx);
+        window.pointer_up(fit, gpui_kit::MouseButton::Left, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.zoom_mode()),
+        ZoomMode::FitWidth
+    );
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("settings-button", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+}

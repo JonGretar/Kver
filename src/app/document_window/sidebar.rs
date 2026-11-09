@@ -85,6 +85,16 @@ impl ReaderSidebar {
         self.last
     }
 
+    pub(super) fn width_rems(&self, window: &Window) -> f32 {
+        if self.active.is_none() {
+            return 0.;
+        }
+        Self::bounded_width(
+            self.width_rems,
+            f32::from(window.bounds().size.width) / f32::from(window.rem_size()),
+        )
+    }
+
     pub(crate) fn find(&self) -> &Entity<FindPanel> {
         &self.find
     }
@@ -122,10 +132,7 @@ impl Render for ReaderSidebar {
         let Some(active) = self.active else {
             return Empty.into_any_element();
         };
-        let width_rems = Self::bounded_width(
-            self.width_rems,
-            f32::from(window.bounds().size.width) / f32::from(window.rem_size()),
-        );
+        let width_rems = self.width_rems(window);
         let panel = match active {
             SidebarPanel::Find => div()
                 .flex_1()

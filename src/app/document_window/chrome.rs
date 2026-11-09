@@ -1,12 +1,13 @@
 //! Window chrome is value-like presentation of the active document's identity.
 
-use gpui_kit::{App, SharedString, Window, div, prelude::*, px};
+use gpui_kit::{App, SharedString, div, prelude::*, px};
 use gpui_kit::{
     assets::IconName,
     base::{Disableable, TestSupportExt as _},
     component::{
         ActiveTheme, Selectable, Sizable, TitleBar,
-        button::{Button, ButtonVariants},
+        button::{Button, ButtonCustomVariant, ButtonVariants},
+        menu::{DropdownMenu as _, PopupMenuItem},
         status_bar::StatusBar,
         toolbar::{Toolbar, ToolbarGroup},
         tooltip::Tooltip,
@@ -29,11 +30,126 @@ pub(super) fn reading_toolbar(
     sidebar_open: bool,
     can_back: bool,
     can_forward: bool,
-    window: &Window,
+    available_rems: f32,
+    cx: &App,
 ) -> Toolbar {
     let has_document = reader.page_count().is_some();
-    let show_fit_labels =
-        f32::from(window.bounds().size.width) >= 35.0 * f32::from(window.rem_size());
+    // A resized sidebar consumes the same space that controls need. Both
+    // thresholds use the remaining pane width at the current interface scale.
+    let show_fit_labels = available_rems >= 44.;
+    let overflow = available_rems < 28.;
+    let history = ToolbarGroup::new("history-controls")
+        .label("Navigation history")
+        .content(reader_button(
+            "navigate-back",
+            "Back",
+            IconName::ArrowLeft,
+            Box::new(NavigateBack),
+            can_back,
+            false,
+            cx,
+        ))
+        .content(reader_button(
+            "navigate-forward",
+            "Forward",
+            IconName::ArrowRight,
+            Box::new(NavigateForward),
+            can_forward,
+            false,
+            cx,
+        ));
+    let pages = ToolbarGroup::new("page-controls")
+        .label("Page navigation")
+        .content(reader_button(
+            "previous-page",
+            "Previous page",
+            IconName::ArrowUp,
+            Box::new(PreviousPage),
+            has_document && reader.page_index() > 0,
+            false,
+            cx,
+        ))
+        .content(reader_button(
+            "next-page",
+            "Next page",
+            IconName::ArrowDown,
+            Box::new(NextPage),
+            reader.page_index() + 1 < reader.page_count().unwrap_or(0),
+            false,
+            cx,
+        ));
+    let single_page = reader.reading_mode() == ReadingMode::SinglePage;
+    let mode_label = match (reader.reading_mode(), reader.mode_override()) {
+        (ReadingMode::SinglePage, Some(_)) => "Single page for this PDF · switch to continuous",
+        (ReadingMode::SinglePage, None) => "Single page (default) · switch to continuous",
+        (ReadingMode::Continuous, Some(_)) => "Continuous for this PDF · switch to single page",
+        (ReadingMode::Continuous, None) => "Continuous (default) · switch to single page",
+    };
+    let mode = reader_button(
+        "reading-mode",
+        mode_label,
+        IconName::FileText,
+        if single_page {
+            Box::new(Continuous)
+        } else {
+            Box::new(SinglePage)
+        },
+        has_document,
+        single_page,
+        cx,
+    )
+    .when(show_fit_labels, |button| {
+        button.label(if single_page {
+            "Single page"
+        } else {
+            "Continuous"
+        })
+    });
+    let zoom = reader.zoom_mode();
+    let zoom_controls = ToolbarGroup::new("zoom-controls")
+        .label("Zoom and fit")
+        .content(reader_button(
+            "zoom-out",
+            "Zoom out",
+            IconName::ZoomOut,
+            Box::new(ZoomOut),
+            has_document,
+            false,
+            cx,
+        ))
+        .content(reader_button(
+            "zoom-in",
+            "Zoom in",
+            IconName::ZoomIn,
+            Box::new(ZoomIn),
+            has_document,
+            false,
+            cx,
+        ))
+        .content(
+            reader_button(
+                "fit-width",
+                "Fit width",
+                IconName::MoveHorizontal,
+                Box::new(FitWidth),
+                has_document,
+                has_document && zoom == ZoomMode::FitWidth,
+                cx,
+            )
+            .when(show_fit_labels, |button| button.label("Fit width")),
+        )
+        .content(
+            reader_button(
+                "fit-page",
+                "Fit page",
+                IconName::Expand,
+                Box::new(FitPage),
+                has_document,
+                has_document && zoom == ZoomMode::FitPage,
+                cx,
+            )
+            .when(show_fit_labels, |button| button.label("Fit page")),
+        );
     Toolbar::new("reading-toolbar")
         .px_3()
         .content(reader_button(
@@ -43,144 +159,93 @@ pub(super) fn reading_toolbar(
             } else {
                 "Show sidebar"
             },
-            Some(IconName::PanelLeft),
+            IconName::PanelLeft,
             Box::new(ToggleSidebar),
             has_document,
             sidebar_open,
+            cx,
         ))
-        .content(gpui_kit::component::separator::Separator::vertical().h_5())
-        .content(
-            ToolbarGroup::new("history-controls")
-                .label("Navigation history")
-                .child(reader_button(
-                    "navigate-back",
-                    "Back",
-                    Some(IconName::ArrowLeft),
-                    Box::new(NavigateBack),
-                    can_back,
-                    false,
-                ))
-                .child(reader_button(
-                    "navigate-forward",
-                    "Forward",
-                    Some(IconName::ArrowRight),
-                    Box::new(NavigateForward),
-                    can_forward,
-                    false,
-                )),
-        )
-        .content(gpui_kit::component::separator::Separator::vertical().h_5())
-        .content(
-            ToolbarGroup::new("page-controls")
-                .label("Page navigation")
-                .child(reader_button(
-                    "previous-page",
-                    "Previous page",
-                    Some(IconName::ArrowUp),
-                    Box::new(PreviousPage),
-                    has_document && reader.page_index() > 0,
-                    false,
-                ))
-                .child(reader_button(
-                    "next-page",
-                    "Next page",
-                    Some(IconName::ArrowDown),
-                    Box::new(NextPage),
-                    reader.page_index() + 1 < reader.page_count().unwrap_or(0),
-                    false,
-                )),
-        )
-        .content(gpui_kit::component::separator::Separator::vertical().h_5())
-        .content(
-            reader_button(
-                "reading-mode",
-                match (reader.reading_mode(), reader.mode_override()) {
-                    (ReadingMode::SinglePage, Some(_)) => {
-                        "Single page for this PDF · switch to continuous"
-                    }
-                    (ReadingMode::SinglePage, None) => {
-                        "Single page (default) · switch to continuous"
-                    }
-                    (ReadingMode::Continuous, Some(_)) => {
-                        "Continuous for this PDF · switch to single page"
-                    }
-                    (ReadingMode::Continuous, None) => {
-                        "Continuous (default) · switch to single page"
-                    }
-                },
-                Some(IconName::FileText),
-                if reader.reading_mode() == ReadingMode::SinglePage {
-                    Box::new(Continuous)
-                } else {
-                    Box::new(SinglePage)
-                },
-                has_document,
-                reader.reading_mode() == ReadingMode::SinglePage,
-            )
-            .small()
-            .when(show_fit_labels, |button| {
-                button.label(if reader.reading_mode() == ReadingMode::SinglePage {
-                    "Single page"
-                } else {
-                    "Continuous"
-                })
-            }),
-        )
-        .content(gpui_kit::component::separator::Separator::vertical().h_5())
-        .content(
-            ToolbarGroup::new("zoom-controls")
-                .label("Zoom and fit")
-                .child(reader_button(
-                    "zoom-out",
-                    "Zoom out",
-                    Some(IconName::ZoomOut),
-                    Box::new(ZoomOut),
-                    has_document,
-                    false,
-                ))
-                .child(reader_button(
-                    "zoom-in",
-                    "Zoom in",
-                    Some(IconName::ZoomIn),
-                    Box::new(ZoomIn),
-                    has_document,
-                    false,
-                ))
-                .child(
-                    reader_button(
-                        "fit-width",
-                        "Fit width",
-                        Some(IconName::MoveHorizontal),
-                        Box::new(FitWidth),
-                        has_document,
-                        has_document && reader.zoom_mode() == ZoomMode::FitWidth,
-                    )
-                    .when(show_fit_labels, |button| button.label("Fit width")),
-                )
-                .child(
-                    reader_button(
-                        "fit-page",
-                        "Fit page",
-                        Some(IconName::Expand),
-                        Box::new(FitPage),
-                        has_document,
-                        has_document && reader.zoom_mode() == ZoomMode::FitPage,
-                    )
-                    .when(show_fit_labels, |button| button.label("Fit page")),
-                ),
-        )
+        .when(!overflow, |toolbar| {
+            toolbar
+                .content(gpui_kit::component::separator::Separator::vertical().h_5())
+                .content(history)
+        })
+        .content(pages)
+        .when(!overflow, |toolbar| {
+            toolbar
+                .content(gpui_kit::component::separator::Separator::vertical().h_5())
+                .content(mode)
+                .content(gpui_kit::component::separator::Separator::vertical().h_5())
+                .content(zoom_controls)
+        })
         .content(div().flex_1())
-        .content(
-            reader_button(
-                "settings-button",
-                "Settings…",
-                Some(IconName::Settings),
-                Box::new(ShowSettings),
-                true,
-                false,
+        .when(overflow, |toolbar| {
+            toolbar.content(
+                Button::new("reader-overflow")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Ellipsis)
+                    .accessibility_label("More reader controls")
+                    .tooltip("More reader controls")
+                    .dropdown_menu(move |menu, _, _| {
+                        menu.item(
+                            PopupMenuItem::new("Back")
+                                .action(Box::new(NavigateBack))
+                                .disabled(!can_back),
+                        )
+                        .item(
+                            PopupMenuItem::new("Forward")
+                                .action(Box::new(NavigateForward))
+                                .disabled(!can_forward),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Single page")
+                                .action(Box::new(SinglePage))
+                                .checked(single_page)
+                                .disabled(!has_document),
+                        )
+                        .item(
+                            PopupMenuItem::new("Continuous")
+                                .action(Box::new(Continuous))
+                                .checked(!single_page)
+                                .disabled(!has_document),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Zoom in")
+                                .action(Box::new(ZoomIn))
+                                .disabled(!has_document),
+                        )
+                        .item(
+                            PopupMenuItem::new("Zoom out")
+                                .action(Box::new(ZoomOut))
+                                .disabled(!has_document),
+                        )
+                        .item(
+                            PopupMenuItem::new("Fit width")
+                                .action(Box::new(FitWidth))
+                                .checked(zoom == ZoomMode::FitWidth)
+                                .disabled(!has_document),
+                        )
+                        .item(
+                            PopupMenuItem::new("Fit page")
+                                .action(Box::new(FitPage))
+                                .checked(zoom == ZoomMode::FitPage)
+                                .disabled(!has_document),
+                        )
+                    }),
             )
-            .small(),
-        )
+        })
+        .content(reader_button(
+            "settings-button",
+            "Settings…",
+            IconName::Settings,
+            Box::new(ShowSettings),
+            true,
+            false,
+            cx,
+        ))
 }
 
 pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
@@ -230,16 +295,27 @@ pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
 fn reader_button(
     id: &'static str,
     label: &'static str,
-    icon: Option<IconName>,
+    icon: IconName,
     action: Box<dyn gpui_kit::Action>,
     enabled: bool,
     selected: bool,
+    cx: &App,
 ) -> Button {
     Button::new(id)
         .accessibility_label(label)
-        .when_some(icon, |button, icon| button.icon(icon))
-        .when(icon.is_none(), |button| button.label(label))
+        .icon(icon)
         .ghost()
+        // Sized explicitly because Toolbar::child resets custom variants to
+        // ghost. Keep the toolbar's compact geometry without losing selection.
+        .small()
+        .compact()
+        .when(selected, |button| {
+            button.custom(
+                ButtonCustomVariant::new(cx)
+                    .foreground(cx.theme().primary)
+                    .active(cx.theme().selection),
+            )
+        })
         .selected(selected)
         .disabled(!enabled)
         .tooltip(label)

@@ -154,8 +154,8 @@ Check that:
    update leave the installed version usable.
 5. `codesign --verify --deep --strict` succeeds on the installed app.
 
-Kver does not yet restore open PDFs or reading positions after restarting.
-Finish reading or note your position before accepting a relaunch.
+Kver does not restore open windows after restarting. Reopen a PDF from Open
+Recent; if Reopen at Last Position is enabled, it resumes where you left off.
 Before shipping, also check the production HTTPS feed/download URLs and an
 upgrade from the first update-enabled release. A local feed test cannot prove
 GitHub publication or the behavior of another Mac.
@@ -171,7 +171,7 @@ open -n -a "$PWD/target/release/Kver.app"
 
 If using `CARGO_TARGET_DIR`, substitute its release bundle path. Verify that
 the file picker lets you choose `examples/readme-sample.pdf`, the sample renders,
-the Kver icon appears in Finder/Dock, and left/right or `p`/`n` changes pages
+the Kver icon appears in Finder/Dock, and Next/Previous Page changes pages
 and `−`/`+` changes zoom. Choose another PDF with **Open PDF**; invalid and
 unreadable documents should show an error and leave the window usable. For
 path-based opening, pass an **absolute** path:

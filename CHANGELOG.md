@@ -7,49 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-09
+
 ### Added
 
-- Customize keyboard shortcuts in the settings file with context- and platform-specific rebinds, aliases, and multi-key sequences. Valid edits take effect without restarting; invalid edits keep the last working shortcuts.
-- Choose Standard or Vim keyboard shortcuts in Settings, see active shortcuts grouped by task and focus context, and reset the preset to Standard. The command palette shows reader shortcut hints; Vim also opens PDFs with `o`, recent PDFs with Shift-O, and the palette with `:`.
-- Return to earlier locations and move forward again from toolbar buttons, the Navigate menu, or the command palette; unavailable directions are disabled.
-- Return to earlier link, Find, Contents, and local-mark locations with Control-O, and move forward again with Control-I. A new jump after going back replaces the abandoned forward path.
-- Open supported links to another local PDF in a new window at the linked page, leaving the original document in place; missing or invalid targets show an error.
-- Follow same-PDF links by clicking them or focusing a link and pressing Enter; supported links can target a page, position, and zoom. Invalid or unsupported links leave the current place intact.
-- Set, revisit, replace, or delete per-PDF letter marks with reader keys or the command palette. Open a searchable list of saved marks and their page positions with Command-Shift-M, and optionally name marks in that popup. Marks and names survive restarts when reading history is on.
-- Resume each PDF where you stopped, with a separate Reopen at Last Position setting. Turning off history recording keeps new places for this session only.
-- Show or hide the toolbar and statusbar in Application → UI Elements settings; both are shown by default.
-- Choose whether Kver remembers reading history; while off, new opens stay available during the session without being saved. Clear all saved reading data from Settings with confirmation, or forget one PDF from Open Recent without deleting PDF files.
-- Find previously opened PDFs with Open Recent from the command palette, File menu, or Command-Shift-O; search older entries.
-- Read one PDF page at a time in Single Page mode; scroll within that page without turning it, and switch modes or turn pages with reader controls, shortcuts, menus, or the command palette.
-- Open Settings from the reader, command palette, or macOS Kver menu; choose System, Light, or Dark appearance and keep that choice after restarting.
-- Close the active window with Command-W or the Window menu on macOS.
-- Choose whether closing the last window quits Kver; on macOS, leave it running to reopen from the Dock, create a new window, or open a PDF from Finder.
-- Choose whether newly opened PDFs start at 100%, Fit Width, or Fit Page in Settings without changing PDFs already open.
-- Choose Continuous or Single Page as the reading view for newly opened PDFs. Set a different mode for one PDF, or use the default again; the PDF choice survives reopening when reading history is on.
-- Save a preference for reopening windows on startup for a future release; window restoration is not implemented yet.
+- Choose Standard or Vim keyboard shortcuts in Settings, browse active shortcuts by task, and see reader shortcuts in the command palette. Customize bindings and aliases in the settings file; valid edits apply live, while invalid edits leave the last working map active. Unbinding is not yet supported.
+- Follow links within a PDF by clicking or focusing them and pressing Enter. Supported links to another local PDF open that document in a new window; unavailable targets leave the current reader intact.
+- Jump back and forward through link, Find, Contents, and local-mark destinations with Control-O/Control-I, toolbar buttons, the Navigate menu, or the command palette.
+- Open Settings from the reader, palette, or app menu; choose a persistent System, Light, or Dark appearance and a default opening zoom of 100%, Fit Width, or Fit Page.
+- Choose Continuous or Single Page as the opening reading view, with an optional per-PDF override. Single Page scrolls within the page without turning it; page turns remain explicit.
+- Search all stored PDFs in Open Recent; optionally resume at the last reading position. Turn off history recording to keep new per-PDF activity session-only, forget one PDF, or clear all saved reading data without deleting the files.
+- Save per-PDF letter marks, optionally name them, and revisit them with reader keys, the command palette, or a searchable popup (Command-Shift-M). Marks persist across restarts while history recording is on.
+- Show or hide the toolbar and status bar in Settings. On macOS, choose whether closing the last window quits Kver or leaves it available from the Dock, menu, and Finder.
 
 ### Changed
 
-- Center the filename in the reader title bar without the K / branding, with truncation that keeps window controls and Open PDF clear.
-- Simplify Settings section hierarchy, soften selected Find results, and give Local marks a unified popup surface with an explicit delete icon.
-- Use sentence-case page counts and tabular numerals in the status bar for calmer, stable reading progress.
-- Use a compact segmented selector for Contents and Find, with a selected surface instead of a bright underline.
-- Keep reader controls reachable beside a resized sidebar: collapse toolbar labels, use an overflow menu in narrow panes, and show selected controls with a quieter accent.
-- Give the Contents sidebar a quieter empty state with a clear heading and inset explanatory text.
-- Use Catppuccin Mocha in dark mode and Latte in light mode, with mauve accents and coordinated application surfaces. PDF page colors are unchanged.
-- In Vim mode, scroll sideways with H/L or Left/Right, move half a screen with Space/Shift-Space, go to the document's start/end with `gg`/G, and open Find with `/`. N/P still turn pages, and native application shortcuts remain available.
-- Use conventional Standard reader shortcuts for scrolling, pages, zoom, and
-  window switching. Vim-style letters and mark sequences are no longer
-  Standard shortcuts; marks remain available through the dialog and palette.
-- Split Settings into Application, Reader, and Persistence pages with working sidebar navigation and matching config sections. Existing config files remain readable.
-- Rename the appearance config key to `[application].appearance`; existing `theme_mode` values remain readable and migrate on save.
-- Apply valid edits to the settings file while Kver is open; keep the last working appearance and show an error during incomplete or invalid edits without overwriting the file.
-- Show Contents before Find in the sidebar and open Contents by default the first time the sidebar is shown.
+- Standard now uses conventional desktop navigation; Vim-style letters and mark sequences belong to the Vim preset. Vim adds sideways and half-screen scrolling, `gg`/G for document bounds, `/` for Find, and `o`/Shift-O for opening PDFs.
+- Settings are organized into Application, Reader, Persistence, and Keyboard pages. Valid hand edits apply while Kver runs; incomplete or invalid edits do not overwrite the file or replace working settings.
+- Reader chrome uses Catppuccin Mocha/Latte, a centered filename, quieter Find/Contents controls, and compact toolbar controls when space is tight. PDF page colors are unchanged.
 
 ### Fixed
 
-- Keep marks search focused after deleting a row, prevent popup clicks from reaching the PDF, and dismiss the marks list when clicking outside it.
-- Keep opening a PDF when its window moves between displays with different pixel densities during loading.
+- Keep marks search focused when deleting an entry and prevent popup clicks from reaching the PDF.
+- Continue opening a PDF when its window moves between displays with different pixel densities during loading.
 
 ## [0.3.1] - 2026-11-06
 

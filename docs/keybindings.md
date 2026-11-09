@@ -74,6 +74,13 @@ On macOS, Kver rejects a rebind if it would make a reader-only typing key
 changing `cmd-alt-right` away from Next Page while `right` remains its first
 reader key is unsafe. Rebind `right` too, or keep the modified shortcut.
 
+The operating system gets first chance to handle some key combinations.
+For example, macOS uses Command-Tab to switch apps and Command-Space for
+Spotlight by default. A TOML entry cannot make Kver take those system
+shortcuts over; choose keys the OS delivers to Kver. Native input and menu
+behavior on Linux and Windows still belongs to their separate delivery
+checks, not to the macOS or headless test results.
+
 ## Command names
 
 Use the exact `command` value, not a menu label. These names are recognized

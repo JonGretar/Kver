@@ -177,7 +177,13 @@ fn reader_command(
     cx: &App,
 ) -> CommandItem {
     let preset = keymap::active_preset(cx);
-    let map = keymap::resolve(keymap::platform(cx), preset).expect("embedded keyboard policy");
+    let fallback;
+    let map = if let Some(map) = keymap::active_map(cx) {
+        map
+    } else {
+        fallback = keymap::resolve(keymap::platform(cx), preset).expect("embedded keyboard policy");
+        &fallback
+    };
     let shortcut = map
         .shortcuts(&action, KeyContext::Reader)
         .last()

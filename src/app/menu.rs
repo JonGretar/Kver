@@ -23,6 +23,32 @@ use crate::settings_ui::ShowSettings;
 
 pub use super::commands::{AboutKver, CheckForUpdates, Quit};
 
+/// Commands displayed in the native menu. The keymap checks that overriding
+/// a modified accelerator cannot promote a reader-only bare key into it.
+pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
+    "about-kver",
+    "check-for-updates",
+    "show-settings",
+    "quit",
+    "new-window",
+    "open-pdf",
+    "show-recent",
+    "copy",
+    "show-find",
+    "navigate-back",
+    "navigate-forward",
+    "close-window",
+    "next-window",
+    "previous-window",
+    "show-contents",
+    "toggle-sidebar",
+    "single-page",
+    "continuous",
+    "use-default-reading-mode",
+    "next-page",
+    "previous-page",
+];
+
 #[cfg(target_os = "macos")]
 struct MenuState {
     updates_available: bool,
@@ -261,5 +287,36 @@ mod tests {
         cx.simulate_keystrokes(reader.into(), "cmd-w");
         cx.run_until_parked();
         assert!(cx.update(|cx| cx.windows().is_empty()));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[gpui_kit::test]
+    fn keymap_refresh_preserves_navigation_menu_availability(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::app::keymap::install(cx);
+            install(cx);
+            refresh_navigation(cx, true, false);
+            crate::app::keymap::reload(
+                cx,
+                Some("[[keyboard.bindings]]\nkeys = \"ctrl-e\"\ncontext = \"reader\"\ncommand = \"navigate-back\"\n".into()),
+                crate::app::keymap::Preset::Standard,
+            )
+            .unwrap();
+            let state = cx.global::<MenuState>();
+            assert!(state.can_back.get());
+            assert!(!state.can_forward.get());
+            let binding = cx
+                .key_bindings()
+                .borrow()
+                .bindings_for_action(&NavigateBack)
+                .last()
+                .unwrap()
+                .clone();
+            assert_eq!(
+                binding.match_keystrokes(&[Keystroke::parse("ctrl-e").unwrap()]),
+                Some(false)
+            );
+        });
     }
 }

@@ -128,7 +128,9 @@ impl SettingsState {
         }
         self.revision += 1;
         if self.paths.is_none() {
-            self.apply_settings(updated, cx);
+            if let Err(error) = self.apply_settings(updated, cx) {
+                self.error = Some(error);
+            }
             self.error = Some(
                 "Settings cannot be saved: no user configuration directory is available.".into(),
             );
@@ -160,7 +162,11 @@ impl SettingsState {
             .detach();
         }
         if self.paths.is_none() {
-            self.apply_settings(self.settings.with_remember_reading_history(remember), cx);
+            if let Err(error) =
+                self.apply_settings(self.settings.with_remember_reading_history(remember), cx)
+            {
+                self.error = Some(error);
+            }
             self.error = Some(
                 "Settings cannot be saved: no user configuration directory is available.".into(),
             );
@@ -171,9 +177,13 @@ impl SettingsState {
         cx.notify();
     }
 
-    fn apply_settings(&mut self, updated: AppSettings, cx: &mut Context<Self>) {
+    fn apply_settings(
+        &mut self,
+        updated: AppSettings,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
         if self.settings.keyboard_preset() != updated.keyboard_preset() {
-            crate::app::keymap::select_preset(cx, updated.keyboard_preset());
+            crate::app::keymap::select_preset(cx, updated.keyboard_preset())?;
         }
         if self.settings.appearance() != updated.appearance() {
             updated.appearance().apply(cx);
@@ -195,6 +205,7 @@ impl SettingsState {
         }
         self.settings = updated;
         cx.notify();
+        Ok(())
     }
 
     fn start_save(&mut self, cx: &mut Context<Self>) {
@@ -226,8 +237,7 @@ impl SettingsState {
                 } else {
                     match result {
                         Ok(updated) => {
-                            this.apply_settings(updated, cx);
-                            this.error = None;
+                            this.error = this.apply_settings(updated, cx).err();
                         }
                         Err(error) => {
                             if let Some(history) = recent::history(cx) {
@@ -261,8 +271,11 @@ impl SettingsState {
         }
         match result {
             Ok(updated) => {
-                if self.settings != updated {
-                    self.apply_settings(updated, cx);
+                if self.settings != updated
+                    && let Err(error) = self.apply_settings(updated, cx)
+                {
+                    self.error = Some(error);
+                    return;
                 }
                 if self.error.take().is_some() {
                     cx.notify();
@@ -1095,7 +1108,13 @@ fn preference_row(
 fn shortcut_help(cx: &App, preset: Preset) -> impl IntoElement {
     use keymap::Context as KeyContext;
     let platform = keymap::platform(cx);
-    let map = keymap::resolve(platform, preset).expect("embedded keyboard policy");
+    let fallback;
+    let map = if let Some(map) = keymap::active_map(cx) {
+        map
+    } else {
+        fallback = keymap::resolve(platform, preset).expect("embedded keyboard policy");
+        &fallback
+    };
     let platform_name = match platform {
         keymap::Platform::Mac => "macOS",
         keymap::Platform::Linux => "Linux",
@@ -1447,6 +1466,115 @@ mod tests {
             settings::load(&config).unwrap().keyboard_preset(),
             Preset::Standard
         );
+    }
+
+    #[gpui_kit::test]
+    fn keyboard_help_and_preset_follow_live_user_bindings(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[keyboard]\npreset = 'vim'\n[[keyboard.bindings]]\nkeys = 'ctrl-e'\ncontext = 'reader'\ncommand = 'next-page'\n",
+        )
+        .unwrap();
+        let paths = AppPaths::for_locations(config, root.path().join("data"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keymap::install_with_paths(cx, Preset::Standard, Some(paths.clone()));
+            install_with_paths(cx, Some(paths));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            assert_eq!(keymap::active_preset(cx), Preset::Vim);
+            assert_eq!(
+                keymap::active_map(cx)
+                    .unwrap()
+                    .action("ctrl-e", keymap::Context::Reader),
+                Some("kver::NextPage")
+            );
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                for _ in 0..12 {
+                    if frame.try_find("shortcut-Reader-NextPage").is_some() {
+                        break;
+                    }
+                    frame.press("down", cx);
+                }
+                assert!(
+                    frame
+                        .find("shortcut-Reader-NextPage")
+                        .label()
+                        .unwrap()
+                        .contains(&shortcut_label::format("ctrl-e", cx))
+                );
+            })
+            .unwrap();
+        });
+        cx.update(|cx| {
+            state(cx).update(cx, |settings, cx| {
+                settings.choose(SettingsChange::KeyboardPreset(Preset::Standard), cx);
+            });
+        });
+        cx.run_until_parked();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(keymap::active_preset(cx), Preset::Standard);
+            assert_eq!(
+                keymap::active_map(cx)
+                    .unwrap()
+                    .action("ctrl-e", keymap::Context::Reader),
+                Some("kver::NextPage")
+            );
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert!(
+                    frame
+                        .find("shortcut-Reader-NextPage")
+                        .label()
+                        .unwrap()
+                        .contains(&shortcut_label::format("ctrl-e", cx))
+                );
+            })
+            .unwrap();
+        });
+    }
+
+    #[gpui_kit::test]
+    fn invalid_preset_and_override_combination_keeps_last_valid_keymap(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[keyboard]\npreset = 'standard'\n[[keyboard.bindings]]\nkeys = 'g'\ncontext = 'reader'\ncommand = 'next-page'\n",
+        )
+        .unwrap();
+        let paths = AppPaths::for_locations(config.clone(), root.path().join("data"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            keymap::install_with_paths(cx, Preset::Standard, Some(paths.clone()));
+            install_with_paths(cx, Some(paths));
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            state(cx).update(cx, |settings, cx| {
+                settings.choose(SettingsChange::KeyboardPreset(Preset::Vim), cx);
+            });
+        });
+        cx.run_until_parked();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(keymap::active_preset(cx), Preset::Standard);
+            assert_eq!(state(cx).read(cx).keyboard_preset(), Preset::Standard);
+            assert!(state(cx).read(cx).error().unwrap().contains("ambiguous"));
+        });
+        std::fs::write(&config, "[keyboard]\npreset = 'vim'\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(state(cx).read(cx).keyboard_preset(), Preset::Vim);
+            assert_eq!(keymap::active_preset(cx), Preset::Vim);
+        });
     }
 
     #[gpui_kit::test]

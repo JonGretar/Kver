@@ -5,7 +5,9 @@ use crate::{app::keymap::install as bind_reader_keys, reader::ZoomMode};
 #[gpui_kit::test]
 fn vim_palette_and_find_keys_stay_in_the_reader_context(cx: &mut TestAppContext) {
     setup(cx);
-    cx.update(|cx| crate::app::keymap::select_preset(cx, crate::app::keymap::Preset::Vim));
+    cx.update(|cx| {
+        crate::app::keymap::select_preset(cx, crate::app::keymap::Preset::Vim).unwrap();
+    });
     let (window, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {

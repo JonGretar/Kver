@@ -53,7 +53,7 @@ pub fn run(path: Option<PathBuf>) {
 fn initialize(cx: &mut App, paths: Option<AppPaths>) {
     gpui_kit::init(cx);
     gpui_kit::component::theme::Theme::sync_system_appearance(None, cx);
-    keymap::install(cx);
+    keymap::install_with_paths(cx, keymap::Preset::default(), paths.clone());
     windows::install(cx);
     settings_ui::install_with_paths(cx, paths.clone());
     reading_history::install(cx, paths);

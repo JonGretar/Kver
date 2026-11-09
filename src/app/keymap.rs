@@ -2,15 +2,20 @@
 //!
 //! Install after GPUI Kit initialization and before building native menus.
 //! Views still own focused contexts and action handlers; GPUI owns dispatch
-//! and pending multi-keystroke sequences. User file loading is not implemented.
+//! and pending multi-keystroke sequences.
 
+use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::{
-    Action, App, Global, KeyBinding, KeyBindingContextPredicate, Keystroke, OperatingSystem,
+    Action, App, AppContext as _, Global, KeyBinding, KeyBindingContextPredicate, Keystroke,
+    OperatingSystem,
 };
-use std::{collections::HashSet, rc::Rc};
+use std::{collections::HashSet, fs, path::PathBuf, rc::Rc, time::Duration};
+
+mod config;
+pub use config::resolve_config;
 
 use super::{
-    commands::Quit,
+    commands::{AboutKver, CheckForUpdates, Quit},
     document_window::command_palette::ShowCommandPalette,
     document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar},
     document_window::{NavigateBack, NavigateForward, OpenPdf},
@@ -23,10 +28,11 @@ use crate::{
         ActivateOutline, Continuous, Copy, DeleteLocalMark, FitPage, FitWidth, GoToDocumentEnd,
         GoToDocumentStart, JumpLocalMark, NextMatch, NextPage, PreviousMatch, PreviousPage,
         ScrollDown, ScrollHalfScreenDown, ScrollHalfScreenUp, ScrollLeft, ScrollRight,
-        ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowMarks, SinglePage, ZoomIn,
-        ZoomOut,
+        ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowDeleteMark, ShowJumpMark,
+        ShowMarks, ShowSetMark, SinglePage, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::ShowRecent,
+    settings::AppPaths,
     settings_ui::{CloseSettings, ShowSettings},
 };
 
@@ -177,6 +183,10 @@ impl Entry {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Diagnostic {
     InvalidSequence(String),
+    UnmatchedUnbind {
+        keys: String,
+        context: Context,
+    },
     DuplicateSlot {
         keys: String,
         context: Context,
@@ -186,6 +196,33 @@ pub enum Diagnostic {
         second: String,
         context: Context,
     },
+}
+
+impl std::fmt::Display for Diagnostic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSequence(keys) => write!(
+                formatter,
+                "invalid keys {keys:?}; check the key spelling and modifiers"
+            ),
+            Self::UnmatchedUnbind { keys, context } => write!(
+                formatter,
+                "unbind {keys:?} in {context:?} has no inherited binding; remove this unbind or choose a bound key"
+            ),
+            Self::DuplicateSlot { keys, context } => write!(
+                formatter,
+                "conflicting entries for {keys:?} in {context:?}; keep one binding per key and context"
+            ),
+            Self::PrefixConflict {
+                first,
+                second,
+                context,
+            } => write!(
+                formatter,
+                "ambiguous sequences {first:?} and {second:?} in {context:?}; change or unbind one prefix"
+            ),
+        }
+    }
 }
 
 struct Slot {
@@ -199,8 +236,14 @@ pub struct ResolvedKeymap {
 }
 
 struct InstalledKeymap {
-    baseline: Vec<KeyBinding>,
+    product_start: usize,
+    product_len: usize,
+    content: Option<String>,
     preset: Preset,
+    platform: Platform,
+    path: Option<PathBuf>,
+    reported_error: Option<String>,
+    resolved: ResolvedKeymap,
 }
 impl Global for InstalledKeymap {}
 
@@ -217,20 +260,21 @@ pub fn platform(cx: &App) -> Platform {
     }
 }
 
-/// Rebuild from Kit's original bindings rather than accumulating stale
-/// shortcuts from previously selected presets.
-pub fn select_preset(cx: &mut App, preset: Preset) {
-    let Some(installed) = cx.try_global::<InstalledKeymap>() else {
-        return;
+/// Rebuild the complete map rather than accumulating keys from prior presets.
+pub fn select_preset(cx: &mut App, preset: Preset) -> Result<bool, String> {
+    let Some(state) = cx.try_global::<InstalledKeymap>() else {
+        return Ok(false);
     };
-    if installed.preset == preset {
-        return;
-    }
-    let baseline = installed.baseline.clone();
-    cx.clear_key_bindings();
-    cx.bind_keys(baseline);
-    install_preset(cx, preset);
-    super::menu::refresh_shortcuts(cx);
+    let content = match &state.path {
+        Some(path) => read_config(path)?,
+        None => state.content.clone(),
+    };
+    reload(cx, content, preset)
+}
+
+pub fn active_map(cx: &App) -> Option<&ResolvedKeymap> {
+    cx.try_global::<InstalledKeymap>()
+        .map(|state| &state.resolved)
 }
 
 impl ResolvedKeymap {
@@ -319,7 +363,36 @@ fn parse(keys: &str, os: OperatingSystem) -> Result<Vec<Keystroke>, Diagnostic> 
     }
     keys.split_whitespace()
         .map(|key| {
-            Keystroke::parse_with_os(key, os).map_err(|_| Diagnostic::InvalidSequence(keys.into()))
+            let stroke = Keystroke::parse_with_os(key, os)
+                .map_err(|_| Diagnostic::InvalidSequence(keys.into()))?;
+            let name = stroke.key.as_str();
+            let known = (name.len() == 1 && name.is_ascii())
+                || matches!(
+                    name,
+                    "space"
+                        | "enter"
+                        | "escape"
+                        | "tab"
+                        | "backspace"
+                        | "delete"
+                        | "up"
+                        | "down"
+                        | "left"
+                        | "right"
+                        | "pageup"
+                        | "pagedown"
+                        | "home"
+                        | "end"
+                        | "insert"
+                )
+                || name
+                    .strip_prefix('f')
+                    .and_then(|number| number.parse::<u8>().ok())
+                    .is_some_and(|number| (1..=24).contains(&number));
+            if !known || stroke.key_char.is_some() {
+                return Err(Diagnostic::InvalidSequence(keys.into()));
+            }
+            Ok(stroke)
         })
         .collect()
 }
@@ -342,13 +415,26 @@ fn apply_layer(
                 context: entry.context,
             });
         }
+        if entry.action.is_none()
+            && !slots.iter().any(|slot| {
+                slot.sequence == sequence
+                    && entry.context.inherits_from(slot.entry.context)
+                    && slot.entry.action.is_some()
+            })
+        {
+            return Err(Diagnostic::UnmatchedUnbind {
+                keys: entry.keys,
+                context: entry.context,
+            });
+        }
         if let Some(index) = slots
             .iter()
             .position(|slot| slot.sequence == sequence && slot.entry.context == entry.context)
         {
-            slots.remove(index);
+            slots[index] = Slot { entry, sequence };
+        } else {
+            slots.push(Slot { entry, sequence });
         }
-        slots.push(Slot { entry, sequence });
     }
     Ok(())
 }
@@ -402,9 +488,9 @@ pub fn resolve(platform: Platform, preset: Preset) -> Result<ResolvedKeymap, Dia
     resolve_with(platform, preset, [])
 }
 
-/// Layers are common, platform, preset, then future user overrides. Replacing a
-/// slot moves it to the later layer's position; no GPUI binding is ever shadowed
-/// by a stale binding from an earlier layer.
+/// Layers are common, platform, preset, then user overrides. Replacing a
+/// slot retains its display order, so a modified menu shortcut is not displaced
+/// by a bare reader alias. No stale earlier-layer binding reaches GPUI.
 pub fn resolve_with(
     platform: Platform,
     preset: Preset,
@@ -421,23 +507,137 @@ pub fn resolve_with(
 
 /// Register the effective defaults once, before native menus snapshot keys.
 pub fn install(cx: &mut App) {
-    let baseline = cx.key_bindings().borrow().bindings().cloned().collect();
-    cx.set_global(InstalledKeymap {
-        baseline,
-        preset: Preset::default(),
-    });
-    install_preset(cx, Preset::default());
+    install_with_paths(cx, Preset::default(), None);
 }
 
-/// Install a selected preset before building native menus. For an already
-/// initialized app, use `select_preset` to replace rather than append bindings.
+/// Install a selected preset before building native menus.
 pub fn install_preset(cx: &mut App, preset: Preset) {
-    let map = resolve(platform(cx), preset).expect("embedded keyboard defaults are valid");
-    cx.bind_keys(map.bindings(cx));
-    if cx.has_global::<InstalledKeymap>() {
-        let installed = cx.global_mut::<InstalledKeymap>();
-        installed.preset = preset;
+    install_with_paths(cx, preset, None);
+}
+
+/// A failed edit never reaches GPUI. Polling catches atomic editor replacements
+/// as well as in-place writes; equality avoids rebuilding menus on every tick.
+pub fn install_with_paths(cx: &mut App, preset: Preset, paths: Option<AppPaths>) {
+    let platform = match cx.platform_info().os {
+        OperatingSystem::Mac => Platform::Mac,
+        OperatingSystem::Windows => Platform::Windows,
+        _ => Platform::Linux,
+    };
+    let product_start = cx.key_bindings().borrow().bindings().len();
+    let path = paths.map(|paths| paths.config().to_path_buf());
+    let content = path.as_ref().and_then(|path| fs::read_to_string(path).ok());
+    let result = content
+        .as_deref()
+        .map(|content| resolve_config(content, platform, preset))
+        .unwrap_or_else(|| resolve(platform, preset).map_err(|error| error.to_string()));
+    let valid = result.is_ok();
+    let map = result.unwrap_or_else(|error| {
+        eprintln!("Keyboard settings not applied: {error}");
+        resolve(platform, preset).expect("embedded keyboard defaults are valid")
+    });
+    let bindings = map.bindings(cx);
+    let product_len = bindings.len();
+    cx.bind_keys(bindings);
+    cx.set_global(InstalledKeymap {
+        product_start,
+        product_len,
+        content: if valid { content } else { None },
+        preset,
+        platform,
+        path: path.clone(),
+        reported_error: None,
+        resolved: map,
+    });
+    if let Some(path) = path {
+        cx.spawn(async move |cx| {
+            loop {
+                let file = path.clone();
+                let result = cx.background_spawn(async move { read_config(&file) }).await;
+                cx.update(|cx| {
+                    if let Err(error) = reload_result(cx, result) {
+                        report_error(cx, error);
+                    }
+                });
+                cx.background_executor()
+                    .timer(Duration::from_millis(350))
+                    .await;
+            }
+        })
+        .detach();
     }
+}
+
+fn read_config(path: &PathBuf) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Cannot read keyboard settings at {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+/// Also used when Settings changes the preset, after its updated file is saved.
+pub fn reload(cx: &mut App, content: Option<String>, preset: Preset) -> Result<bool, String> {
+    let state = cx.global::<InstalledKeymap>();
+    if state.content == content && state.preset == preset {
+        return Ok(false);
+    }
+    let platform = state.platform;
+    let map = match &content {
+        Some(text) => resolve_config(text, platform, preset)?,
+        None => resolve(platform, preset).map_err(|error| error.to_string())?,
+    };
+    let old_range = state.product_start..state.product_start + state.product_len;
+    let retained = cx
+        .key_bindings()
+        .borrow()
+        .bindings()
+        .enumerate()
+        .filter(|(index, _)| !old_range.contains(index))
+        .map(|(_, binding)| binding.clone())
+        .collect::<Vec<_>>();
+    let product_start = retained.len();
+    let bindings = map.bindings(cx);
+    let product_len = bindings.len();
+    cx.clear_key_bindings();
+    cx.bind_keys(retained);
+    cx.bind_keys(bindings);
+    let state = cx.global_mut::<InstalledKeymap>();
+    state.product_start = product_start;
+    state.product_len = product_len;
+    state.content = content;
+    state.preset = preset;
+    state.reported_error = None;
+    state.resolved = map;
+    super::menu::refresh_shortcuts(cx);
+    Ok(true)
+}
+
+fn report_error(cx: &mut App, error: String) {
+    let state = cx.global_mut::<InstalledKeymap>();
+    if state.reported_error.as_ref() == Some(&error) {
+        return;
+    }
+    state.reported_error = Some(error.clone());
+    eprintln!("Keyboard settings not applied: {error}");
+    if let Some(handle) = cx.active_window() {
+        let _ = cx.update_window(handle, |_, window, cx| {
+            window.push_notification(
+                Notification::warning(format!(
+                    "Keyboard settings not applied: {error}. Last valid shortcuts remain active."
+                )),
+                cx,
+            );
+        });
+    }
+}
+
+fn reload_result(cx: &mut App, result: Result<Option<String>, String>) -> Result<bool, String> {
+    let content = result?;
+    let preset = cx.global::<InstalledKeymap>().preset;
+    reload(cx, content, preset)
 }
 
 fn common() -> Vec<Entry> {

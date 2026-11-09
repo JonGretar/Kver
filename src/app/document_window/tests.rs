@@ -1,6 +1,7 @@
 use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
+mod chrome;
 mod contents;
 mod find;
 mod jumplist;

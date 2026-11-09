@@ -250,23 +250,20 @@ pub(super) fn reading_toolbar(
 
 pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
     let has_document = reader.page_count().is_some();
+    let status = reader.page_count().map_or_else(
+        || reader.status().to_owned(),
+        |count| format!("Page {} of {count}", reader.page_index() + 1),
+    );
     StatusBar::new()
+        .font_features(gpui_kit::FontFeatures(vec![("tnum".into(), 1)].into()))
         .left(
             div()
                 .id("reader-status")
                 .test_support()
-                .aria_label(if let Some(count) = reader.page_count() {
-                    format!("Page {} of {}", reader.page_index() + 1, count)
-                } else {
-                    reader.status().to_owned()
-                })
-                .min_w(px(0.0))
+                .aria_label(status.clone())
+                .min_w_0()
                 .truncate()
-                .child(if let Some(count) = reader.page_count() {
-                    format!("PAGE {} / {}", reader.page_index() + 1, count)
-                } else {
-                    reader.status().to_owned()
-                }),
+                .child(status),
         )
         .when(
             has_document && !reader.status().starts_with("Page "),
@@ -280,7 +277,7 @@ pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
             },
         )
         .when(has_document, |bar| {
-            bar.right(div().child(format!(
+            let zoom = format!(
                 "{}%{}",
                 (reader.scale() * 100.0).round(),
                 match reader.zoom_mode() {
@@ -288,7 +285,14 @@ pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
                     ZoomMode::FitWidth => " · Fit width",
                     ZoomMode::FitPage => " · Fit page",
                 }
-            )))
+            );
+            bar.right(
+                div()
+                    .id("reader-zoom")
+                    .test_support()
+                    .aria_label(zoom.clone())
+                    .child(zoom),
+            )
         })
 }
 

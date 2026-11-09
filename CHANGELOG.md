@@ -30,6 +30,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Use a compact segmented selector for Contents and Find, with a selected surface instead of a bright underline.
 - Keep reader controls reachable beside a resized sidebar: collapse toolbar labels, use an overflow menu in narrow panes, and show selected controls with a quieter accent.
 - Give the Contents sidebar a quieter empty state with a clear heading and inset explanatory text.
 - Use Catppuccin Mocha in dark mode and Latte in light mode, with mauve accents and coordinated application surfaces. PDF page colors are unchanged.

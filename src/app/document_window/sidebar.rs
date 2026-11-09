@@ -6,10 +6,10 @@ use gpui_kit::{
 use gpui_kit::{
     base::{InteractiveElementExt as _, TestSupportExt as _},
     component::{
-        ActiveTheme,
+        ActiveTheme, Selectable as _, Sizable as _,
+        button::{Button, ButtonCustomVariant, ButtonGroup, ButtonVariants as _},
         resizable::{HandleEdge, resize_handle},
         scroll::ScrollableElement as _,
-        tab::{Tab, TabBar},
     },
 };
 
@@ -174,25 +174,39 @@ impl Render for ReaderSidebar {
             .text_color(cx.theme().sidebar_foreground)
             .child(panel)
             .child(
-                div().border_t_1().border_color(cx.theme().border).child(
-                    TabBar::new("sidebar-panels")
-                        .w_full()
-                        .underline()
-                        .selected_index(match active {
-                            SidebarPanel::Contents => 0,
-                            SidebarPanel::Find => 1,
-                        })
-                        .last_empty_space(div().w_0())
-                        .child(Tab::new().label("Contents").flex_1())
-                        .child(Tab::new().label("Find").flex_1())
-                        .on_click(|ix, window, cx| {
-                            let action: Box<dyn gpui_kit::Action> = match ix {
-                                0 => Box::new(ShowContents),
-                                _ => Box::new(ShowFind),
-                            };
-                            window.dispatch_action(action, cx);
-                        }),
-                ),
+                div()
+                    .p_2()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        ButtonGroup::new("sidebar-panels")
+                            .w_full()
+                            .small()
+                            .custom(
+                                ButtonCustomVariant::new(cx)
+                                    .color(cx.theme().sidebar)
+                                    .hover(cx.theme().accent)
+                                    .active(cx.theme().selection),
+                            )
+                            .child(
+                                Button::new("sidebar-contents")
+                                    .label("Contents")
+                                    .flex_1()
+                                    .selected(active == SidebarPanel::Contents)
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(ShowContents), cx);
+                                    }),
+                            )
+                            .child(
+                                Button::new("sidebar-find")
+                                    .label("Find")
+                                    .flex_1()
+                                    .selected(active == SidebarPanel::Find)
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(ShowFind), cx);
+                                    }),
+                            ),
+                    ),
             )
             .child(
                 resize_handle("sidebar-resize-handle", Axis::Horizontal)

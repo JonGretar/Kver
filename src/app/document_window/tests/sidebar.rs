@@ -200,3 +200,55 @@ fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
     cx.run_until_parked();
     assert_eq!(cx.update(|cx| cx.windows().len()), 2);
 }
+
+#[gpui_kit::test]
+fn sidebar_tabs_preserve_pointer_keyboard_and_panel_focus(cx: &mut TestAppContext) {
+    setup(cx);
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("cmd-t", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let contents = window.find("sidebar-contents");
+        let find = window.find("sidebar-find");
+        assert_eq!(contents.bounds().size.width, find.bounds().size.width);
+        assert!(contents.bounds().right() <= find.bounds().left());
+        let target = find.bounds().center();
+        window.pointer_down(target, gpui_kit::MouseButton::Left, cx);
+        window.pointer_up(target, gpui_kit::MouseButton::Left, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        window.input("page", cx);
+        window.press("cmd-t", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("tab", cx);
+        assert_eq!(window.find("sidebar-contents").focused(), Some(true));
+        window.press("tab", cx);
+        assert_eq!(window.find("sidebar-find").focused(), Some(true));
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        assert_eq!(window.find("find-query").value(), Some("page"));
+    })
+    .unwrap();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.sidebar_panel(cx), Some(SidebarPanel::Find));
+    });
+}

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use gpui_kit::base::{Disableable, TestSupportExt as _};
 use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Selectable, Sizable,
-    button::{Button, ButtonVariants},
+    button::{Button, ButtonCustomVariant, ButtonVariants},
     input::{Input, InputEvent, InputState},
 };
 use gpui_kit::{
@@ -412,6 +412,11 @@ impl Render for FindPanel {
                                 .small()
                                 .compact()
                                 .w_full()
+                                .when(self.active == Some(index), |button| {
+                                    button.custom(
+                                        ButtonCustomVariant::new(cx).active(cx.theme().list_active),
+                                    )
+                                })
                                 .selected(self.active == Some(index))
                                 .accessibility_label(format!("{page_label}: {}", hit.snippet))
                                 .child(

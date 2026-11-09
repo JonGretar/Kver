@@ -670,6 +670,7 @@ impl Render for SettingsView {
                                     .p_4()
                                     .border_b_1()
                                     .border_color(cx.theme().border)
+                                    .text_lg()
                                     .font_medium()
                                     .child(page.label()),
                             )
@@ -718,10 +719,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         div()
-                                            .pb_2()
-                                            .border_b_1()
-                                            .border_color(cx.theme().border)
-                                            .text_sm()
+                                            .text_xs()
+                                            .font_medium()
                                             .text_color(cx.theme().muted_foreground)
                                             .child(if page == SettingsPage::Application { "Theme" } else { "Reading Experience" }),
                                     )
@@ -868,10 +867,9 @@ impl Render for SettingsView {
                             .children((page == SettingsPage::Application).then(||
                                 div()
                                     .mx_4()
-                                    .pb_2()
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
+                                    .pt_2()
+                                    .text_xs()
+                                    .font_medium()
                                     .text_color(cx.theme().muted_foreground)
                                     .child("UI Elements"),
                             ))
@@ -903,10 +901,9 @@ impl Render for SettingsView {
                             .children((page == SettingsPage::Application).then(||
                                 div()
                                     .mx_4()
-                                    .pb_2()
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
+                                    .pt_2()
+                                    .text_xs()
+                                    .font_medium()
                                     .text_color(cx.theme().muted_foreground)
                                     .child("Windows"),
                             ))
@@ -953,10 +950,8 @@ impl Render for SettingsView {
                                 div()
                                     .mx_4()
                                     .mt_4()
-                                    .pb_2()
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
+                                    .text_xs()
+                                    .font_medium()
                                     .text_color(cx.theme().muted_foreground)
                                     .child("Reading History"),
                             ))

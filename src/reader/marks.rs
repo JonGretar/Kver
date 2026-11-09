@@ -7,9 +7,9 @@ use gpui_kit as gpui;
 use gpui_kit::{
     Context, Entity, EventEmitter, FocusHandle, Subscription, Task, Window,
     assets::IconName,
-    base::{Dialog, DialogPopup, Disableable, TestSupportExt as _},
+    base::{Dialog, DialogPopup, Disableable, StyledExt as _, TestSupportExt as _},
     component::{
-        ActiveTheme, Sizable,
+        ActiveTheme, Sizable, ThemeStyled as _,
         button::{Button, ButtonVariants},
         command::{Command, CommandItem, CommandState},
         input::{Input, InputEvent, InputState},
@@ -472,7 +472,7 @@ impl Render for LocalMarks {
                                 )
                                 .child(
                                     Button::new(format!("delete-mark:{letter}"))
-                                        .icon(IconName::Close)
+                                        .icon(IconName::Trash)
                                         .accessibility_label(format!("Delete local mark {letter}"))
                                         .tooltip("Delete mark")
                                         .ghost()
@@ -537,14 +537,16 @@ impl Render for LocalMarks {
                         DialogPopup::new()
                             .w_full()
                             .max_w(gpui::rems(28.))
-                            .bg(cx.theme().popover)
-                            .child(div().px_3().pt_3().pb_2().child(title))
+                            .popover_style(cx)
+                            .child(div().px_3().pt_3().pb_2().font_semibold().child(title))
                             .when(panel.name_input.is_none(), {
                                 let command_owner = owner.clone();
                                 let revision = self.panel_revision;
                                 move |content| {
                                     content.child(
                                         Command::new(&panel.command)
+                                            .bordered(false)
+                                            .bg(gpui::transparent_black())
                                             .placeholder("Search marks…")
                                             .items(entries)
                                             .empty(|_, _, cx| {

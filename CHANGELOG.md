@@ -30,6 +30,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Simplify Settings section hierarchy, soften selected Find results, and give Local marks a unified popup surface with an explicit delete icon.
 - Use sentence-case page counts and tabular numerals in the status bar for calmer, stable reading progress.
 - Use a compact segmented selector for Contents and Find, with a selected surface instead of a bright underline.
 - Keep reader controls reachable beside a resized sidebar: collapse toolbar labels, use an overflow menu in narrow panes, and show selected controls with a quieter accent.

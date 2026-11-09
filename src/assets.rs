@@ -17,7 +17,8 @@ icon_assets!(
         Sun,
         Moon,
         SunMoon,
-        Pencil
+        Pencil,
+        Trash
     ]
 );
 
@@ -65,6 +66,7 @@ mod tests {
             "icons/sun-moon.svg",
             "icons/arrow-down.svg",
             "icons/pencil.svg",
+            "icons/trash.svg",
         ] {
             assert!(ReaderAssets.load(path).unwrap().is_some(), "{path}");
             assert!(ReaderAssets.list("icons/").unwrap().contains(&path.into()));

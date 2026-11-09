@@ -71,9 +71,8 @@ shortcut hints.
 
 On macOS, Kver rejects a rebind if it would make a reader-only typing key
 (including a Shift-only key) into a native menu accelerator. For example,
-changing `cmd-alt-right` away from
-Next Page while `right` remains its first reader key is unsafe. Rebind
-`right` too, or keep the modified shortcut.
+changing `cmd-alt-right` away from Next Page while `right` remains its first
+reader key is unsafe. Rebind `right` too, or keep the modified shortcut.
 
 ## Command names
 

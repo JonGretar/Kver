@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Customize keyboard shortcuts in the settings file with context- and platform-specific rebinds, aliases, and multi-key sequences. Valid edits take effect without restarting; invalid edits keep the last working shortcuts.
 - Choose Standard or Vim keyboard shortcuts in Settings, see active shortcuts grouped by task and focus context, and reset the preset to Standard. The command palette shows reader shortcut hints; Vim also opens PDFs with `o`, recent PDFs with Shift-O, and the palette with `:`.
 - Return to earlier locations and move forward again from toolbar buttons, the Navigate menu, or the command palette; unavailable directions are disabled.
 - Return to earlier link, Find, Contents, and local-mark locations with Control-O, and move forward again with Control-I. A new jump after going back replaces the abandoned forward path.

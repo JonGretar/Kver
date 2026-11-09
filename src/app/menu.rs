@@ -128,7 +128,7 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 MenuItem::action("Copy", Copy),
                 MenuItem::action("Find", ShowFind),
             ]),
-                Menu::new("View").items([
+            Menu::new("View").items([
                 MenuItem::action("Toggle Sidebar", ToggleSidebar),
                 MenuItem::separator(),
                 MenuItem::action("Single Page", SinglePage),
@@ -149,7 +149,6 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 MenuItem::action("Next Window", NextWindow),
                 MenuItem::action("Previous Window", PreviousWindow),
             ]),
-            
         ]);
     }
     #[cfg(not(target_os = "macos"))]

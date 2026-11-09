@@ -600,7 +600,7 @@ impl Render for DocumentWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = settings_ui::state(cx);
         let reader = self.reader.read(cx);
-        let title = chrome::title_bar(reader.path(), window, cx);
+        let title = chrome::title_bar(reader.path(), window);
         let marks = reader.marks_overlay();
         let toolbar = settings.read(cx).show_toolbar().then(|| {
             let sidebar_rems = self

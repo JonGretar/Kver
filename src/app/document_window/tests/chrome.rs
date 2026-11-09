@@ -27,11 +27,11 @@ fn filename_stays_centered_without_overlapping_titlebar_controls(cx: &mut TestAp
                     window.render_frame(cx);
                     let title = window.find("document-name");
                     let open = window.find("open-pdf");
-                    let brand = window.find("reader-brand");
+                    assert!(window.try_find("reader-brand").is_none());
                     assert_eq!(title.label(), Some(expected.as_str()));
                     assert!((title.bounds().center().x - px(width / 2.)).abs() <= px(0.5));
                     assert!(title.bounds().size.width > px(0.));
-                    assert!(title.bounds().left() > brand.bounds().right());
+                    assert!(title.bounds().left() >= px(0.));
                     assert!(title.bounds().right() < open.bounds().left());
                     assert!(open.visible());
                     assert!(open.bounds().right() <= px(width));

@@ -326,11 +326,7 @@ fn reader_button(
         .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
 }
 
-pub(super) fn title_bar(
-    path: Option<&Path>,
-    window: &Window,
-    cx: &App,
-) -> impl IntoElement + use<> {
+pub(super) fn title_bar(path: Option<&Path>, window: &Window) -> impl IntoElement + use<> {
     let filename = path.map(document_name).map(SharedString::from);
     let title = filename
         .clone()
@@ -351,28 +347,19 @@ pub(super) fn title_bar(
     } else {
         TITLE_BAR_HEIGHT * 3.
     };
-    let inset =
-        (native_inset + rem * 3.).max(window_controls + rem * if compact_open { 3. } else { 8. });
+    let inset = native_inset.max(window_controls + rem * if compact_open { 3. } else { 8. });
     TitleBar::new()
         .relative()
         .pl_0()
         .pr_3()
-        .child(
-            div()
-                .id("reader-brand")
-                .test_support()
-                .ml(native_inset)
-                .text_color(cx.theme().primary)
-                .font_weight(gpui_kit::FontWeight::BOLD)
-                .child("K /"),
-        )
+        .child(div().flex_1())
         .child(
             div()
                 .absolute()
                 .top_0()
                 .left(inset)
                 // Equal clearance at both edges centers on the window, not
-                // the asymmetric space between branding and Open PDF.
+                // the asymmetric space between window controls and Open PDF.
                 .w((width - inset * 2.).max(px(0.)))
                 .h(TITLE_BAR_HEIGHT)
                 .flex()

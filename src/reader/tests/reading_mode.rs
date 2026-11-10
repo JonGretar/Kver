@@ -195,7 +195,7 @@ fn private_mode_is_session_only_then_flushes_on_reenable(cx: &mut TestAppContext
     cx.update(|cx| {
         cx.update_window(settings_window, |_, frame, cx| {
             frame.render_frame(cx);
-            frame.click("reading-history", cx);
+            frame.within("settings-sidebar").click("0-2", cx);
             frame.click("remember-reading-history", cx);
         })
         .unwrap();

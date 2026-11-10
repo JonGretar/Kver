@@ -131,7 +131,7 @@ fn private_single_page_place_and_mark_follow_the_pdf_across_windows_and_restart(
     cx.update(|cx| {
         cx.update_window(settings_window, |_, frame, cx| {
             frame.render_frame(cx);
-            frame.click("reading-history", cx);
+            frame.within("settings-sidebar").click("0-2", cx);
             frame.click("remember-reading-history", cx);
         })
         .unwrap();

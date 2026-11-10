@@ -36,7 +36,7 @@ fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext
     });
     cx.update_window(settings, |_, window, cx| {
         window.render_frame(cx);
-        assert!(window.find("settings-sidebar").visible());
+        assert!(window.find("appearance-choice").visible());
         window.press("escape", cx);
     })
     .unwrap();

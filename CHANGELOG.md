@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Search settings and resize their sidebar in the new GPUI Kit settings layout. Appearance and keyboard preset can still be reset individually; other settings and their saved values are unchanged.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

@@ -99,7 +99,7 @@ fn history_off_is_session_only_across_reader_windows_and_reenable_saves_it(
     let settings_window = cx.update(|cx| *cx.windows().last().unwrap());
     cx.update_window(settings_window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.click("reading-history", cx);
+        frame.within("settings-sidebar").click("0-2", cx);
         frame.click("remember-reading-history", cx);
     })
     .unwrap();

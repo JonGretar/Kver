@@ -241,13 +241,14 @@ The former `[application].theme_mode` key also remains readable and migrates to
 external edits or panel changes; a `SettingsChange` updates one known field in
 the latest valid TOML document. New preferences explicitly join this model
 and the panel, rather than generating controls from arbitrary TOML keys.
-`src/settings_ui.rs` owns the shared app-wide settings state and one Settings
-window. Its navigation tree switches between Application (Theme and Windows),
-Reader (Reading Experience), and Persistence (Reading History). Child nodes select
-their parent page; grouping is visual, not an additional config nesting level.
-The tree owns selection and keyboard navigation, and only the selected page's
-controls are rendered. The panel retains the appearance reset control and the
-confirmed clear-all history action.
+`src/settings_ui.rs` owns the shared app-wide settings state and the single
+Settings window. `src/settings_ui/panel.rs` composes GPUI Kit's `Settings`
+pages, groups, search, and resizable sidebar for Application, Reader,
+Persistence, and Keyboard. Grouping is visual, not additional config nesting.
+Kit owns page selection and renders only matching settings; Kver supplies
+the controlled preference fields and a live shortcut reference. There is no
+page-wide reset: appearance and keyboard preset have individual reset buttons.
+Clearing all reading history still requires confirmation.
 Loading, periodic file checks, and saving TOML run off the UI thread. Valid
 external changes update the shared model, theme, and open Settings controls;
 invalid or partially written edits leave the last valid choice active and

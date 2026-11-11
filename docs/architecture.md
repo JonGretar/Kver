@@ -523,6 +523,21 @@ highlight rectangles. `ReaderView` converts pointer coordinates, executes
 background requests, projects highlights at the current zoom, and writes to
 the clipboard. Zoom does not invalidate selection or page text.
 
+The PDF adapter splits horizontal lines at wide gaps and derives a geometric
+reading order in `src/pdf/text_layout.rs`. Bounded recursive whitespace cuts
+separate full-width bands and recognizable columns within them. Selection
+anchors index that same ordered list of fragments, so a drag across columns
+finishes the first column before continuing at the top of the next; copy and
+highlight ranges cannot choose different orders. Layout analysis runs during
+background extraction, not during pointer movement or rendering.
+
+This is a prose-layout heuristic, not semantic reconstruction. Narrow or
+interrupted gutters, floating sidebars, tables, footnotes, mathematical
+notation, and bidirectional or vertical text can need a different order.
+`examples/reading-order.typ` and its generated PDF provide magazine and
+scientific-article layouts, including explicitly identified stress cases.
+The source includes the deterministic Typst rebuild command.
+
 Selection keeps visible page text plus the selected page so copying still
 works after scrolling away in Continuous mode. One current text request runs
 at a time; after completion, the next request uses the latest viewport.
@@ -533,8 +548,8 @@ Entering Single Page mode clears a selection on another page, and turning
 pages in that mode clears the selection.
 Pure selection and request-lifecycle tests live under
 `src/reader/selection/`; pointer, copy, zoom, and replacement workflows live in
-`src/reader/tests/selection.rs`. More general line grouping, rotated/cropped
-text selection, and scans remain separate follow-ups.
+`src/reader/tests/selection.rs`. Crop/rotation projection remains independent
+of line order; arbitrary rotated text and scans remain separate follow-ups.
 
 ## Future state
 

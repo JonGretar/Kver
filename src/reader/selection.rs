@@ -129,8 +129,7 @@ impl Selection {
         let selected = self
             .span
             .filter(|span| span.page == page)
-            .and_then(|span| self.text.get(&page).map(|text| (span, text)))
-            .filter(|(span, text)| selected_text(*span, text).is_some());
+            .and_then(|span| self.text.get(&page).map(|text| (span, text)));
         selected.into_iter().flat_map(move |(span, text)| {
             selected_ranges(span, text).into_iter().map(move |range| {
                 let glyphs = &text.glyphs[range];

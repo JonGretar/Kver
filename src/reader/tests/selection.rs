@@ -1,6 +1,136 @@
 use super::*;
 use gpui_kit::test::TestEventExt;
 
+#[gpui_kit::test]
+fn dragging_from_column_text_onto_a_link_copies_without_following_it(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let path = PathBuf::from("examples/reading-order.pdf");
+    let text = pdf::page_text(&path, 2).unwrap();
+    let heading = text
+        .lines
+        .iter()
+        .find(|range| {
+            text.glyphs[(*range).clone()]
+                .iter()
+                .map(|glyph| glyph.text.as_str())
+                .collect::<String>()
+                .starts_with("Article right begins.")
+        })
+        .unwrap();
+    let start = text.glyphs[heading.start].start;
+    let (window, reader) = recent_test_window(cx, Some(path));
+    cx.run_until_parked();
+    reader.update(cx, |reader, cx| {
+        reader.set_reading_mode(ReadingMode::SinglePage, cx);
+        reader.select_page(2, cx);
+        reader.fit_page(cx);
+    });
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| frame.render_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+    let start = reader.read_with(cx, |reader, _| {
+        let start = reader.page_viewport(2).unwrap().document_to_screen(start);
+        point(px(start.x as f32), px(start.y as f32))
+    });
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        let end = frame.find("pdf-link-2-0").bounds().center();
+        frame.drag(start, end, cx);
+    })
+    .unwrap();
+    cx.simulate_keystrokes(window, "cmd-c");
+    let copied = cx
+        .update(|cx| cx.read_from_clipboard().and_then(|item| item.text()))
+        .unwrap();
+    assert!(copied.starts_with("Article right begins."), "{copied}");
+    assert!(copied.contains("The procedure is described"), "{copied}");
+    assert!(!copied.contains("Article left"), "{copied}");
+    reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 2));
+    // A subsequent ordinary click must still use the same link.
+    cx.update_window(window, |_, frame, cx| frame.click("pdf-link-2-0", cx))
+        .unwrap();
+    reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 3));
+}
+
+#[gpui_kit::test]
+fn field_guide_cross_column_copy_uses_reading_order_after_zoom_and_scroll(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let path = PathBuf::from("examples/field-guide.pdf");
+    let text = pdf::page_text(&path, 7).unwrap();
+    let heading = |phrase: &str| {
+        let range = text
+            .lines
+            .iter()
+            .find(|range| {
+                text.glyphs[(*range).clone()]
+                    .iter()
+                    .map(|glyph| glyph.text.as_str())
+                    .collect::<String>()
+                    .starts_with(phrase)
+            })
+            .unwrap();
+        text.glyphs[range.start].start
+    };
+    let start = heading("Route and reference points.");
+    let right = heading("Reading across columns.");
+    let (window, reader) = recent_test_window(cx, Some(path));
+    cx.run_until_parked();
+    for mode in [ReadingMode::Continuous, ReadingMode::SinglePage] {
+        reader.update(cx, |reader, cx| {
+            reader.set_reading_mode(mode, cx);
+            reader.select_page(7, cx);
+        });
+        cx.run_until_parked();
+        for zoomed in [false, true] {
+            if zoomed {
+                reader.update(cx, |reader, cx| {
+                    reader.zoom_in(cx);
+                    reader.scroll_by(50.0, cx);
+                });
+                cx.run_until_parked();
+            }
+            cx.update_window(window, |_, frame, cx| frame.render_frame(cx))
+                .unwrap();
+            cx.run_until_parked();
+            let (start, end) = reader.read_with(cx, |reader, _| {
+                let viewport = reader.page_viewport(7).unwrap();
+                let screen = |at| {
+                    let at = viewport.document_to_screen(at);
+                    point(px(at.x as f32), px(at.y as f32))
+                };
+                // Stop at the next column's first boundary. The entire left
+                // column, not just its first physical row, must be copied.
+                (screen(start), screen(right))
+            });
+            for (start, end) in [(start, end), (end, start)] {
+                cx.update_window(window, |_, frame, cx| frame.drag(start, end, cx))
+                    .unwrap();
+                cx.simulate_keystrokes(window, "cmd-c");
+                let copied = cx
+                    .update(|cx| cx.read_from_clipboard().and_then(|item| item.text()))
+                    .unwrap();
+                assert!(
+                    copied.starts_with("Route and reference points."),
+                    "{copied}"
+                );
+                assert!(copied.trim_end().ends_with("without color."), "{copied}");
+                assert!(!copied.contains("Reading across columns."), "{copied}");
+                reader.read_with(cx, |reader, _| {
+                    assert_eq!(reader.page_index(), 7);
+                    assert_eq!(reader.selection.dragging_page(), None);
+                });
+            }
+        }
+    }
+}
+
 fn title_selection_points(
     reader: &ReaderView,
     text: &pdf::PageText,

@@ -116,9 +116,14 @@ promise for the immediately following release.
 - A document-wide Annotations list for supported text markup, with navigation,
   recoloring, and deletion, including supported annotations from other readers.
   Preserve unrelated annotation types and existing metadata when editing.
-- Explicit Save and Save As for annotation edits, with unsaved-state feedback
-  and Save / Discard / Cancel before closing a modified document. Note
-  authoring, area markup, and other annotation types are deferred.
+- Save is the default operation for annotation edits, with unsaved-state
+  feedback and Save / Discard / Cancel before closing a modified document.
+  Save As remains a deliberate File-menu command and suggests a filename ending
+  in `-annotated.pdf`. Keep Save and Save As off the main reader toolbar.
+  Note authoring, area markup, and other annotation types are deferred.
+- Future option: a configurable offer to save annotations to a new location,
+  only when the original PDF had no annotations before the current edits.
+  Do not offer it routinely for already annotated originals.
 - Future Zotero library/annotation integration, with no assigned milestone or
   date. Access to Zotero's annotation database and coordination with PDF-backed
   annotations need a separate spec; no API or direct-database approach is

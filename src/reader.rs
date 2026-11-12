@@ -65,6 +65,7 @@ use gpui_kit::{
             Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
             EmptyTitle,
         },
+        menu::{ContextMenuExt as _, PopupMenuItem},
         spinner::Spinner,
     },
 };
@@ -74,6 +75,7 @@ pub struct ReaderView {
     path: Option<PathBuf>,
     session: Option<Entity<DocumentSession>>,
     session_wait: Option<Subscription>,
+    session_observation: Option<Subscription>,
     document: Option<Arc<pdf::Document>>,
     record_path: Option<PathBuf>,
     position_ready: bool,
@@ -119,6 +121,9 @@ pub(crate) enum DocumentEvent {
         generation: u64,
         path: PathBuf,
         page: usize,
+    },
+    Saved {
+        generation: u64,
     },
 }
 
@@ -181,10 +186,18 @@ struct OpenRestoration {
 
 impl ReaderView {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
+        let participant = cx.entity_id();
+        cx.on_release(move |reader, cx| {
+            if let Some(session) = &reader.session {
+                session.update(cx, |session, _| session.detach(participant));
+            }
+        })
+        .detach();
         let mut reader = Self {
             path,
             session: None,
             session_wait: None,
+            session_observation: None,
             document: None,
             record_path: None,
             position_ready: false,
@@ -224,7 +237,9 @@ impl ReaderView {
     /// Replace the active document immediately, before any asynchronous work completes.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.document_generation += 1;
+        self.detach_session(cx);
         self.session_wait = None;
+        self.session_observation = None;
         self.session = None;
         self.document = None;
         self.marks = None;
@@ -485,7 +500,11 @@ impl ReaderView {
                 match normalized {
                     Ok(path) => {
                         let session = DocumentSession::join(path, cx);
+                        let participant = cx.entity_id();
+                        session.update(cx, |session, _| session.attach(participant));
                         let pending = restoration.clone();
+                        this.session_observation =
+                            Some(cx.observe(&session, |this, _, cx| this.sync_shared_session(cx)));
                         this.session_wait = Some(cx.observe(&session, move |this, source, cx| {
                             if this.document_generation == generation
                                 && this.session.as_ref() == Some(&source)
@@ -552,6 +571,9 @@ impl ReaderView {
                     Ok(pages) if !pages.is_empty() => {
                         opened = true;
                         this.document = document.ok();
+                        if let Some(session) = this.session.clone() {
+                            session.update(cx, |session, cx| session.ensure_annotations(cx));
+                        }
                         if let Ok(Some(mode)) = saved_mode {
                             this.reading_mode = match mode {
                                 ReadingView::Continuous => ReadingMode::Continuous,
@@ -782,6 +804,124 @@ impl ReaderView {
 
     pub(crate) fn session(&self) -> Option<Entity<DocumentSession>> {
         self.session.clone()
+    }
+
+    pub(crate) fn detach_session(&mut self, cx: &mut Context<Self>) {
+        if let Some(session) = self.session.take() {
+            let participant = cx.entity_id();
+            session.update(cx, |session, _| session.detach(participant));
+        }
+        self.session_wait = None;
+        self.session_observation = None;
+    }
+
+    fn sync_shared_session(&mut self, cx: &mut Context<Self>) {
+        let shared = self
+            .session
+            .as_ref()
+            .and_then(|session| session.read(cx).result())
+            .and_then(Result::ok);
+        if let (Some(current), Some(shared)) = (&self.document, shared)
+            && !Arc::ptr_eq(current, &shared)
+        {
+            let path = shared.path().to_path_buf();
+            self.path = Some(path.clone());
+            self.record_path = Some(path);
+            self.document = Some(shared);
+            self.links.reset();
+            self.rasters.invalidate();
+            self.schedule(cx);
+            self.status = if self.is_dirty(cx) {
+                "Newer changes remain unsaved".into()
+            } else {
+                format!("Page {} of {}", self.page_index + 1, self.pages.len())
+            };
+            cx.emit(DocumentEvent::Saved {
+                generation: self.document_generation,
+            });
+        }
+        if !self.is_dirty(cx) && self.status.starts_with("Highlight selected") {
+            self.annotation_identification = None;
+            self.status = format!("Page {} of {}", self.page_index + 1, self.pages.len());
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn is_dirty(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.read(cx).is_dirty())
+    }
+
+    pub(crate) fn is_saving(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.read(cx).is_saving())
+    }
+
+    pub(crate) fn save_available(&self, cx: &App) -> bool {
+        self.is_dirty(cx) && self.save_as_available(cx)
+    }
+
+    pub(crate) fn save_as_available(&self, cx: &App) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            let session = session.read(cx);
+            !session.is_saving()
+                && session.editing_rejection().is_none()
+                && session.annotations().is_some_and(|catalog| catalog.is_ok())
+        })
+    }
+
+    pub(crate) fn annotation_editing_rejection(&self, cx: &App) -> Option<String> {
+        self.session
+            .as_ref()
+            .and_then(|session| session.read(cx).editing_rejection().map(ToOwned::to_owned))
+    }
+
+    pub(crate) fn highlight_available(&self, cx: &App) -> bool {
+        self.selected_text().is_some()
+            && self.session.as_ref().is_some_and(|session| {
+                let session = session.read(cx);
+                session.annotations().is_some_and(|result| result.is_ok())
+                    && session.editing_rejection().is_none()
+            })
+    }
+
+    fn highlight_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(page) = self.selection.page() else {
+            return;
+        };
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+        let quads = self
+            .selection
+            .document_quads()
+            .into_iter()
+            .map(pdf::annotations::Quad::new)
+            .collect::<Option<Vec<_>>>();
+        let Some(quads) = quads else {
+            self.status = "This selection has no usable annotation geometry.".into();
+            cx.notify();
+            return;
+        };
+        match session.update(cx, |session, cx| session.create_highlight(page, quads, cx)) {
+            Ok(id) => {
+                let catalog = session.read(cx).annotations().and_then(Result::ok);
+                if let Some(annotation) = catalog
+                    .as_ref()
+                    .and_then(|catalog| catalog.iter().find(|a| a.id() == id))
+                    && let Some(document) = &self.document
+                {
+                    self.annotation_identification = document
+                        .annotation_bounds(annotation)
+                        .map(|bounds| (page, bounds));
+                }
+                self.status = "Highlight selected".into();
+            }
+            Err(error) => self.status = error,
+        }
+        cx.notify();
     }
     pub(crate) fn record_path(&self) -> Option<&Path> {
         self.record_path.as_deref()
@@ -1341,6 +1481,8 @@ impl Render for ReaderView {
             let page_height = px(page_height * self.scale);
             let image = self.rasters.image(index).cloned();
             let mut page = div()
+                .id(format!("pdf-page-{index}"))
+                .test_support()
                 .relative()
                 .w(page_width)
                 .h(page_height)
@@ -1392,6 +1534,63 @@ impl Render for ReaderView {
                             },
                         ),
                 );
+            }
+            if let Some(session) = &self.session
+                && let Some(transform) = self
+                    .document
+                    .as_ref()
+                    .and_then(|document| document.page_transform(index))
+            {
+                for annotation in session
+                    .read(cx)
+                    .unsaved_annotations()
+                    .filter(|annotation| annotation.page() == index)
+                {
+                    let quads: Vec<_> = annotation
+                        .quads()
+                        .iter()
+                        .map(|quad| quad.points().map(|point| transform.document_to_page(point)))
+                        .collect();
+                    let color = annotation.color().rgb().unwrap_or([1., 0.85, 0.]);
+                    let opacity = annotation.opacity();
+                    let scale = self.scale;
+                    page = page.child(
+                        gpui::canvas(
+                            |_, _, _| (),
+                            move |bounds, _, window, _| {
+                                for [ul, ur, ll, lr] in &quads {
+                                    let projected = |point: &Point| {
+                                        bounds.origin
+                                            + gpui::point(
+                                                px(point.x as f32 * scale),
+                                                px(point.y as f32 * scale),
+                                            )
+                                    };
+                                    let mut path = gpui::PathBuilder::fill();
+                                    path.move_to(projected(ul));
+                                    path.line_to(projected(ur));
+                                    path.line_to(projected(lr));
+                                    path.line_to(projected(ll));
+                                    path.close();
+                                    if let Ok(path) = path.build() {
+                                        // Annotation color is PDF data, not chrome.
+                                        window.paint_path(
+                                            path,
+                                            gpui::Rgba {
+                                                r: color[0],
+                                                g: color[1],
+                                                b: color[2],
+                                                a: opacity,
+                                            },
+                                        );
+                                    }
+                                }
+                            },
+                        )
+                        .absolute()
+                        .inset_0(),
+                    );
+                }
             }
             for highlight in self.selection.highlights(index, self.pages[index]) {
                 page = page.child(
@@ -1509,6 +1708,7 @@ impl Render for ReaderView {
                 this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
+            .on_action(cx.listener(|this, _: &Highlight, _, cx| this.highlight_selection(cx)))
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, _, _| this.selection.finish()),
@@ -1690,6 +1890,22 @@ impl Render for ReaderView {
                         content.into_any_element()
                     }),
             )
+            .context_menu({
+                let enabled = self.highlight_available(cx);
+                let has_selection = self.selected_text().is_some();
+                move |menu, _, _| {
+                    menu.item(
+                        PopupMenuItem::new("Highlight")
+                            .action(Box::new(Highlight))
+                            .disabled(!enabled),
+                    )
+                    .item(
+                        PopupMenuItem::new("Copy")
+                            .action(Box::new(Copy))
+                            .disabled(!has_selection),
+                    )
+                }
+            })
     }
 }
 

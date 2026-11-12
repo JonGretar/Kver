@@ -11,7 +11,7 @@ document window owns composition and focus routing, and its reader owns the
 active session participation and central PDF surface.
 
 Repeated opens join one document session by canonical local path. The session
-owns the immutable PDF baseline and its loading lifetime; readers independently
+owns the current immutable PDF baseline and its loading lifetime; readers independently
 own navigation, zoom, reading mode, text selection, focus, and tool presentation.
 This extends the original per-reader document ownership to prevent windows of
 one PDF from processing divergent baselines. Sharing only metadata while
@@ -28,12 +28,19 @@ tools receive the shared baseline with that generation and reject obsolete
 replies. Background work never owns session membership or keeps a closed reader
 alive. Raster tickets also reject obsolete zoom/density work. All persistent
 reading data uses the same serialized history worker, separate from the PDF
-baseline. The session also owns one shared, lazy annotation metadata catalog.
+baseline. The session also owns one shared, lazy annotation catalog, annotation
+revisions, dirty state, and serialized background Save/Save As operations.
 Annotations panels retain window-local list selection and extracted excerpts,
 not competing document models. Backend-neutral, epoch-scoped annotation
-identities let browsing and future editing use the same representation while
-external reload invalidates old references. External-change reload and
-annotation mutation are not implemented by this browsing boundary.
+identities let imported and newly authored annotations use the same representation.
+Save and Save As install a new immutable baseline only after the file transaction succeeds;
+all participating readers use it without sharing viewport or text selection.
+Only Save As changes the shared path. A completed save records its captured
+revision, not newer edits.
+Windows own file prompts and Save/Discard/Cancel continuations; the session owns
+the changes those decisions affect. In-place Save verifies the captured file version
+through the commit path rather than trusting a preflight alone. External-change
+reload remains a separate capability.
 
 This favors local ownership over spreading methods on one large entity across
 files, global `views`/`models` directories, or one crate per feature. It adds

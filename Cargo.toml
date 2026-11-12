@@ -24,18 +24,23 @@ required-features = ["screenshot"]
 [dependencies]
 # Corgi's feature-specific unit graph needs these packages in default Cargo metadata.
 # Revisit when Corgi resolves metadata using the requested features.
+# Before upgrading GPUI Kit, run the native-quit checklist in docs/macos-app.md.
 gpui-kit = { version = "=0.8.1", features = ["test-support"], optional = true }
 hayro = "0.8.0"
+# Separate PDF writer; incremental encoding preserves the loaded baseline bytes.
+# Kept pinned to the version exercised by the annotation interchange fixtures.
+lopdf = { version = "=0.47.0", default-features = false }
 directories = "6"
 rusqlite = { version = "0.32", features = ["bundled"] }
 toml_edit = "0.22"
 tempfile = "3"
+libc = "0.2"
 image = { version = "0.25", default-features = false, optional = true }
 rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }
 url = { version = "2", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Native Sparkle bridge only; these versions are already used by the GUI stack.
+# Native Sparkle/quit bridges; these versions are already used by the GUI stack.
 objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSError", "NSString"], optional = true }

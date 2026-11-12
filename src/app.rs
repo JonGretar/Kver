@@ -7,6 +7,7 @@ pub mod commands;
 pub mod document_window;
 pub mod keymap;
 pub mod menu;
+pub(crate) mod quit_guard;
 pub(crate) mod shortcut_label;
 pub(crate) mod theme;
 pub mod windows;
@@ -32,6 +33,11 @@ pub fn run(path: Option<PathBuf>) {
     application.on_reopen(windows::reopen);
     application.run(move |cx: &mut App| {
         initialize(cx, AppPaths::resolve());
+        if let Err(error) = quit_guard::install(cx) {
+            eprintln!("Cannot protect unsaved work during native Quit: {error}");
+            cx.quit();
+            return;
+        }
 
         let initial = match windows::open(cx, path) {
             Ok(reader) => reader.downgrade(),

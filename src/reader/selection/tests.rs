@@ -22,6 +22,42 @@ fn phrase_points(text: &PageText, phrase: &str) -> (Point, Point) {
 }
 
 #[test]
+fn captured_quads_follow_selected_fragments_and_retain_selection() {
+    let text = crate::pdf::page_text(std::path::Path::new("examples/field-guide.pdf"), 7).unwrap();
+    let start = phrase_points(&text, "Route and reference points.").0;
+    let end = phrase_points(&text, "Reading across columns.").1;
+    let mut selection = Selection::default();
+    assert!(selection.document_quads().is_empty());
+    load(&mut selection, 7, text);
+    selection.begin(7, Some(start));
+    assert!(selection.extend(end));
+    selection.finish();
+    let copied = selection.selected_text().unwrap();
+    let quads = selection.document_quads();
+    assert!(
+        quads.len() > 2,
+        "wrapped/column selection needs separate regions"
+    );
+    for quad in &quads {
+        assert_eq!(quad[0].y, quad[1].y);
+        assert_eq!(quad[2].y, quad[3].y);
+        assert!(quad[0].y > quad[2].y);
+        assert!(quad[1].x > quad[0].x);
+        assert!(quad[1].x - quad[0].x < 260.0, "quad spans the gutter");
+    }
+    assert_eq!(selection.selected_text().as_deref(), Some(copied.as_str()));
+    assert_eq!(selection.document_quads(), quads);
+    selection.begin(7, Some(end));
+    assert!(selection.extend(start));
+    selection.finish();
+    assert_eq!(
+        selection.document_quads(),
+        quads,
+        "drag direction is not identity"
+    );
+}
+
+#[test]
 fn column_ranges_survive_cropped_rotated_projection_zoom_and_scroll() {
     for coefficients in [
         [1.0, 0.0, 0.0, -1.0, -20.0, 772.0],
@@ -39,6 +75,7 @@ fn column_ranges_survive_cropped_rotated_projection_zoom_and_scroll() {
         let transform = text.transform;
         let mut selection = Selection::default();
         load(&mut selection, 7, text);
+        let mut original_quads = None;
         for zoom in [1.0, 1.5] {
             let viewport = crate::coordinates::PageViewport::new(
                 transform,
@@ -61,6 +98,16 @@ fn column_ranges_survive_cropped_rotated_projection_zoom_and_scroll() {
             );
             assert!(copied.contains("without color."), "{copied}");
             assert!(copied.ends_with("Reading across columns."), "{copied}");
+            let quads = selection.document_quads();
+            assert!(!quads.is_empty());
+            if let Some(original) = &original_quads {
+                assert_eq!(
+                    &quads, original,
+                    "viewport changes must not move stored quads"
+                );
+            } else {
+                original_quads = Some(quads);
+            }
             let rotated = coefficients[0] == 0.0;
             let size = if rotated {
                 (752.0, 572.0)

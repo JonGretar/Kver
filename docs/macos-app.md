@@ -34,6 +34,44 @@ or publish anything. The tag-only release job runs this same packaging path;
 run it before tagging a release to catch packaging failures. Ordinary macOS PR
 CI builds the GUI binary but does not assemble or inspect an app archive.
 
+## Recheck native quit protection after dependency upgrades
+
+**Required when changing GPUI Kit, its GPUI/macOS backend, `objc2`, or Kver's
+native quit adapter.** Record the check result in the upgrade PR; a passing
+headless test suite alone does not establish native termination safety.
+
+`src/app/quit_guard/macos.rs` supplies Cocoa's `applicationShouldTerminate:`
+before GPUI's non-cancellable shutdown callback. It keeps GPUI's delegate object
+and instance-variable layout, using an ivar-free runtime subclass for the veto.
+It does not fork or patch GPUI. Startup rejects an unexpected delegate class,
+layout, or a framework-owned veto so an upgrade cannot silently bypass review.
+
+Before accepting a dependency upgrade:
+
+1. Inspect the pinned backend's delegate creation, termination, and shutdown
+   callbacks. Confirm that the adapter still preserves delegate identity,
+   ivars, inherited methods, and optional-selector discovery. If GPUI gains a
+   supported pre-quit veto, reconsider and preferably remove this adapter.
+2. Run `corgi test --lib app::quit_guard` on macOS, then the ordinary library
+   tests and strict Clippy checks. The runtime tests check subclass layout,
+   inherited behavior, and one-shot approval invalidation.
+3. In a real Kver window, create an unsaved highlight and choose **Quit** from
+   the Dock. Cancel must leave the app, selection, and edits usable. Repeat
+   Quit while the dialog is open; it must not stack duplicate decisions.
+4. Repeat native Quit with **Save**. A writable original must save without a
+   filename prompt. With a readonly original, Save must offer another location;
+   cancelling the picker or failing the save must not quit or lose edits.
+   Verify the resulting PDF before testing **Discard** in a separate run.
+5. Exercise two windows of one dirty PDF plus an unrelated document. Quit must
+   resolve each dirty session once, regardless of which window is active.
+6. Recheck Command-Q, the Quit menu, last-window close, Finder file delivery,
+   Dock reopen, menus, and update checking. The adapter must not break GPUI's
+   other delegate callbacks.
+
+Normal native Quit requests are covered by this guard. Force Quit, process
+killing, crashes, and power failure cannot offer Save/Discard/Cancel; there is
+no persistent recovery of unsaved annotations.
+
 ## Download an unsigned release
 
 Download the current `Kver-vX.Y.Z-macos-arm64.zip` from

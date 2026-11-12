@@ -10,6 +10,7 @@ mod links;
 mod palette;
 mod recent_history;
 mod recent_picker;
+mod saving;
 mod sidebar;
 
 fn setup(cx: &mut TestAppContext) {

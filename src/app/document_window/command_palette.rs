@@ -14,7 +14,7 @@ use gpui_kit::{
 };
 
 use super::{
-    NavigateBack, NavigateForward, OpenPdf,
+    NavigateBack, NavigateForward, OpenPdf, Save, SaveAs,
     sidebar::{ShowAnnotations, ShowContents, ShowFind, ToggleSidebar},
 };
 use crate::{
@@ -24,9 +24,9 @@ use crate::{
         shortcut_label,
     },
     reader::{
-        Continuous, Copy, FitPage, FitWidth, NextMatch, NextPage, PreviousMatch, PreviousPage,
-        ReadingMode, ShowDeleteMark, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage,
-        UseDefaultReadingMode, ZoomIn, ZoomOut,
+        Continuous, Copy, FitPage, FitWidth, Highlight, NextMatch, NextPage, PreviousMatch,
+        PreviousPage, ReadingMode, ShowDeleteMark, ShowJumpMark, ShowMarks, ShowSetMark,
+        SinglePage, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::ShowRecent,
     settings_ui::ShowSettings,
@@ -41,6 +41,9 @@ pub(crate) struct CommandAvailability {
     pub(crate) page_count: usize,
     pub(crate) mode_override: Option<ReadingMode>,
     pub(crate) has_selection: bool,
+    pub(crate) highlight_available: bool,
+    pub(crate) save_available: bool,
+    pub(crate) save_as_available: bool,
     pub(crate) has_matches: bool,
     pub(crate) can_back: bool,
     pub(crate) can_forward: bool,
@@ -77,6 +80,9 @@ impl CommandPalette {
         let has_document = available.page_count > 0;
         let items = vec![
             command("Open PDF…", OpenPdf, true),
+            command("Save", Save, available.save_available),
+            command("Save As…", SaveAs, available.save_as_available),
+            reader_command("Highlight", Highlight, available.highlight_available, cx),
             command("Open Recent…", ShowRecent, true),
             command("Open marks…", ShowMarks, has_document),
             command("Set local mark…", ShowSetMark, has_document),

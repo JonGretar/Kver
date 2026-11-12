@@ -24,6 +24,7 @@ gpui::actions!(
         SinglePage,
         Continuous,
         UseDefaultReadingMode,
+        Highlight,
         Copy
     ]
 );

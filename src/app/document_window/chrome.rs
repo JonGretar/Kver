@@ -16,11 +16,11 @@ use gpui_kit::{
 use std::path::Path;
 
 use super::sidebar::ToggleSidebar;
-use super::{NavigateBack, NavigateForward, OpenPdf};
+use super::{NavigateBack, NavigateForward, OpenPdf, Save, SaveAs};
 use crate::{
     reader::{
-        Continuous, FitPage, FitWidth, NextPage, PreviousPage, ReaderView, ReadingMode, SinglePage,
-        ZoomIn, ZoomMode, ZoomOut,
+        Continuous, FitPage, FitWidth, Highlight, NextPage, PreviousPage, ReaderView, ReadingMode,
+        SinglePage, ZoomIn, ZoomMode, ZoomOut,
     },
     settings_ui::ShowSettings,
 };
@@ -36,8 +36,11 @@ pub(super) fn reading_toolbar(
     let has_document = reader.page_count().is_some();
     // A resized sidebar consumes the same space that controls need. Both
     // thresholds use the remaining pane width at the current interface scale.
-    let show_fit_labels = available_rems >= 44.;
-    let overflow = available_rems < 28.;
+    let show_fit_labels = available_rems >= 54.;
+    let overflow = available_rems < 38.;
+    let highlight_available = reader.highlight_available(cx);
+    let save_available = reader.save_available(cx);
+    let save_as_available = reader.save_as_available(cx);
     let history = ToolbarGroup::new("history-controls")
         .label("Navigation history")
         .content(reader_button(
@@ -179,6 +182,16 @@ pub(super) fn reading_toolbar(
                 .content(zoom_controls)
         })
         .content(div().flex_1())
+        .when(!overflow, |toolbar| {
+            toolbar.content(
+                Button::new("highlight-selection")
+                    .label("Highlight")
+                    .ghost()
+                    .small()
+                    .disabled(!highlight_available)
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(Highlight), cx)),
+            )
+        })
         .when(overflow, |toolbar| {
             toolbar.content(
                 Button::new("reader-overflow")
@@ -189,6 +202,22 @@ pub(super) fn reading_toolbar(
                     .tooltip("More reader controls")
                     .dropdown_menu(move |menu, _, _| {
                         menu.item(
+                            PopupMenuItem::new("Highlight")
+                                .action(Box::new(Highlight))
+                                .disabled(!highlight_available),
+                        )
+                        .item(
+                            PopupMenuItem::new("Save")
+                                .action(Box::new(Save))
+                                .disabled(!save_available),
+                        )
+                        .item(
+                            PopupMenuItem::new("Save As…")
+                                .action(Box::new(SaveAs))
+                                .disabled(!save_as_available),
+                        )
+                        .separator()
+                        .item(
                             PopupMenuItem::new("Back")
                                 .action(Box::new(NavigateBack))
                                 .disabled(!can_back),
@@ -248,11 +277,23 @@ pub(super) fn reading_toolbar(
         ))
 }
 
-pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
+pub(super) fn status_bar(reader: &ReaderView, cx: &App) -> StatusBar {
     let has_document = reader.page_count().is_some();
     let status = reader.page_count().map_or_else(
         || reader.status().to_owned(),
-        |count| format!("Page {} of {count}", reader.page_index() + 1),
+        |count| {
+            format!(
+                "Page {} of {count}{}",
+                reader.page_index() + 1,
+                if reader.is_saving(cx) {
+                    " · Saving…"
+                } else if reader.is_dirty(cx) {
+                    " · Unsaved changes"
+                } else {
+                    ""
+                }
+            )
+        },
     );
     StatusBar::new()
         .font_features(gpui_kit::FontFeatures(vec![("tnum".into(), 1)].into()))
@@ -276,6 +317,9 @@ pub(super) fn status_bar(reader: &ReaderView) -> StatusBar {
                 )
             },
         )
+        .when_some(reader.annotation_editing_rejection(cx), |bar, reason| {
+            bar.child(div().min_w_0().truncate().child(reason))
+        })
         .when(has_document, |bar| {
             let zoom = format!(
                 "{}%{}",

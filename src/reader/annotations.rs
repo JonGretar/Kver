@@ -175,6 +175,12 @@ impl AnnotationsPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.generation == generation && self.document.is_some() && document.is_some() {
+            // Save As replaces the byte baseline, not this window's selection
+            // or stable session annotation identities.
+            self.document = document;
+            return;
+        }
         self.generation = generation;
         self.document = document;
         self.revision = None;

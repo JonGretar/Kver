@@ -5,13 +5,56 @@ use std::path::PathBuf;
 use gpui_kit as gpui;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
-    App, AppContext as _, Bounds, Entity, WeakEntity, Window, WindowBounds, WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Entity, Global, WeakEntity, Window,
+    WindowBounds, WindowOptions, px, size,
 };
 
 use super::document_window::DocumentWindow;
 use crate::settings_ui;
 
 gpui::actions!(kver, [CloseWindow, NewWindow, NextWindow, PreviousWindow]);
+
+#[derive(Default)]
+struct DocumentWindows(Vec<(AnyWindowHandle, WeakEntity<DocumentWindow>)>);
+impl Global for DocumentWindows {}
+
+pub(crate) fn register_document(
+    handle: AnyWindowHandle,
+    document: WeakEntity<DocumentWindow>,
+    cx: &mut App,
+) {
+    if !cx.has_global::<DocumentWindows>() {
+        cx.set_global(DocumentWindows::default());
+    }
+    let windows = &mut cx.global_mut::<DocumentWindows>().0;
+    windows.retain(|(_, document)| document.upgrade().is_some());
+    windows.push((handle, document));
+}
+
+pub(crate) fn request_quit(cx: &mut App) {
+    // Menu/keyboard actions may still be dispatching inside the target window.
+    // GPUI temporarily removes that window from its registry during dispatch;
+    // only discover/update it after the current effect returns it to the app.
+    cx.defer(|cx| {
+        let dirty = cx.try_global::<DocumentWindows>().and_then(|windows| {
+            windows.0.iter().find_map(|(handle, document)| {
+                let document = document.upgrade()?;
+                let reader = document.read(cx).reader().read(cx);
+                (reader.is_dirty(cx) || reader.is_saving(cx)).then_some((*handle, document))
+            })
+        });
+        if let Some((handle, document)) = dirty {
+            if let Err(error) = cx.update_window(handle, |_, window, cx| {
+                window.activate_window();
+                document.update(cx, |document, cx| document.request_quit(window, cx));
+            }) {
+                eprintln!("Cannot show the unsaved-work decision: {error}");
+            }
+        } else {
+            super::quit_guard::finish_quit(cx);
+        }
+    });
+}
 
 pub fn install(cx: &mut App) {
     cx.on_action(|_: &NewWindow, cx| {

@@ -121,6 +121,23 @@ impl Selection {
         selected_text(span, self.text.get(&span.page)?)
     }
 
+    /// Capture the selected line fragments before any crop, rotation, zoom, or
+    /// viewport projection. These are the same glyph envelopes shown by the
+    /// selection, not rectangles reconstructed from screen-space bounds.
+    /// Vertex order is upper-left/right, lower-left/right in document space.
+    pub(super) fn document_quads(&self) -> Vec<[Point; 4]> {
+        let Some(span) = self.span else {
+            return Vec::new();
+        };
+        let Some(text) = self.text.get(&span.page) else {
+            return Vec::new();
+        };
+        selected_ranges(span, text)
+            .into_iter()
+            .map(|range| selection_quad(&text.glyphs[range]))
+            .collect()
+    }
+
     pub(super) fn highlights(
         &self,
         page: usize,
@@ -132,36 +149,8 @@ impl Selection {
             .and_then(|span| self.text.get(&page).map(|text| (span, text)));
         selected.into_iter().flat_map(move |(span, text)| {
             selected_ranges(span, text).into_iter().map(move |range| {
-                let glyphs = &text.glyphs[range];
-                let first = &glyphs[0];
-                let last = &glyphs[glyphs.len() - 1];
-                let top = glyphs
-                    .iter()
-                    .map(|glyph| glyph.top)
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let bottom = glyphs
-                    .iter()
-                    .map(|glyph| glyph.bottom)
-                    .fold(f64::INFINITY, f64::min);
-                let corners = [
-                    Point {
-                        x: first.start.x,
-                        y: top,
-                    },
-                    Point {
-                        x: last.end.x,
-                        y: top,
-                    },
-                    Point {
-                        x: first.start.x,
-                        y: bottom,
-                    },
-                    Point {
-                        x: last.end.x,
-                        y: bottom,
-                    },
-                ]
-                .map(|corner| text.transform.document_to_page(corner));
+                let corners = selection_quad(&text.glyphs[range])
+                    .map(|corner| text.transform.document_to_page(corner));
                 let left = corners
                     .iter()
                     .map(|point| point.x)
@@ -233,6 +222,39 @@ impl Selection {
         }
         true
     }
+}
+
+fn selection_quad(glyphs: &[TextGlyph]) -> [Point; 4] {
+    // Ranges are nonempty by construction. Keep each line/column fragment
+    // separate; a union over the whole selection would cover column gutters.
+    let first = &glyphs[0];
+    let last = &glyphs[glyphs.len() - 1];
+    let top = glyphs
+        .iter()
+        .map(|glyph| glyph.top)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let bottom = glyphs
+        .iter()
+        .map(|glyph| glyph.bottom)
+        .fold(f64::INFINITY, f64::min);
+    [
+        Point {
+            x: first.start.x,
+            y: top,
+        },
+        Point {
+            x: last.end.x,
+            y: top,
+        },
+        Point {
+            x: first.start.x,
+            y: bottom,
+        },
+        Point {
+            x: last.end.x,
+            y: bottom,
+        },
+    ]
 }
 
 fn selected_ranges(span: Span, text: &PageText) -> Vec<Range<usize>> {

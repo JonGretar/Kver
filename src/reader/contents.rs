@@ -68,6 +68,11 @@ impl ContentsPanel {
         document: Option<Arc<pdf::Document>>,
         cx: &mut Context<Self>,
     ) {
+        if generation == self.generation && self.document.is_some() && document.is_some() {
+            // The outline is unchanged by annotation Save/Save As.
+            self.document = document;
+            return;
+        }
         self.generation = generation;
         self.document = document;
         self.task = None;

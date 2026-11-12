@@ -132,6 +132,15 @@ impl FindPanel {
         total_pages: usize,
         cx: &mut Context<Self>,
     ) {
+        if generation == self.document_generation
+            && self.document.is_some()
+            && document.is_some()
+            && total_pages == self.total_pages
+        {
+            // Annotation saves replace the byte baseline, not the text/query.
+            self.document = document;
+            return;
+        }
         if generation != self.document_generation {
             self.pending_query_reset = true;
         }

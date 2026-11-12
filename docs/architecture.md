@@ -131,12 +131,66 @@ snapshots retain the immutable baseline, not membership. Closing one window
 does not invalidate another. After the final participant detaches, the next
 open loads a fresh baseline. Detecting external changes and reloading an
 existing session are separate, not-yet-implemented capabilities.
-Session epochs distinguish annotation identities across loaded baselines.
+Session epochs distinguish annotation identities across independent open lifetimes.
 Backend-neutral `pdf::annotations` types preserve PDF document-space quad point
 order, markup kind, color space, opacity, and supported metadata. Imported
 identity serials refer to page/annotation slots only within that epoch; they
 are not durable cross-reader identifiers. Malformed supported annotations are
 readonly, with a valid PDF rectangle used only as a navigation fallback.
+The same catalog contains newly authored highlights. Creation waits for metadata
+loading to finish, retains the window's text selection, and captures one quad per
+selected line/column fragment before any viewport projection. Reapplying Highlight
+to identical quads selects the existing entry without changing its color or revision.
+Mutations keep the catalog in document/spatial order.
+
+`src/pdf/writer.rs` uses exactly pinned `lopdf` 0.47.0 alongside Hayro, rather than
+replacing the rendering backend. The retained writer experiment supplies concrete
+incremental-preservation and PDFKit/Preview interchange evidence for that version.
+Production encoding uses the immutable baseline's original bytes, not a reread of
+its source path, and appends only highlights added since the saved snapshot.
+Standard `/Highlight`, `/QuadPoints`, and normal appearance streams preserve
+editability without changing page content or rewriting existing annotation and
+metadata dictionaries. Hayro paints embedded appearances; only additions not yet
+in its baseline have application overlays. Ordinary filesystem readonly sources
+remain editable in memory; signed/encrypted documents are not editable.
+
+Save and Save As share one session-owned, serialized write pipeline. Save uses
+the file identity, modification time, permissions, and original bytes captured
+with the loaded/saved baseline, not a fresh overwrite confirmation. It refuses
+external rewrites and replacement files through the commit path. Conflicts retain
+the edits and offer Save As of Kver's version; external reload remains separate.
+Readonly originals route to Save As without changing their permissions.
+A successful Save keeps the session path; Save As moves every participant to
+the destination. Both install the parsed output and its file version as the baseline.
+Annotation IDs and window-local text selections remain valid across this operation.
+The captured revision becomes saved; edits made while writing remain dirty.
+Cancellation and recoverable failures leave the source, session path, and edits
+unchanged. Windows own native file prompts, overwrite confirmation, and unsaved
+work decisions. Closing one participant leaves changes with the others.
+
+On macOS, `app/quit_guard/macos.rs` intercepts Cocoa termination before GPUI's
+non-cancellable shutdown notification. The same window/session decisions handle
+Dock Quit, the Quit menu, and Command-Q. The adapter preserves GPUI's delegate
+object and ivars, adds only the veto selector, and defers decisions to the UI
+executor rather than borrowing the app inside a Cocoa callback. Final approval
+is one-shot; new edits or writes revoke a queued approval. This is a local native
+adapter, not a framework fork. Quit waits for a pending save decision or write;
+cancelling its picker or failing its write cancels the quit continuation.
+Dependency upgrades require the
+[native quit checklist](macos-app.md#recheck-native-quit-protection-after-dependency-upgrades).
+
+`reader/document_session/save_file.rs` stages and flushes a complete temporary
+output beside the destination. New paths use a no-clobber commit. On macOS/Linux,
+overwrites atomically exchange directory entries and verify the actual displaced
+file's identity, modification time, permissions, and contents before reporting
+success. Save preserves the original's file mode. A conflict restores
+the displaced file; if another concurrent change prevents safe cleanup, the error
+identifies a retained recovery copy rather than deleting it. Other platforms refuse
+overwriting and require a new filename until they have a safe transaction adapter.
+Save As refuses the current source (including file aliases) and any destination
+open in another Kver session, even when clean. A destination reservation also
+rejects opens while a new Save As destination is in progress. Repeated opens of
+the current file continue joining its existing session during Save.
 Failed loads do not prevent a later normal open from retrying a repaired file.
 Navigation, zoom, reading mode, selection, focus, jumplists, and tool interaction
 state remain window-local. Each reader's monotonically increasing open generation

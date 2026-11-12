@@ -33,6 +33,7 @@ mod annotation_read;
 mod annotation_read_tests;
 pub mod annotations;
 mod links;
+mod writer;
 #[cfg(test)]
 pub(crate) use links::linked_fixture;
 pub use links::{LinkDestination, PageLink, page_links};
@@ -43,17 +44,63 @@ pub use links::{LinkDestination, PageLink, page_links};
 pub(crate) struct Document {
     path: PathBuf,
     pdf: Pdf,
+    file_metadata: Option<std::fs::Metadata>,
 }
 
 #[cfg(feature = "gui")]
 impl Document {
     pub(crate) fn open(path: &Path) -> Result<Self, String> {
-        let data = std::fs::read(path)
+        use std::io::Read as _;
+        let mut file = std::fs::File::open(path)
             .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+        let before = file.metadata().map_err(|error| error.to_string())?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)
+            .map_err(|error| error.to_string())?;
+        let after = file.metadata().map_err(|error| error.to_string())?;
+        if before.len() != after.len()
+            || before.modified().ok() != after.modified().ok()
+            || after.len() != data.len() as u64
+        {
+            return Err("PDF changed while opening. Open it again before editing.".into());
+        }
+        Ok(Self::from_bytes(path.to_path_buf(), data)?.with_file_metadata(after))
+    }
+
+    pub(crate) fn from_bytes(path: PathBuf, data: Vec<u8>) -> Result<Self, String> {
         Ok(Self {
-            path: path.to_path_buf(),
+            path,
             pdf: open_pdf(data)?,
+            file_metadata: None,
         })
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        self.pdf.data().as_ref()
+    }
+
+    pub(crate) fn file_metadata(&self) -> Option<&std::fs::Metadata> {
+        self.file_metadata.as_ref()
+    }
+
+    pub(crate) fn with_file_metadata(mut self, metadata: std::fs::Metadata) -> Self {
+        self.file_metadata = Some(metadata);
+        self
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn editing_rejection(&self) -> Option<String> {
+        writer::editing_rejection(self.bytes())
+    }
+
+    pub(crate) fn with_highlights(
+        &self,
+        additions: &[annotations::Annotation],
+    ) -> Result<Vec<u8>, String> {
+        writer::append_highlights(self.bytes(), additions)
     }
 
     pub(crate) fn pages(&self) -> Vec<(f32, f32)> {
@@ -62,6 +109,13 @@ impl Document {
             .iter()
             .map(|page| page.render_dimensions())
             .collect()
+    }
+
+    pub(crate) fn page_transform(&self, page: usize) -> Option<PageTransform> {
+        self.pdf
+            .pages()
+            .get(page)
+            .map(|page| PageTransform::from_coefficients(page.initial_transform(true).as_coeffs()))
     }
 
     pub(crate) fn page_text(&self, page: usize) -> Result<PageText, String> {

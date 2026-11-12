@@ -8,13 +8,13 @@ use gpui_kit::{Global, Menu, MenuItem};
 
 use super::document_window::OpenPdf;
 #[cfg(target_os = "macos")]
-use super::document_window::{NavigateBack, NavigateForward};
+use super::document_window::{NavigateBack, NavigateForward, Save, SaveAs};
 #[cfg(target_os = "macos")]
 use super::windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 #[cfg(target_os = "macos")]
 use crate::reader::{
-    Continuous, Copy, NextPage, PreviousPage, ShowAnnotations, ShowContents, ShowFind, SinglePage,
-    ToggleSidebar, UseDefaultReadingMode,
+    Continuous, Copy, Highlight, NextPage, PreviousPage, ShowAnnotations, ShowContents, ShowFind,
+    SinglePage, ToggleSidebar, UseDefaultReadingMode,
 };
 #[cfg(target_os = "macos")]
 use crate::reading_history::ShowRecent;
@@ -32,8 +32,11 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "quit",
     "new-window",
     "open-pdf",
+    "save-as",
+    "save",
     "show-recent",
     "copy",
+    "highlight",
     "show-find",
     "navigate-back",
     "navigate-forward",
@@ -54,6 +57,9 @@ struct MenuState {
     updates_available: bool,
     can_back: Cell<bool>,
     can_forward: Cell<bool>,
+    highlight_available: Cell<bool>,
+    save_available: Cell<bool>,
+    save_as_available: Cell<bool>,
 }
 #[cfg(target_os = "macos")]
 impl Global for MenuState {}
@@ -67,6 +73,9 @@ pub fn install(cx: &mut App) {
         updates_available,
         can_back: Cell::new(false),
         can_forward: Cell::new(false),
+        highlight_available: Cell::new(false),
+        save_available: Cell::new(false),
+        save_as_available: Cell::new(false),
     });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {
@@ -83,7 +92,7 @@ pub fn install(cx: &mut App) {
             Err(error) => eprintln!("Cannot open About Kver: {error}"),
         }
     });
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Quit, cx| super::windows::request_quit(cx));
     cx.on_action(|_: &OpenPdf, cx| {
         if cx.windows().is_empty() {
             match super::windows::open(cx, None) {
@@ -123,9 +132,12 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 MenuItem::action("New Window", NewWindow),
                 MenuItem::action("Open PDF…", OpenPdf),
                 MenuItem::action("Open Recent…", ShowRecent),
+                MenuItem::action("Save", Save).disabled(!state.save_available.get()),
+                MenuItem::action("Save As…", SaveAs).disabled(!state.save_as_available.get()),
             ]),
             Menu::new("Edit").items([
                 MenuItem::action("Copy", Copy),
+                MenuItem::action("Highlight", Highlight).disabled(!state.highlight_available.get()),
                 MenuItem::action("Find", ShowFind),
             ]),
             Menu::new("View").items([
@@ -165,6 +177,17 @@ pub(crate) fn refresh_shortcuts(cx: &App) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = cx;
+}
+
+pub(crate) fn set_authoring_availability(cx: &App, highlight: bool, save: bool, save_as: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(state) = cx.try_global::<MenuState>() {
+        state.highlight_available.set(highlight);
+        state.save_available.set(save);
+        state.save_as_available.set(save_as);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (cx, highlight, save, save_as);
 }
 
 #[cfg(test)]

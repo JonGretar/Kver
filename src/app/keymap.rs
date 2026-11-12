@@ -18,7 +18,7 @@ use super::{
     commands::{AboutKver, CheckForUpdates, Quit},
     document_window::command_palette::ShowCommandPalette,
     document_window::sidebar::{ShowAnnotations, ShowContents, ShowFind, ToggleSidebar},
-    document_window::{NavigateBack, NavigateForward, OpenPdf},
+    document_window::{NavigateBack, NavigateForward, OpenPdf, Save, SaveAs},
     windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow},
 };
 use crate::{
@@ -26,10 +26,10 @@ use crate::{
     key_context,
     reader::{
         ActivateOutline, Continuous, Copy, DeleteLocalMark, FitPage, FitWidth, GoToDocumentEnd,
-        GoToDocumentStart, JumpLocalMark, NextMatch, NextPage, PreviousMatch, PreviousPage,
-        ScrollDown, ScrollHalfScreenDown, ScrollHalfScreenUp, ScrollLeft, ScrollRight,
-        ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowDeleteMark, ShowJumpMark,
-        ShowMarks, ShowSetMark, SinglePage, UseDefaultReadingMode, ZoomIn, ZoomOut,
+        GoToDocumentStart, Highlight, JumpLocalMark, NextMatch, NextPage, PreviousMatch,
+        PreviousPage, ScrollDown, ScrollHalfScreenDown, ScrollHalfScreenUp, ScrollLeft,
+        ScrollRight, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowDeleteMark,
+        ShowJumpMark, ShowMarks, ShowSetMark, SinglePage, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::ShowRecent,
     settings::AppPaths,
@@ -643,6 +643,9 @@ fn common() -> Vec<Entry> {
         Entry::bind("cmd-n", Context::Global, NewWindow),
         Entry::bind("cmd-shift-p", Context::Global, ShowCommandPalette),
         Entry::bind("cmd-shift-m", Context::Global, ShowMarks),
+        Entry::bind("cmd-shift-h", Context::Reader, Highlight),
+        Entry::bind("cmd-shift-s", Context::Global, SaveAs),
+        Entry::bind("cmd-s", Context::Global, Save),
         Entry::bind("cmd-f", Context::Global, ShowFind),
         Entry::bind("cmd-b", Context::Global, ToggleSidebar),
         Entry::bind("cmd-g", Context::Global, NextMatch),

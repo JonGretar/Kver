@@ -88,12 +88,18 @@ by the current keyboard configuration:
 
 | Task | Commands |
 | --- | --- |
-| Application and windows | `open-pdf`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
+| Application and windows | `open-pdf`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `copy` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
+| Text markup | `highlight`, `show-annotations` |
 
 The mark commands in this list open the corresponding mark chooser. The Vim
 letter-specific mark sequences are supplied by the Vim preset; the TOML
 command names do not accept a mark letter argument.
+
+With text selected in the reader, Command-Shift-H (Ctrl-Shift-H outside macOS)
+applies Highlight once and retains the selection. Command-S (Ctrl-S) saves changes
+to the current PDF. Command-Shift-S (Ctrl-Shift-S) opens Save As and suggests an
+`-annotated.pdf` filename. Both presets share these shortcuts.

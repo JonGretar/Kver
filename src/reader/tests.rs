@@ -8,6 +8,9 @@ use crate::settings_ui::ShowSettings;
 use gpui_kit::{AnyWindowHandle, TestAppContext, point, size, test::TestWindowExt};
 use std::collections::BTreeMap;
 
+mod authoring;
+mod authoring_geometry;
+mod current_save;
 mod find;
 mod links;
 mod loading;

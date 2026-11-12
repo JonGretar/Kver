@@ -6,6 +6,7 @@
 mod chrome;
 pub mod command_palette;
 mod jumplist;
+mod saving;
 pub mod sidebar;
 
 use std::path::PathBuf;
@@ -42,11 +43,14 @@ use command_palette::{
 };
 use jumplist::Jumplist;
 pub(crate) use jumplist::{NavigateBack, NavigateForward};
+use saving::Leave;
+pub use saving::{Save, SaveAs};
 use sidebar::{ReaderSidebar, SidebarPanel};
 
 gpui_kit::actions!(kver, [OpenPdf]);
 
 pub struct DocumentWindow {
+    window: AnyWindowHandle,
     reader: Entity<ReaderView>,
     jumplist: Jumplist,
     file_picker: Option<Task<()>>,
@@ -59,6 +63,10 @@ pub struct DocumentWindow {
     sidebar: Option<Entity<ReaderSidebar>>,
     panel_subscriptions: Vec<Subscription>,
     annotation_session: Option<Subscription>,
+    save_picker: Option<Task<()>>,
+    save_prompt_open: bool,
+    save_observation: Option<Subscription>,
+    pending_leave: Option<Leave>,
     _reader_observation: Subscription,
     _reader_focus_subscription: Subscription,
     _settings_observation: Subscription,
@@ -70,6 +78,7 @@ pub struct DocumentWindow {
 
 struct PendingRecentOpen {
     generation: u64,
+    path: PathBuf,
     picker: gpui_kit::WeakEntity<RecentPicker>,
     request: u64,
 }
@@ -103,6 +112,15 @@ impl DocumentWindow {
             this.refresh_navigation_menu(window, cx);
         });
         let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
+        let owner = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            let _ = owner.update(cx, |this: &mut Self, cx| {
+                this.request_leave(Leave::Close, window, cx)
+            });
+            false
+        });
+        let owner = cx.weak_entity();
+        windows::register_document(window.window_handle(), owner, cx);
         let reader_focus_subscription = cx.on_focus(
             &reader.read(cx).focus_handle(cx),
             window,
@@ -129,12 +147,17 @@ impl DocumentWindow {
                     cx.notify();
                 }
             });
-        let reader_observation = cx.observe(&reader, |_, _, cx| cx.notify());
+        let reader_observation = cx.observe_in(&reader, window, |this, reader, window, cx| {
+            window.set_window_edited(reader.read(cx).is_dirty(cx));
+            this.refresh_navigation_menu(window, cx);
+            cx.notify();
+        });
         let settings = settings_ui::state(cx);
         let settings_observation = cx.observe_in(&settings, window, |this, _, window, cx| {
             this.schedule_refit(window, cx);
         });
         Self {
+            window: window.window_handle(),
             reader,
             jumplist: Jumplist::default(),
             file_picker: None,
@@ -147,6 +170,10 @@ impl DocumentWindow {
             sidebar: None,
             panel_subscriptions: Vec::new(),
             annotation_session: None,
+            save_picker: None,
+            save_prompt_open: false,
+            save_observation: None,
+            pending_leave: None,
             _reader_observation: reader_observation,
             _reader_focus_subscription: reader_focus_subscription,
             _settings_observation: settings_observation,
@@ -387,6 +414,12 @@ impl DocumentWindow {
             .is_some_and(|marks| marks.read(cx).is_open());
         let accepts_shortcut =
             !find_has_focus && self.palette.is_none() && self.recent.is_none() && !marks_open;
+        menu::set_authoring_availability(
+            cx,
+            accepts_shortcut && self.reader.read(cx).highlight_available(cx),
+            self.reader.read(cx).save_available(cx),
+            self.reader.read(cx).save_as_available(cx),
+        );
         menu::refresh_navigation(
             cx,
             accepts_shortcut && self.jumplist.can_back(),
@@ -432,10 +465,35 @@ impl DocumentWindow {
     }
 
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.reader.read(cx).is_dirty(cx) || self.reader.read(cx).is_saving(cx) {
+            let owner = cx.weak_entity();
+            let window = self.window;
+            cx.defer(move |cx| {
+                let _ = cx.update_window(window, |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.request_leave(Leave::Replace(path), window, cx)
+                    });
+                });
+            });
+            return;
+        }
+        self.replace_path(path, cx);
+    }
+
+    fn replace_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.file_picker = None;
+        self.save_picker = None;
+        self.save_prompt_open = false;
+        self.save_observation = None;
         self.initial_link_page = None;
+        let target = path.clone();
         self.reader
             .update(cx, |reader, cx| reader.open_path(path, cx));
+        if let Some(pending) = &mut self.recent_open
+            && pending.path == target
+        {
+            pending.generation = self.reader.read(cx).document_generation();
+        }
     }
 
     fn open_linked_document(
@@ -544,8 +602,7 @@ impl DocumentWindow {
             return;
         }
         if let Some(path) = path {
-            self.reader
-                .update(cx, |reader, cx| reader.open_path(path, cx));
+            self.open_path(path, cx);
         }
     }
 
@@ -566,6 +623,7 @@ impl DocumentWindow {
                         this.open_path(path.clone(), cx);
                         this.recent_open = Some(PendingRecentOpen {
                             generation: this.reader.read(cx).document_generation(),
+                            path: path.clone(),
                             picker: picker.downgrade(),
                             request: *request,
                         });
@@ -601,9 +659,9 @@ impl DocumentWindow {
             return;
         }
         let generation = match event {
-            DocumentEvent::Replaced { generation } | DocumentEvent::Opened { generation, .. } => {
-                *generation
-            }
+            DocumentEvent::Replaced { generation }
+            | DocumentEvent::Opened { generation, .. }
+            | DocumentEvent::Saved { generation } => *generation,
             DocumentEvent::OpenLinkedDocument { .. } => unreachable!(),
         };
         if generation != self.reader.read(cx).document_generation() {
@@ -682,7 +740,7 @@ impl Render for DocumentWindow {
         let statusbar = settings
             .read(cx)
             .show_statusbar()
-            .then(|| chrome::status_bar(reader));
+            .then(|| chrome::status_bar(reader, cx));
         div()
             .id("document-window")
             .test_support()
@@ -727,6 +785,7 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<Continuous>))
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
             .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
                 this.show_sidebar(SidebarPanel::Contents, window, cx)
             }))
@@ -750,7 +809,11 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(|this, _: &NavigateForward, window, cx| {
                 this.traverse_jumplist(1, window, cx)
             }))
-            .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                this.request_leave(Leave::Close, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SaveAs, window, cx| this.save_as(window, cx)))
+            .on_action(cx.listener(|this, _: &Save, window, cx| this.save(window, cx)))
             .on_action(|_: &NextWindow, window, cx| windows::cycle(window, cx, 1))
             .on_action(|_: &PreviousWindow, window, cx| windows::cycle(window, cx, -1))
             .child(title)
@@ -795,6 +858,9 @@ impl Render for DocumentWindow {
                         page_count: reader.page_count().unwrap_or(0),
                         mode_override: reader.mode_override(),
                         has_selection: reader.selected_text().is_some(),
+                        highlight_available: reader.highlight_available(cx),
+                        save_available: reader.save_available(cx),
+                        save_as_available: reader.save_as_available(cx),
                         has_matches: self.has_matches(cx),
                         can_back: self.jumplist.can_back(),
                         can_forward: self.jumplist.can_forward(),

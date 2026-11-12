@@ -1,7 +1,7 @@
 //! Window-local Find workflow. The host supplies document snapshots and
 //! handles navigation events; query, results, and background work stay here.
 
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui_kit::base::{Disableable, TestSupportExt as _};
 use gpui_kit::component::{
@@ -53,7 +53,7 @@ pub(crate) struct FindPanel {
     query: Entity<InputState>,
     _subscription: Subscription,
     // A snapshot supplied by the document owner, never changed by Find itself.
-    path: Option<PathBuf>,
+    document: Option<Arc<pdf::Document>>,
     total_pages: usize,
     document_generation: u64,
     pending_query_reset: bool,
@@ -86,7 +86,7 @@ impl FindPanel {
         Self {
             query,
             _subscription: subscription,
-            path: None,
+            document: None,
             total_pages: 0,
             document_generation: 0,
             pending_query_reset: false,
@@ -128,7 +128,7 @@ impl FindPanel {
     pub(crate) fn set_document(
         &mut self,
         generation: u64,
-        path: Option<PathBuf>,
+        document: Option<Arc<pdf::Document>>,
         total_pages: usize,
         cx: &mut Context<Self>,
     ) {
@@ -136,7 +136,7 @@ impl FindPanel {
             self.pending_query_reset = true;
         }
         self.document_generation = generation;
-        self.path = path;
+        self.document = document;
         self.total_pages = total_pages;
         self.clear_results();
         cx.notify();
@@ -183,7 +183,7 @@ impl FindPanel {
         if !self.pending_query_reset
             && !query.trim().is_empty()
             && self.total_pages > 0
-            && let Some(path) = self.path.clone()
+            && let Some(baseline) = self.document.clone()
         {
             self.searching = true;
             let document = self.document_generation;
@@ -192,12 +192,13 @@ impl FindPanel {
             self.task = Some(cx.spawn(async move |this, cx| {
                 for start in (0..total_pages).step_by(BATCH_PAGES) {
                     let end = (start + BATCH_PAGES).min(total_pages);
-                    let path = path.clone();
+                    let baseline = baseline.clone();
                     let query = query.clone();
                     let batch = cx
                         .background_executor()
                         .spawn(async move {
-                            pdf::page_text_batch(&path, start..end)
+                            baseline
+                                .page_text_batch(start..end)
                                 .into_iter()
                                 .enumerate()
                                 .map(|(offset, page)| match page {

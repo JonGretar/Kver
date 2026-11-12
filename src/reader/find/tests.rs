@@ -3,6 +3,12 @@
 use super::*;
 use gpui_kit::{TestAppContext, test::TestWindowExt};
 
+fn baseline(path: &str) -> Option<Arc<pdf::Document>> {
+    Some(Arc::new(
+        pdf::Document::open(std::path::Path::new(path)).unwrap(),
+    ))
+}
+
 fn sample_hit() -> FindMatch {
     let text = pdf::page_text(std::path::Path::new("examples/readme-sample.pdf"), 0).unwrap();
     find_search::matches_on_page(&text, 0, "This is page 1 of 100").remove(0)
@@ -16,7 +22,7 @@ fn obsolete_batches_and_navigation_cannot_cross_query_or_document_revisions(
     let window = cx.add_window(FindPanel::new);
     window
         .update(cx, |find, _, cx| {
-            find.set_document(0, Some("examples/readme-sample.pdf".into()), 100, cx);
+            find.set_document(0, baseline("examples/readme-sample.pdf"), 100, cx);
             find.query_changed("This is page 1 of 100".into(), cx);
             let first_revision = find.revision;
             let old_navigation = FindNavigation {
@@ -65,7 +71,7 @@ fn results_are_bounded_and_pending_enter_activates_once(cx: &mut TestAppContext)
     let window = cx.add_window(FindPanel::new);
     window
         .update(cx, |find, _, cx| {
-            find.set_document(0, Some("examples/readme-sample.pdf".into()), 100, cx);
+            find.set_document(0, baseline("examples/readme-sample.pdf"), 100, cx);
             find.query_changed("This is page".into(), cx);
             find.step_match(1, cx);
             assert!(find.pending_next);
@@ -95,7 +101,7 @@ fn unmapped_and_failed_pages_keep_distinct_progress(cx: &mut TestAppContext) {
     let window = cx.add_window(FindPanel::new);
     window
         .update(cx, |find, _, cx| {
-            find.set_document(0, Some("examples/readme-sample.pdf".into()), 3, cx);
+            find.set_document(0, baseline("examples/readme-sample.pdf"), 3, cx);
             find.query_changed("absent phrase".into(), cx);
             assert!(!find.apply_batch(
                 0,
@@ -123,7 +129,7 @@ fn closing_find_drops_its_pending_search_owner(cx: &mut TestAppContext) {
     let window = cx.add_window(FindPanel::new);
     let weak = window
         .update(cx, |find, _, cx| {
-            find.set_document(0, Some("examples/readme-sample.pdf".into()), 100, cx);
+            find.set_document(0, baseline("examples/readme-sample.pdf"), 100, cx);
             find.query_changed("This is page".into(), cx);
             assert!(find.task.is_some());
             cx.weak_entity()
@@ -141,7 +147,7 @@ fn document_replacement_clears_query_when_hidden_find_is_focused_again(cx: &mut 
     let window = cx.add_window(FindPanel::new);
     window
         .update(cx, |find, frame, cx| {
-            find.set_document(0, Some("examples/readme-sample.pdf".into()), 100, cx);
+            find.set_document(0, baseline("examples/readme-sample.pdf"), 100, cx);
             find.focus(frame, cx);
         })
         .unwrap();
@@ -154,7 +160,7 @@ fn document_replacement_clears_query_when_hidden_find_is_focused_again(cx: &mut 
     window
         .update(cx, |find, frame, cx| {
             find.set_document(1, None, 0, cx);
-            find.set_document(1, Some("examples/field-guide.pdf".into()), 5, cx);
+            find.set_document(1, baseline("examples/field-guide.pdf"), 5, cx);
             find.focus(frame, cx);
             assert_eq!(find.query(cx), "");
             assert!(!find.pending_query_reset);

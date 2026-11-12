@@ -14,6 +14,11 @@ An independent reading workspace with a document, navigation tools, and window
 controls. Two windows can display the same document at different places.
 _Avoid_: Document tab
 
+**Document session**:
+The shared lifetime of an opened document across its participating windows.
+Closing one window leaves the session available to the others.
+_Avoid_: Reading position, document window
+
 **Reader view**:
 The central PDF surface within a document window, not its sidebar or window
 controls.

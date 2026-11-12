@@ -10,6 +10,8 @@ pub(crate) use store::LocalMark;
 pub use store::{ReadingPosition, RecentFile, RecentStore};
 
 #[cfg(feature = "gui")]
+pub(crate) use worker::RecentHistory;
+#[cfg(feature = "gui")]
 pub use worker::{history, install, notify_changed, revision};
 
 #[cfg(feature = "gui")]

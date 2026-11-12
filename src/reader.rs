@@ -2,6 +2,7 @@
 
 mod commands;
 mod contents;
+mod document_session;
 mod find;
 mod links;
 mod marks;
@@ -19,6 +20,7 @@ pub(crate) use find::FindPanel;
 pub use find::{NextMatch, PreviousMatch};
 // Preserve the former public name while callers adopt the narrowed view.
 pub use ReaderView as Preview;
+use document_session::DocumentSession;
 use links::PageLinks;
 use marks::MarksEvent;
 pub use marks::{
@@ -33,13 +35,14 @@ use selection::Selection;
 
 use std::{
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
 use crate::{
     coordinates::{PageViewport, Point},
     find_search, pdf,
-    recent::{self, ReadingPosition, RecentStore},
+    recent::{self, ReadingPosition},
     settings::{InitialZoom, ReadingView},
     settings_ui,
 };
@@ -62,9 +65,12 @@ use gpui_kit::{
     },
 };
 
-/// Central PDF surface and document lifecycle, independent of window chrome.
+/// Central PDF surface and window-local session participation, independent of chrome.
 pub struct ReaderView {
     path: Option<PathBuf>,
+    session: Option<Entity<DocumentSession>>,
+    session_wait: Option<Subscription>,
+    document: Option<Arc<pdf::Document>>,
     record_path: Option<PathBuf>,
     position_ready: bool,
     position_touched: bool,
@@ -95,7 +101,7 @@ pub struct ReaderView {
     status: String,
 }
 
-/// Document lifecycle, independent of the UI that requested an open.
+/// Window-local open lifecycle, independent of the UI that requested it.
 pub(crate) enum DocumentEvent {
     Replaced {
         generation: u64,
@@ -159,10 +165,22 @@ impl gpui::Focusable for ReaderView {
     }
 }
 
+/// Capture history's privacy epoch and opening preference before any I/O. A
+/// history clear during a pending open must not let its late reply record again.
+#[derive(Clone)]
+struct OpenRestoration {
+    history: Option<recent::RecentHistory>,
+    epoch: Option<u64>,
+    restore_position: bool,
+}
+
 impl ReaderView {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
         let mut reader = Self {
             path,
+            session: None,
+            session_wait: None,
+            document: None,
             record_path: None,
             position_ready: false,
             position_touched: false,
@@ -200,6 +218,9 @@ impl ReaderView {
     /// Replace the active document immediately, before any asynchronous work completes.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.document_generation += 1;
+        self.session_wait = None;
+        self.session = None;
+        self.document = None;
         self.marks = None;
         self.marks_subscriptions.clear();
         self.find_highlight = None;
@@ -392,26 +413,80 @@ impl ReaderView {
             return;
         };
         let history = recent::history(cx);
-        let history_epoch = history.as_ref().map(|history| history.epoch());
-        let restore_position = settings.read(cx).reopen_at_last_position();
-        let document_generation = self.document_generation;
+        let restoration = OpenRestoration {
+            epoch: history.as_ref().map(|history| history.epoch()),
+            history,
+            restore_position: settings.read(cx).reopen_at_last_position(),
+        };
+        let generation = self.document_generation;
         let work = cx.background_executor().spawn(async move {
-            let pages = pdf::document_pages(&path);
-            let normalized = if matches!(&pages, Ok(pages) if !pages.is_empty()) {
-                Some(RecentStore::normalize(&path))
-            } else {
-                None
-            };
-            (pages, normalized)
+            std::fs::canonicalize(&path)
+                .map_err(|error| format!("Cannot read {}: {error}", path.display()))
         });
         cx.spawn(async move |this, cx| {
-            let (result, normalized) = work.await;
-            let saved_mode = if matches!(&result, Ok(pages) if !pages.is_empty()) {
-                if let (Some(history), Some(Ok(path))) = (&history, &normalized) {
-                    history.reading_mode(path.clone(), history_epoch.unwrap_or(0)).await
-                } else {
-                    Ok(None)
+            let normalized = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if generation != this.document_generation {
+                    return;
                 }
+                match normalized {
+                    Ok(path) => {
+                        let session = DocumentSession::join(path, cx);
+                        let pending = restoration.clone();
+                        this.session_wait = Some(cx.observe(&session, move |this, source, cx| {
+                            if this.document_generation == generation
+                                && this.session.as_ref() == Some(&source)
+                            {
+                                this.finish_session_load(pending.clone(), cx);
+                            }
+                        }));
+                        this.session = Some(session);
+                        this.finish_session_load(restoration, cx);
+                    }
+                    Err(error) => {
+                        this.status = error.clone();
+                        cx.emit(DocumentEvent::Opened {
+                            generation,
+                            result: Err(error),
+                        });
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn finish_session_load(&mut self, restoration: OpenRestoration, cx: &mut Context<Self>) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let Some(result) = session.read(cx).result() else {
+            return;
+        };
+        let path = session.read(cx).path().to_path_buf();
+        self.session_wait = None;
+        let OpenRestoration {
+            history,
+            epoch: history_epoch,
+            restore_position,
+        } = restoration;
+        let document_generation = self.document_generation;
+        let work = cx.background_executor().spawn(async move {
+            let pages = result
+                .as_ref()
+                .map(|document| document.pages())
+                .map_err(Clone::clone);
+            (pages, result)
+        });
+        cx.spawn(async move |this, cx| {
+            let (result, document) = work.await;
+            let saved_mode = if result.is_ok()
+                && let Some(history) = &history
+            {
+                history
+                    .reading_mode(path.clone(), history_epoch.unwrap_or(0))
+                    .await
             } else {
                 Ok(None)
             };
@@ -423,6 +498,7 @@ impl ReaderView {
                 match result {
                     Ok(pages) if !pages.is_empty() => {
                         opened = true;
+                        this.document = document.ok();
                         if let Ok(Some(mode)) = saved_mode {
                             this.reading_mode = match mode {
                                 ReadingView::Continuous => ReadingMode::Continuous,
@@ -434,43 +510,37 @@ impl ReaderView {
                         if let Err(error) = saved_mode {
                             this.status = format!("Reading mode could not be loaded: {error}");
                         }
-                        match normalized {
-                            Some(Ok(path)) => {
-                                this.record_path = Some(path.clone());
-                                if let Some(history) = history {
-                                    let record = history.record_at(path.clone(), history_epoch.unwrap_or(0));
-                                    let position = history.position(path, history_epoch.unwrap_or(0));
-                                    cx.spawn(async move |this, cx| {
-                                        let result = match record.await {
-                                            Ok(()) => position.await,
-                                            Err(error) => Err(error),
-                                        };
-                                        let _ = this.update(cx, |this, cx| {
-                                            if document_generation != this.document_generation {
-                                                return;
-                                            }
-                                            match result {
-                                                Ok(saved) => this.finish_position_load(
-                                                    if restore_position { saved } else { None }, cx
-                                                ),
-                                                Err(error) => {
-                                                    this.status = format!("Reading history could not be loaded: {error}");
-                                                    this.position_ready = true;
-                                                    cx.notify();
-                                                }
-                                            }
-                                        });
-                                    }).detach();
-                                } else {
-                                    this.finish_position_load(None, cx);
-                                }
-                            }
-                            Some(Err(error)) => {
-                                this.status = format!("Reading history could not be saved: {error}");
-                            }
-                            None => {}
-                        }
-                        if this.record_path.is_none() {
+                        this.record_path = Some(path.clone());
+                        if let Some(history) = history {
+                            let record =
+                                history.record_at(path.clone(), history_epoch.unwrap_or(0));
+                            let position = history.position(path, history_epoch.unwrap_or(0));
+                            cx.spawn(async move |this, cx| {
+                                let result = match record.await {
+                                    Ok(()) => position.await,
+                                    Err(error) => Err(error),
+                                };
+                                let _ = this.update(cx, |this, cx| {
+                                    if document_generation != this.document_generation {
+                                        return;
+                                    }
+                                    match result {
+                                        Ok(saved) => this.finish_position_load(
+                                            if restore_position { saved } else { None },
+                                            cx,
+                                        ),
+                                        Err(error) => {
+                                            this.status = format!(
+                                                "Reading history could not be loaded: {error}"
+                                            );
+                                            this.position_ready = true;
+                                            cx.notify();
+                                        }
+                                    }
+                                });
+                            })
+                            .detach();
+                        } else {
                             this.finish_position_load(None, cx);
                         }
                     }
@@ -479,7 +549,11 @@ impl ReaderView {
                 }
                 cx.emit(DocumentEvent::Opened {
                     generation: document_generation,
-                    result: if opened { Ok(()) } else { Err(this.status.clone()) },
+                    result: if opened {
+                        Ok(())
+                    } else {
+                        Err(this.status.clone())
+                    },
                 });
                 cx.notify();
             });
@@ -649,6 +723,9 @@ impl ReaderView {
     pub(crate) fn document_generation(&self) -> u64 {
         self.document_generation
     }
+    pub(crate) fn document(&self) -> Option<Arc<pdf::Document>> {
+        self.document.clone()
+    }
     pub(crate) fn record_path(&self) -> Option<&Path> {
         self.record_path.as_deref()
     }
@@ -814,7 +891,7 @@ impl ReaderView {
         if self.pages.is_empty() {
             return;
         }
-        let Some(path) = self.path.as_ref() else {
+        let Some(document) = self.document.clone() else {
             return;
         };
         let (top, _, height) = self.viewport();
@@ -825,10 +902,9 @@ impl ReaderView {
         else {
             return;
         };
-        let path = path.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::page_text(&path, request.page()) });
+            .spawn(async move { document.page_text(request.page()) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -1092,7 +1168,7 @@ impl ReaderView {
         if self.pages.is_empty() {
             return;
         }
-        let Some(path) = self.path.as_ref() else {
+        let Some(document) = self.document.clone() else {
             return;
         };
         let (top, _, height) = self.viewport();
@@ -1113,10 +1189,9 @@ impl ReaderView {
             request.page() + 1,
             (self.scale * 100.0).round()
         );
-        let path = path.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::render_bitmap(&path, request.page(), request.scale()) });
+            .spawn(async move { document.render_bitmap(request.page(), request.scale()) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -1139,7 +1214,7 @@ impl ReaderView {
         if self.pages.is_empty() {
             return;
         }
-        let Some(path) = self.path.as_ref() else {
+        let Some(document) = self.document.clone() else {
             return;
         };
         let (top, _, height) = self.viewport();
@@ -1147,10 +1222,9 @@ impl ReaderView {
         let Some(request) = self.links.request(visible, self.document_generation) else {
             return;
         };
-        let path = path.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::page_links(&path, request.page()) });
+            .spawn(async move { document.page_links(request.page()) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {

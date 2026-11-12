@@ -61,7 +61,7 @@ offsets to real content.
 `src/assets.rs` combines Kit's default component assets with only the extra
 reader icons used by zoom and fit controls; the full icon catalog is not embedded.
 `src/app/windows.rs` creates document windows, cycles focus, and owns
-the last-window policy; it does not share document or viewport state between readers.
+the last-window policy; it does not own document sessions or reader viewports.
 Each window mounts `app::document_window::DocumentWindow` inside GPUI Kit's
 `Root`, which owns component
 overlays and applies the theme's interface scale. The window uses Kit's
@@ -74,11 +74,11 @@ Open/Close/Next Window/Previous Window handlers. Those handlers are ancestors
 of the reader's focused regions, so sidebar and palette input still reach the
 correct window.
 
-The window strongly owns one reader entity, with no reverse reference. The
-reader remains the source of document identity, loading, and restoration;
-window and OS open requests call that same load path. A file-picker result
-checks the document generation rather than the raster generation, so a
-replacement document invalidates it but an intervening zoom does not.
+The window strongly owns one reader entity, with no reverse reference. Each
+reader joins a shared document session while retaining its own open generation
+and restoration; window and OS open requests call that same load path. A
+file-picker result checks the document generation rather than the raster
+generation, so a replacement document invalidates it but an intervening zoom does not.
 The native picker task belongs to the window lifetime. Deferred reader resize
 work uses a weak handle so a queued frame does not retain a closed reader.
 
@@ -94,8 +94,8 @@ window mounts their popup alongside the palette so neither is positioned
 relative to the smaller workspace below the title bar.
 
 `src/reader.rs` implements `ReaderView`: the central PDF surface, document
-identity and loading/restoration, navigation, selection, rendering, and
-document-owned marks coordination. It does not retain the sidebar or its
+session participation and window-local loading/restoration, navigation,
+selection, rendering, and document-owned marks coordination. It does not retain the sidebar or its
 panels, window chrome, the palette, or Recent dialogs. The former public
 `Preview` name remains an alias for callers adopting the narrower interface.
 `src/reader/commands.rs` declares document commands independently of physical
@@ -108,6 +108,26 @@ reply can affect the new document.
 `src/reader/rendering.rs` owns raster request selection, reply validation, and
 visible bitmap retention. The reader coordinates navigation commands,
 restoration, background execution, and presentation.
+`src/reader/document_session.rs` resolves canonical-path membership on the UI
+thread after off-thread path normalization. Concurrent and later normal opens
+join the same session, including relative-path and symlink aliases. Separate
+copies and distinct hard-link paths remain independent. The session loads one
+immutable PDF baseline off-thread; all raster, selection text, link, Contents,
+and Find requests use that baseline rather than rereading the path.
+The application registry holds only weak session handles. A reader holds its
+participation until replacement or closure; background requests and sidebar
+snapshots retain the immutable baseline, not membership. Closing one window
+does not invalidate another. After the final participant detaches, the next
+open loads a fresh baseline. Detecting external changes and reloading an
+existing session are separate, not-yet-implemented capabilities.
+Failed loads do not prevent a later normal open from retrying a repaired file.
+Navigation, zoom, reading mode, selection, focus, jumplists, and tool interaction
+state remain window-local. Each reader's monotonically increasing open generation
+and the existing tool revisions/raster tickets reject replies to replaced
+documents; weak owner updates reject replies after closure. Session loading is
+owned by the session, not its first window. Final detachment drops the load
+continuation; an already-running backend call may finish, but cannot install
+its reply into a later session or retain a closed window.
 `src/reader/tests.rs` contains only the integration-suite declarations and
 shared fixtures. The suites under `reader/tests/` group loading, reading modes,
 saved positions, navigation, rendering, selection, Find, and marks behavior.
@@ -119,10 +139,11 @@ Window-only composition, command routing, and focus tests remain beside
 it returns page dimensions, page geometry, positioned text, document outline
 entries and destinations, page-local link rectangles with backend-neutral
 destinations, and premultiplied BGRA pixels, not Hayro types, to
-the reader. The adapter currently reads and parses the document for each
-raster, text, and visible-page link request. Reusing a parsed
-document or prefetching pages should be driven by measurements, not a new
-worker architecture upfront.
+the reader. Its internal `Document` retains one parsed, immutable baseline per
+session, without exposing Hayro types to readers or tools. Processing uses
+background workers, and raster/text/link caches remain viewport-bounded and
+window-local. The existing path-based adapter entry points still serve
+standalone tools and PDF-boundary tests; production readers use session snapshots.
 See the [rendering validation](rendering-validation.md) for the backend choice
 and accepted limitations.
 
@@ -174,9 +195,9 @@ density changes invalidate pixels, pending tickets, and old failures together.
 An already-running backend call may finish after invalidation; it no longer
 owns the current request slot.
 
-Document loading and reading-mode save replies use the reader's document
-generation, not a raster ticket. Moving between displays while a PDF opens
-therefore cannot discard the document load. Raster scheduling, cache bounds,
+Session attachment, document loading, and reading-mode save replies use the
+reader's window-local document generation, not a raster ticket. Moving between
+displays while a PDF opens therefore cannot discard the document load. Raster scheduling, cache bounds,
 and reply ordering have direct tests under `src/reader/rendering/`; composed
 loading, zoom, density, and replacement tests live in
 `src/reader/tests/rendering.rs`.

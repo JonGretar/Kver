@@ -109,14 +109,77 @@ promise for the immediately following release.
 
 - Reload PDFs after rebuilds; SyncTeX forward/inverse navigation with LaTeX
   source files.
-- Notes, persistent text highlights, bookmarks, and annotation export. Decide
-  how annotations are stored and shared before promising PDF interoperability.
+- Persistent highlights, underlines, strikethrough, and squiggly underlines,
+  saved as standard annotations in the PDF without an export step. Start with
+  mouse-driven, page-local text selection and keyboard-operable commands;
+  keyboard visual selection comes later.
+- A document-wide Annotations list for supported text markup, with navigation,
+  recoloring, and deletion, including supported annotations from other readers.
+  Preserve unrelated annotation types and existing metadata when editing.
+- Explicit Save and Save As for annotation edits, with unsaved-state feedback
+  and Save / Discard / Cancel before closing a modified document. Note
+  authoring, area markup, and other annotation types are deferred.
+- Future Zotero library/annotation integration, with no assigned milestone or
+  date. Access to Zotero's annotation database and coordination with PDF-backed
+  annotations need a separate spec; no API or direct-database approach is
+  selected yet.
 - Split views, snapshots, overviews, and two-page or presentation layouts.
 - Smart jumps to references, bibliography navigation, and portals inspired by
   Sioyek.
 
 These capabilities can be promoted independently when they have a clear
 use case and an implementation path. They do not define a mandatory order.
+
+#### Text-markup behavior
+
+These are agreed requirements for the planned feature, not current app behavior.
+The [text-markup spec (#123)](https://github.com/JonGretar/Kver/issues/123)
+defines the complete scope, implementation boundaries, and testing decisions.
+
+- Start with one-shot creation from the current selection through keyboard
+  commands and a selection context menu. Keep the selection after creation;
+  revisit a persistent markup-tool mode later.
+- Offer five named preset colors, initially yellow for highlights and red for
+  line-based markup. Remember the last-used color per type during the session.
+  Preserve imported colors until explicitly changed. Custom palettes, opacity,
+  and line-thickness controls are deferred.
+- List supported markup in document order with copy text, navigation, recoloring,
+  and deletion. Use a plain list of marked text with a type indicator; decide the
+  GPUI Kit component and appearance during implementation. Keep entries whose
+  text cannot be recovered. Search, filters, whole-document annotation export,
+  and cross-document lists are deferred.
+- Selecting markup directly on the page is essential, alongside list access.
+  Disambiguate overlapping annotations rather than choosing an arbitrary target.
+  Preserve normal text dragging. Type conversion is deferred.
+- Support session undo/redo for creation, recoloring, and deletion, including
+  after Save. Prevent exact same-type duplicates; allow different markup types
+  on the same text and independent partially overlapping annotations. Merging,
+  splitting, and boundary dragging are deferred.
+- Reapplying the same markup type to an identical region selects the existing
+  annotation without duplicating, recoloring, or toggling it off, even when the
+  current creation color differs.
+- Disable editing of signed or encrypted PDFs initially. Allow edits to ordinary
+  read-only PDFs in memory, with Save As to a writable file. Retain unsaved edits
+  on save failure; do not bypass permissions or silently remove signatures.
+- Never silently overwrite an externally changed PDF. Retain local edits on a
+  conflict and offer saving a separate version or discarding edits and reloading,
+  without automatic merging. Reload clean documents while preserving the reading
+  position where possible.
+- Share annotation edits, undo/redo, and save state between windows displaying
+  the same document. Keep reading positions and text selections window-local;
+  closing one window must not discard edits still open in another.
+- Save As switches the shared editing session and all its windows to the new
+  file, leaving the original unchanged. Do not silently replace a destination
+  being edited in another Kver session.
+- External reload starts a new editing baseline and clears annotation undo/redo.
+  Ordinary Save preserves undo/redo.
+- Provide an optional app-wide Annotation author setting, initially blank,
+  applied to new annotations only. Do not infer a name from the operating-system
+  account or rewrite existing authorship when recoloring. Existing annotations
+  remain editable regardless of author. An onboarding dialog is deferred.
+- Protect unsaved edits when closing, replacing a document, or quitting.
+  Persistent crash recovery is deferred; unsaved edits can be lost on a crash
+  or power failure.
 
 ## Other platforms
 

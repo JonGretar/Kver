@@ -13,8 +13,8 @@ use super::document_window::{NavigateBack, NavigateForward};
 use super::windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 #[cfg(target_os = "macos")]
 use crate::reader::{
-    Continuous, Copy, NextPage, PreviousPage, ShowContents, ShowFind, SinglePage, ToggleSidebar,
-    UseDefaultReadingMode,
+    Continuous, Copy, NextPage, PreviousPage, ShowAnnotations, ShowContents, ShowFind, SinglePage,
+    ToggleSidebar, UseDefaultReadingMode,
 };
 #[cfg(target_os = "macos")]
 use crate::reading_history::ShowRecent;
@@ -137,6 +137,7 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
             ]),
             Menu::new("Navigate").items([
                 MenuItem::action("Contents", ShowContents),
+                MenuItem::action("Annotations", ShowAnnotations),
                 MenuItem::separator(),
                 MenuItem::action("Forward", NavigateForward).disabled(!can_forward),
                 MenuItem::action("Back", NavigateBack).disabled(!can_back),

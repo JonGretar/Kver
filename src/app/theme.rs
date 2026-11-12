@@ -17,6 +17,13 @@ pub(super) fn install(cx: &mut App) {
     Theme::change(mode, None, cx);
 }
 
+/// Selection on PDF pages has a paper-colored surface in either chrome theme.
+/// Keep this document-surface role distinct from primary chrome, which may be
+/// white in a dark/custom theme and disappear against the PDF.
+pub(crate) fn document_identification() -> gpui_kit::Hsla {
+    gpui_kit::rgb(0x1e66f5).into()
+}
+
 // Official palette roles: https://catppuccin.com/palette/
 struct Palette {
     base: &'static str,

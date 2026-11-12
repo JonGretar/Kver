@@ -45,8 +45,8 @@ their bindings. On macOS, edits that would promote a reader typing key to the
 first shortcut for a native menu action are rejected.
 Duplicate slots within a layer and one-key/multi-key prefix collisions in
 overlapping contexts are diagnostics, not implicit GPUI ordering rules.
-Reader, Sidebar, Contents, Settings, and About are stable product contexts;
-the sidebar contains Contents, while Reader and the auxiliary windows do not
+Reader, Sidebar, Contents, Annotations, Settings, and About are stable product contexts;
+the sidebar contains Contents and Annotations, while Reader and the auxiliary windows do not
 overlap. `src/key_context.rs` shares their GPUI names with the focused views.
 Features still own their Actions and handlers. GPUI owns dispatch, pending
 sequences, Escape cancellation, and focus invalidation. The application reads
@@ -104,6 +104,17 @@ as ordinary Rust state, without a separate entity or view back-reference.
 `src/reader/links.rs` retains visible-page link metadata and one current
 background request; replacing a document invalidates that request before its
 reply can affect the new document.
+`src/reader/annotations.rs` browses the session's supported text markup through
+Kit's virtualized List. The session owns one lazily loaded metadata catalog;
+each panel owns only list presentation, selected annotation identity, and
+excerpts. Page order followed by rotated-page top/left position defines list
+order, with original annotation slot as a stable tie-breaker within the loaded
+baseline. This is spatial order, not a promise of semantic reading order.
+Excerpts are extracted one annotated page at a time off-thread and published
+progressively. Document generations and catalog revisions reject late replies.
+Copy uses only text underneath valid quads, never attached comments. Missing
+text and malformed entries remain visible; usable geometry still navigates.
+The reader adds an identification outline rather than another markup fill.
 `src/reader/navigation.rs` owns shared layout and navigation-coordinate rules.
 `src/reader/rendering.rs` owns raster request selection, reply validation, and
 visible bitmap retention. The reader coordinates navigation commands,
@@ -120,6 +131,12 @@ snapshots retain the immutable baseline, not membership. Closing one window
 does not invalidate another. After the final participant detaches, the next
 open loads a fresh baseline. Detecting external changes and reloading an
 existing session are separate, not-yet-implemented capabilities.
+Session epochs distinguish annotation identities across loaded baselines.
+Backend-neutral `pdf::annotations` types preserve PDF document-space quad point
+order, markup kind, color space, opacity, and supported metadata. Imported
+identity serials refer to page/annotation slots only within that epoch; they
+are not durable cross-reader identifiers. Malformed supported annotations are
+readonly, with a valid PDF rectangle used only as a navigation fallback.
 Failed loads do not prevent a later normal open from retrying a repaired file.
 Navigation, zoom, reading mode, selection, focus, jumplists, and tool interaction
 state remain window-local. Each reader's monotonically increasing open generation

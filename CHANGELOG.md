@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Browse existing highlights, underlines, strikethroughs, and squiggly underlines in the Annotations sidebar. Jump to marked passages and copy their text; annotations without recoverable text remain listed.
+
 ### Changed
 
 - Search settings and resize their sidebar in the new GPUI Kit settings layout. Appearance and keyboard preset can still be reset individually; other settings and their saved values are unchanged.

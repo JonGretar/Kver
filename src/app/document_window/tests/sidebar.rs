@@ -237,6 +237,8 @@ fn sidebar_tabs_preserve_pointer_keyboard_and_panel_focus(cx: &mut TestAppContex
         window.press("tab", cx);
         assert_eq!(window.find("sidebar-contents").focused(), Some(true));
         window.press("tab", cx);
+        assert_eq!(window.find("sidebar-annotations").focused(), Some(true));
+        window.press("tab", cx);
         assert_eq!(window.find("sidebar-find").focused(), Some(true));
         window.press("enter", cx);
     })

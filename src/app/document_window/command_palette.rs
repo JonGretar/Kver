@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use super::{
     NavigateBack, NavigateForward, OpenPdf,
-    sidebar::{ShowContents, ShowFind, ToggleSidebar},
+    sidebar::{ShowAnnotations, ShowContents, ShowFind, ToggleSidebar},
 };
 use crate::{
     app::windows::{NewWindow, NextWindow, PreviousWindow},
@@ -87,6 +87,7 @@ impl CommandPalette {
             command("Next match", NextMatch, available.has_matches),
             command("Previous match", PreviousMatch, available.has_matches),
             command("Contents", ShowContents, has_document),
+            command("Annotations", ShowAnnotations, has_document),
             command("Back", NavigateBack, available.can_back),
             command("Forward", NavigateForward, available.can_forward),
             command("Toggle Sidebar", ToggleSidebar, has_document),

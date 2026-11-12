@@ -1,8 +1,9 @@
 //! Reader geometry drives layout; only the viewport owns bitmaps.
 
+mod annotations;
 mod commands;
 mod contents;
-mod document_session;
+pub(crate) mod document_session;
 mod find;
 mod links;
 mod marks;
@@ -11,8 +12,11 @@ mod rendering;
 mod selection;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
-pub use crate::app::document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar};
+pub use crate::app::document_window::sidebar::{
+    ShowAnnotations, ShowContents, ShowFind, ToggleSidebar,
+};
 pub use crate::reading_history::ShowRecent;
+pub(crate) use annotations::AnnotationsPanel;
 pub use commands::*;
 pub use contents::ActivateOutline;
 pub(crate) use contents::ContentsPanel;
@@ -98,6 +102,7 @@ pub struct ReaderView {
     marks: Option<Entity<LocalMarks>>,
     marks_subscriptions: Vec<Subscription>,
     find_highlight: Option<(find_search::FindMatch, u64)>,
+    annotation_identification: Option<(usize, [f64; 4])>,
     status: String,
 }
 
@@ -206,6 +211,7 @@ impl ReaderView {
             marks: None,
             marks_subscriptions: Vec::new(),
             find_highlight: None,
+            annotation_identification: None,
             status: "Open a PDF to start reading".into(),
         };
         if reader.path.is_some() {
@@ -224,6 +230,7 @@ impl ReaderView {
         self.marks = None;
         self.marks_subscriptions.clear();
         self.find_highlight = None;
+        self.annotation_identification = None;
         self.selection.reset();
         self.links.reset();
         self.path = Some(path);
@@ -376,6 +383,52 @@ impl ReaderView {
             self.layout()
                 .offset_for(Position { page: hit.page, y }, height * 0.25),
         );
+        self.sync_viewport(cx);
+        self.emit_jump(before, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn navigate_annotation(
+        &mut self,
+        generation: u64,
+        revision: u64,
+        annotation: &pdf::annotations::Annotation,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.document_generation
+            || annotation.page() >= self.pages.len()
+            || self.session.as_ref().is_none_or(|session| {
+                let session = session.read(cx);
+                session.epoch() != annotation.id().epoch() || session.revision() != revision
+            })
+        {
+            return;
+        }
+        let Some(document) = self.document.as_ref() else {
+            return;
+        };
+        let bounds = document.annotation_bounds(annotation);
+        self.annotation_identification = bounds.map(|b| (annotation.page(), b));
+        let before = self.jump_location();
+        let page = annotation.page();
+        self.position_touched = true;
+        self.focus_page(page);
+        let (_, width, height) = self.viewport();
+        self.apply_fit(page, Position { page, y: 0. }, (width, height), 0.);
+        let [left, top, _, _] = bounds.unwrap_or([0.; 4]);
+        self.scroll_to(
+            (left as f32 * self.scale - width * 0.1).max(0.),
+            self.layout().offset_for(
+                Position {
+                    page,
+                    y: top as f32,
+                },
+                height * 0.25,
+            ),
+        );
+        if bounds.is_none() {
+            self.status = "This annotation has no usable location; showing its page".into();
+        }
         self.sync_viewport(cx);
         self.emit_jump(before, cx);
         cx.notify();
@@ -725,6 +778,10 @@ impl ReaderView {
     }
     pub(crate) fn document(&self) -> Option<Arc<pdf::Document>> {
         self.document.clone()
+    }
+
+    pub(crate) fn session(&self) -> Option<Entity<DocumentSession>> {
+        self.session.clone()
     }
     pub(crate) fn record_path(&self) -> Option<&Path> {
         self.record_path.as_deref()
@@ -1345,6 +1402,25 @@ impl Render for ReaderView {
                         .w(px((highlight.width * self.scale as f64) as f32))
                         .h(px((highlight.height * self.scale as f64) as f32))
                         .bg(gpui::rgba(0x278acb70)),
+                );
+            }
+            if let Some((_, [left, top, right, bottom])) = self
+                .annotation_identification
+                .filter(|(page, _)| *page == index)
+            {
+                // PDF geometry in logical points; no extra markup fill is
+                // painted over the annotation's embedded appearance.
+                page = page.child(
+                    div()
+                        .id("annotation-identification")
+                        .test_support()
+                        .absolute()
+                        .left(px(left as f32 * self.scale))
+                        .top(px(top as f32 * self.scale))
+                        .w(px((right - left) as f32 * self.scale))
+                        .h(px((bottom - top) as f32 * self.scale))
+                        .border_2()
+                        .border_color(crate::app::theme::document_identification()),
                 );
             }
             if let Some(links) = self.links.visible(index) {

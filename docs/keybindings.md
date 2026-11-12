@@ -57,7 +57,7 @@ assignment without choosing another command is not supported yet:
 | Field | Meaning |
 | --- | --- |
 | `keys` | Required. A key such as `"right"` or `"cmd-shift-p"`, or a space-separated sequence such as `"g t"`. Use `cmd`, `ctrl`, `alt`, and `shift` as modifier names. |
-| `context` | Optional; defaults to `"global"`. Use `"reader"`, `"sidebar"`, `"contents"`, `"settings"`, or `"about"` to limit where the shortcut works. Contents inherits Sidebar; a reader shortcut does not fire while typing in a dialog or palette. |
+| `context` | Optional; defaults to `"global"`. Use `"reader"`, `"sidebar"`, `"contents"`, `"annotations"`, `"settings"`, or `"about"` to limit where the shortcut works. Contents and Annotations inherit Sidebar; a reader shortcut does not fire while typing in a dialog or palette. |
 | `command` | Required. Lowercase, hyphenated command name; see the list below. |
 | `platform` | Optional; one of `"mac"`, `"linux"`, or `"windows"`. Without it, the entry applies on every platform. |
 

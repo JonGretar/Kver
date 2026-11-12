@@ -28,6 +28,10 @@ use hayro::{
 
 use crate::coordinates::{PageTransform, Point};
 
+mod annotation_read;
+#[cfg(test)]
+mod annotation_read_tests;
+pub mod annotations;
 mod links;
 #[cfg(test)]
 pub(crate) use links::linked_fixture;
@@ -77,6 +81,55 @@ impl Document {
 
     pub(crate) fn page_links(&self, page: usize) -> Result<Vec<PageLink>, String> {
         links::links_in_pdf(&self.pdf, &self.path, page)
+    }
+
+    pub(crate) fn page_annotations(
+        &self,
+        page: usize,
+        epoch: u64,
+    ) -> Result<Vec<annotations::Annotation>, String> {
+        annotation_read::page_annotations(&self.pdf, page, epoch)
+    }
+
+    pub(crate) fn annotation_bounds(
+        &self,
+        annotation: &annotations::Annotation,
+    ) -> Option<[f64; 4]> {
+        let page = self.pdf.pages().get(annotation.page())?;
+        let [left, top, right, bottom] = annotation_read::page_bounds(
+            annotation,
+            PageTransform::from_coefficients(page.initial_transform(true).as_coeffs()),
+        )?;
+        let (width, height) = page.render_dimensions();
+        let bounds = [
+            left.max(0.),
+            top.max(0.),
+            right.min(f64::from(width)),
+            bottom.min(f64::from(height)),
+        ];
+        (bounds[0] < bounds[2] && bounds[1] < bounds[3]).then_some(bounds)
+    }
+
+    pub(crate) fn annotation_excerpts(
+        &self,
+        page: usize,
+        annotations: &[annotations::Annotation],
+    ) -> Result<Vec<(annotations::AnnotationId, Option<String>)>, String> {
+        // Annotation appearance streams may contain comment text. Quotations
+        // come only from page content underneath the markup.
+        let text = page_text_with_settings(
+            &self.pdf,
+            page,
+            InterpreterSettings {
+                render_annotations: false,
+                ..Default::default()
+            },
+        )?;
+        Ok(annotations
+            .iter()
+            .filter(|a| a.page() == page)
+            .map(|a| (a.id(), annotation_read::marked_text(a, &text)))
+            .collect())
     }
 
     #[cfg(feature = "gui")]
@@ -564,6 +617,14 @@ pub fn page_text_batch(
 }
 
 fn page_text_in_pdf(pdf: &Pdf, page_index: usize) -> Result<PageText, String> {
+    page_text_with_settings(pdf, page_index, InterpreterSettings::default())
+}
+
+fn page_text_with_settings(
+    pdf: &Pdf,
+    page_index: usize,
+    settings: InterpreterSettings,
+) -> Result<PageText, String> {
     let page = pdf
         .pages()
         .get(page_index)
@@ -576,7 +637,7 @@ fn page_text_in_pdf(pdf: &Pdf, page_index: usize) -> Result<PageText, String> {
         Rect::new(box_.x0, box_.y0, box_.x1, box_.y1),
         &cache,
         page.xref(),
-        InterpreterSettings::default(),
+        settings,
     );
     let mut collector = TextCollector {
         crop: Rect::new(crop.x0, crop.y0, crop.x1, crop.y1),

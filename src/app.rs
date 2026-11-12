@@ -8,7 +8,7 @@ pub mod document_window;
 pub mod keymap;
 pub mod menu;
 pub(crate) mod shortcut_label;
-mod theme;
+pub(crate) mod theme;
 pub mod windows;
 
 use std::path::PathBuf;

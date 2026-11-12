@@ -39,7 +39,7 @@ pub(super) fn page_annotations(
         let values = dict.get::<Array<'_>>(b"QuadPoints").and_then(numbers);
         let mut quads = Vec::new();
         if let Some(values) = values.filter(|v| !v.is_empty() && v.len() % 8 == 0) {
-            for values in values.chunks_exact(8) {
+            for values in values.as_chunks::<8>().0 {
                 if let Some(quad) = Quad::new(std::array::from_fn(|i| Point {
                     x: values[i * 2],
                     y: values[i * 2 + 1],
@@ -67,6 +67,7 @@ pub(super) fn page_annotations(
                 ];
                 (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
             });
+        malformed |= rect.is_none();
         let color = match dict.get::<Array<'_>>(b"C").and_then(numbers) {
             None if dict.get::<Object<'_>>(b"C").is_none() => AnnotationColor::Unspecified,
             Some(v) if v.iter().all(|v| (0.0..=1.0).contains(v)) => match v.as_slice() {
@@ -132,22 +133,18 @@ pub(super) fn page_annotations(
 
 fn numbers(array: Array<'_>) -> Option<Vec<f64>> {
     // Iterating as f64 would silently stop at the first malformed element.
-    array
+    let expected = array.raw_iter().count();
+    let values: Option<Vec<_>> = array
         .iter::<Object<'_>>()
         .map(|o| match o {
             Object::Number(n) if n.as_f64().is_finite() => Some(n.as_f64()),
             _ => None,
         })
-        .collect()
+        .collect();
+    values.filter(|values| values.len() == expected)
 }
 
 pub(super) fn page_bounds(annotation: &Annotation, transform: PageTransform) -> Option<[f64; 4]> {
-    let points: Vec<_> = if annotation.quads().is_empty() {
-        let [x0, y0, x1, y1] = annotation.fallback_rect()?;
-        vec![Point { x: x0, y: y0 }, Point { x: x1, y: y1 }]
-    } else {
-        annotation.quads().iter().flat_map(|q| q.points()).collect()
-    };
     let mut bounds = [
         f64::INFINITY,
         f64::INFINITY,
@@ -164,7 +161,7 @@ pub(super) fn page_bounds(annotation: &Annotation, transform: PageTransform) -> 
             Point { x: x1, y: y1 },
         ]
     } else {
-        points
+        annotation.quads().iter().flat_map(|q| q.points()).collect()
     };
     for point in points {
         let p = transform.document_to_page(point);
@@ -177,4 +174,64 @@ pub(super) fn page_bounds(annotation: &Annotation, transform: PageTransform) -> 
         .iter()
         .all(|v| v.is_finite() && v.abs() <= f32::MAX as f64)
         .then_some(bounds)
+}
+
+pub(super) fn marked_text(annotation: &Annotation, text: &super::PageText) -> Option<String> {
+    if annotation.is_readonly() || annotation.quads().is_empty() {
+        return None;
+    }
+    // Sort each quad's corners around its centre for containment only. Stored
+    // geometry remains untouched, including imported Z/perimeter point order.
+    let polygons: Vec<_> = annotation
+        .quads()
+        .iter()
+        .map(|quad| {
+            let mut points = quad.points();
+            let centre = Point {
+                x: points.iter().map(|p| p.x).sum::<f64>() / 4.,
+                y: points.iter().map(|p| p.y).sum::<f64>() / 4.,
+            };
+            points.sort_by(|a, b| {
+                (a.y - centre.y)
+                    .atan2(a.x - centre.x)
+                    .total_cmp(&(b.y - centre.y).atan2(b.x - centre.x))
+            });
+            points
+        })
+        .collect();
+    let mut result = Vec::new();
+    for line in &text.lines {
+        let mut marked = String::new();
+        for glyph in &text.glyphs[line.clone()] {
+            let centre = Point {
+                x: (glyph.start.x + glyph.ink_right.unwrap_or(glyph.end.x)) / 2.,
+                y: (glyph.top + glyph.bottom) / 2.,
+            };
+            if polygons.iter().any(|points| {
+                let mut positive = false;
+                let mut negative = false;
+                for i in 0..4 {
+                    let a = points[i];
+                    let b = points[(i + 1) % 4];
+                    let cross = (b.x - a.x) * (centre.y - a.y) - (b.y - a.y) * (centre.x - a.x);
+                    positive |= cross > 1e-6;
+                    negative |= cross < -1e-6;
+                }
+                !(positive && negative)
+            }) {
+                marked.push_str(&glyph.text);
+            } else if !marked.is_empty() {
+                // Disjoint quads must not silently concatenate unrelated
+                // fragments into a quotation that never existed on the page.
+                if !marked.trim().is_empty() {
+                    result.push(marked.trim().to_string());
+                }
+                marked.clear();
+            }
+        }
+        if !marked.trim().is_empty() {
+            result.push(marked.trim().to_string());
+        }
+    }
+    (!result.is_empty()).then(|| result.join("\n"))
 }

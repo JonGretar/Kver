@@ -49,14 +49,29 @@ pub struct Quad {
 
 impl Quad {
     pub fn new(points: [Point; 4]) -> Option<Self> {
-        if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        if points.iter().any(|p| {
+            !p.x.is_finite()
+                || !p.y.is_finite()
+                || p.x.abs() > f32::MAX as f64
+                || p.y.abs() > f32::MAX as f64
+        }) {
             return None;
         }
-        // Accept both PDF perimeter order and the widely used Z order, but
-        // reject collapsed/collinear regions. Do not reorder stored points.
+        // Accept both PDF perimeter order and the widely used Z order.
+        // Validate the convex region without changing stored point order.
+        let centre = Point {
+            x: points.iter().map(|p| p.x).sum::<f64>() / 4.,
+            y: points.iter().map(|p| p.y).sum::<f64>() / 4.,
+        };
+        let mut corners = points;
+        corners.sort_by(|a, b| {
+            (a.y - centre.y)
+                .atan2(a.x - centre.x)
+                .total_cmp(&(b.y - centre.y).atan2(b.x - centre.x))
+        });
         let cross =
             |a: Point, b: Point, c: Point| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        if (1..3).all(|i| cross(points[0], points[i], points[i + 1]).abs() < 1e-8) {
+        if (0..4).any(|i| cross(corners[i], corners[(i + 1) % 4], corners[(i + 2) % 4]) <= 1e-8) {
             return None;
         }
         Some(Self { points })

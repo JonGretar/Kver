@@ -47,11 +47,12 @@ pub fn resolve_config(
                 "reader" => Context::Reader,
                 "sidebar" => Context::Sidebar,
                 "contents" => Context::Contents,
+                "annotations" => Context::Annotations,
                 "settings" => Context::Settings,
                 "about" => Context::About,
                 name => {
                     return Err(format!(
-                        "{where_}: unknown context {name:?}; use global, reader, sidebar, contents, settings, or about"
+                        "{where_}: unknown context {name:?}; use global, reader, sidebar, contents, annotations, settings, or about"
                     ));
                 }
             };
@@ -162,6 +163,7 @@ commands! {
         "show-settings" => ShowSettings, "close-settings" => CloseSettings,
         "close-about" => CloseAbout, "command-palette" => ShowCommandPalette,
         "show-contents" => ShowContents, "show-find" => ShowFind,
+        "show-annotations" => ShowAnnotations,
         "toggle-sidebar" => ToggleSidebar, "activate-outline" => ActivateOutline,
         "next-page" => NextPage, "previous-page" => PreviousPage,
         "scroll-down" => ScrollDown, "scroll-up" => ScrollUp,

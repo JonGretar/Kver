@@ -20,7 +20,7 @@ The session registry is weak: closing or replacing one reader detaches only
 that participant, and the next open after the final detachment loads afresh.
 Relative paths and symlinks join; copies and distinct hard-link paths do not.
 
-Find, Contents, marks, and Recent own their retained interaction and asynchronous
+Find, Contents, Annotations, marks, and Recent own their retained interaction and asynchronous
 work where their lifetimes differ. Navigation geometry, selection rules, and
 raster scheduling use ordinary Rust state rather than additional entities.
 The reader remains the window-local document-generation authority; cooperating
@@ -28,8 +28,12 @@ tools receive the shared baseline with that generation and reject obsolete
 replies. Background work never owns session membership or keeps a closed reader
 alive. Raster tickets also reject obsolete zoom/density work. All persistent
 reading data uses the same serialized history worker, separate from the PDF
-baseline. External-change reload and annotation editing are not implemented by
-this session boundary.
+baseline. The session also owns one shared, lazy annotation metadata catalog.
+Annotations panels retain window-local list selection and extracted excerpts,
+not competing document models. Backend-neutral, epoch-scoped annotation
+identities let browsing and future editing use the same representation while
+external reload invalidates old references. External-change reload and
+annotation mutation are not implemented by this browsing boundary.
 
 This favors local ownership over spreading methods on one large entity across
 files, global `views`/`models` directories, or one crate per feature. It adds

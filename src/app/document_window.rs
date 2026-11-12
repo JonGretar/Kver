@@ -26,9 +26,9 @@ use crate::{
     reader::{
         Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpEvent,
         JumpLocalMark, MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView,
-        ScrollDown, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowContents,
-        ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage, ToggleSidebar,
-        UseDefaultReadingMode, ZoomIn, ZoomOut,
+        ScrollDown, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowAnnotations,
+        ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage,
+        ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::{
         ShowRecent,
@@ -58,6 +58,7 @@ pub struct DocumentWindow {
     palette: Option<CommandPalette>,
     sidebar: Option<Entity<ReaderSidebar>>,
     panel_subscriptions: Vec<Subscription>,
+    annotation_session: Option<Subscription>,
     _reader_observation: Subscription,
     _reader_focus_subscription: Subscription,
     _settings_observation: Subscription,
@@ -145,6 +146,7 @@ impl DocumentWindow {
             palette: None,
             sidebar: None,
             panel_subscriptions: Vec::new(),
+            annotation_session: None,
             _reader_observation: reader_observation,
             _reader_focus_subscription: reader_focus_subscription,
             _settings_observation: settings_observation,
@@ -221,6 +223,7 @@ impl DocumentWindow {
             let sidebar = cx.new(|cx| ReaderSidebar::new(window, cx));
             let contents = sidebar.read(cx).contents().clone();
             let find = sidebar.read(cx).find().clone();
+            let annotations = sidebar.read(cx).annotations().clone();
             let query_focus = find.read(cx).query_focus(cx);
             self.panel_subscriptions = vec![
                 cx.on_focus(&query_focus, window, |this, window, cx| {
@@ -257,22 +260,62 @@ impl DocumentWindow {
                         });
                     }
                 }),
+                cx.subscribe(&annotations, |this, _, navigation, cx| {
+                    this.reader.update(cx, |reader, cx| {
+                        reader.navigate_annotation(
+                            navigation.generation,
+                            navigation.revision,
+                            &navigation.annotation,
+                            cx,
+                        );
+                    });
+                }),
             ];
             self.sidebar = Some(sidebar);
-            self.sync_sidebar_document(cx);
+            self.sync_sidebar_document(window, cx);
         }
         if let Some(sidebar) = &self.sidebar {
             sidebar.update(cx, |sidebar, cx| sidebar.open(panel, window, cx));
         }
+        if panel == SidebarPanel::Annotations {
+            self.load_annotations(window, cx);
+        }
         self.refresh_navigation_menu(window, cx);
     }
 
-    fn sync_sidebar_document(&self, cx: &mut Context<Self>) {
+    fn load_annotations(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.reader.read(cx).session() {
+            session.update(cx, |session, cx| session.ensure_annotations(cx));
+            self.sync_annotations(window, cx);
+        }
+    }
+
+    fn sync_annotations(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sidebar) = &self.sidebar else {
+            return;
+        };
+        let Some(session) = self.reader.read(cx).session() else {
+            return;
+        };
+        let session = session.read(cx);
+        let revision = session.revision();
+        let catalog = session.annotations();
+        sidebar
+            .read(cx)
+            .annotations()
+            .clone()
+            .update(cx, |panel, cx| {
+                panel.set_catalog(revision, catalog, window, cx)
+            });
+    }
+
+    fn sync_sidebar_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(sidebar) = &self.sidebar else { return };
         let reader = self.reader.read(cx);
         let generation = reader.document_generation();
         let count = reader.page_count().unwrap_or(0);
         let document = reader.document();
+        let session = reader.session();
         sidebar.update(cx, |sidebar, cx| {
             sidebar.contents().update(cx, |contents, cx| {
                 contents.set_document(generation, document.clone(), cx);
@@ -281,9 +324,20 @@ impl DocumentWindow {
                 }
             });
             sidebar.find().update(cx, |find, cx| {
-                find.set_document(generation, document, count, cx)
+                find.set_document(generation, document.clone(), count, cx)
+            });
+            sidebar.annotations().update(cx, |panel, cx| {
+                panel.set_document(generation, document, window, cx);
             });
         });
+        self.annotation_session = session.map(|session| {
+            cx.observe_in(&session, window, |this, _, window, cx| {
+                this.sync_annotations(window, cx);
+            })
+        });
+        if self.sidebar_panel(cx) == Some(SidebarPanel::Annotations) {
+            self.load_annotations(window, cx);
+        }
     }
 
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -567,7 +621,18 @@ impl DocumentWindow {
             self.reader
                 .update(cx, |reader, cx| reader.select_page(page, cx));
         }
-        self.sync_sidebar_document(cx);
+        self.sync_sidebar_document(window, cx);
+        if let DocumentEvent::Opened {
+            result: Err(error), ..
+        } = event
+            && let Some(sidebar) = &self.sidebar
+        {
+            sidebar
+                .read(cx)
+                .annotations()
+                .clone()
+                .update(cx, |panel, cx| panel.document_failed(error, cx));
+        }
         if self
             .recent_open
             .as_ref()
@@ -667,6 +732,9 @@ impl Render for DocumentWindow {
             }))
             .on_action(cx.listener(|this, _: &ShowFind, window, cx| {
                 this.show_sidebar(SidebarPanel::Find, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowAnnotations, window, cx| {
+                this.show_sidebar(SidebarPanel::Annotations, window, cx)
             }))
             .on_action(
                 cx.listener(|this, _: &ToggleSidebar, window, cx| this.toggle_sidebar(window, cx)),

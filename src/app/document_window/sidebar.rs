@@ -13,15 +13,19 @@ use gpui_kit::{
     },
 };
 
-use crate::reader::{ContentsPanel, FindPanel};
+use crate::reader::{AnnotationsPanel, ContentsPanel, FindPanel};
 
-gpui_kit::actions!(kver, [ShowContents, ShowFind, ToggleSidebar]);
+gpui_kit::actions!(
+    kver,
+    [ShowContents, ShowFind, ShowAnnotations, ToggleSidebar]
+);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SidebarPanel {
     #[default]
     Contents,
     Find,
+    Annotations,
 }
 
 const DEFAULT_WIDTH_REMS: f32 = 16.;
@@ -45,6 +49,7 @@ pub struct ReaderSidebar {
     width_rems: f32,
     find: Entity<FindPanel>,
     contents: Entity<ContentsPanel>,
+    annotations: Entity<AnnotationsPanel>,
 }
 
 impl ReaderSidebar {
@@ -55,6 +60,7 @@ impl ReaderSidebar {
             width_rems: DEFAULT_WIDTH_REMS,
             find: cx.new(|cx| FindPanel::new(window, cx)),
             contents: cx.new(ContentsPanel::new),
+            annotations: cx.new(|cx| AnnotationsPanel::new(window, cx)),
         }
     }
 
@@ -103,6 +109,10 @@ impl ReaderSidebar {
         &self.contents
     }
 
+    pub(crate) fn annotations(&self) -> &Entity<AnnotationsPanel> {
+        &self.annotations
+    }
+
     pub fn open(&mut self, panel: SidebarPanel, window: &mut Window, cx: &mut Context<Self>) {
         self.active = Some(panel);
         self.last = panel;
@@ -111,6 +121,9 @@ impl ReaderSidebar {
             SidebarPanel::Contents => self
                 .contents
                 .update(cx, |contents, cx| contents.focus(window, cx)),
+            SidebarPanel::Annotations => self
+                .annotations
+                .update(cx, |panel, cx| panel.focus(window, cx)),
         }
         cx.notify();
     }
@@ -134,6 +147,11 @@ impl Render for ReaderSidebar {
         };
         let width_rems = self.width_rems(window);
         let panel = match active {
+            SidebarPanel::Annotations => div()
+                .flex_1()
+                .min_h_0()
+                .child(self.annotations.clone())
+                .into_any_element(),
             SidebarPanel::Find => div()
                 .flex_1()
                 .min_h_0()
@@ -191,16 +209,31 @@ impl Render for ReaderSidebar {
                             .child(
                                 Button::new("sidebar-contents")
                                     .label("Contents")
+                                    .tooltip("Contents")
                                     .flex_1()
+                                    .min_w_0()
                                     .selected(active == SidebarPanel::Contents)
                                     .on_click(|_, window, cx| {
                                         window.dispatch_action(Box::new(ShowContents), cx);
                                     }),
                             )
                             .child(
+                                Button::new("sidebar-annotations")
+                                    .label("Annotations")
+                                    .tooltip("Annotations")
+                                    .flex_1()
+                                    .min_w_0()
+                                    .selected(active == SidebarPanel::Annotations)
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(ShowAnnotations), cx);
+                                    }),
+                            )
+                            .child(
                                 Button::new("sidebar-find")
                                     .label("Find")
+                                    .tooltip("Find")
                                     .flex_1()
+                                    .min_w_0()
                                     .selected(active == SidebarPanel::Find)
                                     .on_click(|_, window, cx| {
                                         window.dispatch_action(Box::new(ShowFind), cx);

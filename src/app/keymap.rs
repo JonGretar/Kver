@@ -17,7 +17,7 @@ pub use config::resolve_config;
 use super::{
     commands::{AboutKver, CheckForUpdates, Quit},
     document_window::command_palette::ShowCommandPalette,
-    document_window::sidebar::{ShowContents, ShowFind, ToggleSidebar},
+    document_window::sidebar::{ShowAnnotations, ShowContents, ShowFind, ToggleSidebar},
     document_window::{NavigateBack, NavigateForward, OpenPdf},
     windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow},
 };
@@ -73,6 +73,7 @@ pub enum Context {
     Reader,
     Sidebar,
     Contents,
+    Annotations,
     Settings,
     About,
 }
@@ -84,6 +85,7 @@ impl Context {
             Self::Reader => Some(key_context::READER),
             Self::Sidebar => Some(key_context::SIDEBAR),
             Self::Contents => Some(key_context::CONTENTS),
+            Self::Annotations => Some(key_context::ANNOTATIONS),
             Self::Settings => Some(key_context::SETTINGS),
             Self::About => Some(key_context::ABOUT),
         }
@@ -92,7 +94,7 @@ impl Context {
     fn inherits_from(self, parent: Self) -> bool {
         self == parent
             || parent == Self::Global
-            || (self == Self::Contents && parent == Self::Sidebar)
+            || (matches!(self, Self::Contents | Self::Annotations) && parent == Self::Sidebar)
     }
 }
 
@@ -440,13 +442,7 @@ fn apply_layer(
 }
 
 fn contexts_overlap(a: Context, b: Context) -> bool {
-    a == b
-        || a == Context::Global
-        || b == Context::Global
-        || matches!(
-            (a, b),
-            (Context::Sidebar, Context::Contents) | (Context::Contents, Context::Sidebar)
-        )
+    a.inherits_from(b) || b.inherits_from(a)
 }
 
 fn validate_prefixes(slots: &[Slot]) -> Result<(), Diagnostic> {
@@ -654,6 +650,7 @@ fn common() -> Vec<Entry> {
         Entry::bind("cmd-t", Context::Global, ShowContents),
         Entry::bind("escape", Context::Sidebar, ToggleSidebar),
         Entry::bind("enter", Context::Contents, ActivateOutline),
+        Entry::bind("cmd-c", Context::Annotations, Copy),
         // Native menus snapshot the first binding for an Action. Keep their
         // page accelerators modified; bare reader arrows must never become
         // menu key equivalents in a focused text control.

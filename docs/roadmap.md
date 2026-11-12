@@ -20,6 +20,9 @@ complete; further goals have no fixed release sequence. See
 **Next work:** No further reader gate is scheduled. Internal and another-PDF
 links, the jumplist, and Back/Forward controls are covered by
 [navigation spec #96](https://github.com/JonGretar/Kver/issues/96).
+Portable text markup and the Annotations list have an approved
+[spec and implementation tickets (#123)](https://github.com/JonGretar/Kver/issues/123),
+without an assigned release date or numbered milestone.
 GitHub Issues tracks live ownership and blockers for subsequent keyboard
 work; the [feature workflow](agents/workflow.md) explains how to check status.
 

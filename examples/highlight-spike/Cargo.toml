@@ -1,0 +1,12 @@
+[package]
+name = "kver-highlight-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Keep the writer experiment out of the application's dependency graph.
+[workspace]
+
+[dependencies]
+hayro = "=0.8.0"
+lopdf = { version = "=0.47.0", default-features = false }

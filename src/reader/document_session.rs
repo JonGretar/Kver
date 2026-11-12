@@ -2,20 +2,33 @@
 //! The registry is weak: only participating readers own sessions. Background
 //! consumers retain an immutable baseline, never a session or a reader.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, Task, WeakEntity};
 
-use crate::pdf;
+use crate::pdf::{self, annotations::Annotation};
+
+static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 struct Sessions(HashMap<PathBuf, WeakEntity<DocumentSession>>);
 
 impl Global for Sessions {}
 
-pub(super) struct DocumentSession {
+pub(crate) struct DocumentSession {
     path: PathBuf,
     result: Option<Result<Arc<pdf::Document>, String>>,
+    epoch: u64,
+    revision: u64,
+    annotations: Option<Result<Arc<Vec<Annotation>>, String>>,
+    annotation_load: Option<Task<()>>,
     _load: Task<()>,
 }
 
@@ -56,6 +69,10 @@ impl DocumentSession {
         Self {
             path,
             result: None,
+            epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
+            revision: 0,
+            annotations: None,
+            annotation_load: None,
             _load: cx.spawn(async move |this, cx| {
                 let result = work.await;
                 let _ = this.update(cx, |this, cx| {
@@ -72,5 +89,47 @@ impl DocumentSession {
 
     pub(super) fn path(&self) -> &std::path::Path {
         &self.path
+    }
+
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn annotations(&self) -> Option<Result<Arc<Vec<Annotation>>, String>> {
+        self.annotations.clone()
+    }
+
+    /// The session owns one metadata catalog for both imported and authored
+    /// annotations. Opening a panel never extracts text or rasterizes pages.
+    pub(crate) fn ensure_annotations(&mut self, cx: &mut Context<Self>) {
+        if self.annotations.is_some() || self.annotation_load.is_some() {
+            return;
+        }
+        let Some(Ok(document)) = self.result() else {
+            return;
+        };
+        let epoch = self.epoch;
+        let work = cx.background_executor().spawn(async move {
+            let mut annotations = Vec::new();
+            for page in 0..document.pages().len() {
+                annotations.extend(document.page_annotations(page, epoch)?);
+            }
+            Ok(Arc::new(annotations))
+        });
+        self.annotation_load = Some(cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.epoch != epoch {
+                    return;
+                }
+                this.annotations = Some(result);
+                this.annotation_load = None;
+                cx.notify();
+            });
+        }));
     }
 }

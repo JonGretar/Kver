@@ -2,7 +2,7 @@
 
 mod commands;
 mod contents;
-mod document_session;
+pub(crate) mod document_session;
 mod find;
 mod links;
 mod marks;
@@ -725,6 +725,10 @@ impl ReaderView {
     }
     pub(crate) fn document(&self) -> Option<Arc<pdf::Document>> {
         self.document.clone()
+    }
+
+    pub(crate) fn session(&self) -> Option<Entity<DocumentSession>> {
+        self.session.clone()
     }
     pub(crate) fn record_path(&self) -> Option<&Path> {
         self.record_path.as_deref()

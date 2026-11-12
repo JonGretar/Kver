@@ -1,6 +1,8 @@
 //! Provisional PDF backend for the reader prototype.
 //!
 //! The UI receives bitmap pixels and document-space text geometry, never Hayro types.
+#[cfg(feature = "gui")]
+use std::path::PathBuf;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -30,6 +32,58 @@ mod links;
 #[cfg(test)]
 pub(crate) use links::linked_fixture;
 pub use links::{LinkDestination, PageLink, page_links};
+
+/// An immutable loaded PDF baseline. Backend types stay inside this adapter.
+/// Open and all processing methods must run off the UI thread.
+#[cfg(feature = "gui")]
+pub(crate) struct Document {
+    path: PathBuf,
+    pdf: Pdf,
+}
+
+#[cfg(feature = "gui")]
+impl Document {
+    pub(crate) fn open(path: &Path) -> Result<Self, String> {
+        let data = std::fs::read(path)
+            .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            pdf: open_pdf(data)?,
+        })
+    }
+
+    pub(crate) fn pages(&self) -> Vec<(f32, f32)> {
+        self.pdf
+            .pages()
+            .iter()
+            .map(|page| page.render_dimensions())
+            .collect()
+    }
+
+    pub(crate) fn page_text(&self, page: usize) -> Result<PageText, String> {
+        page_text_in_pdf(&self.pdf, page)
+    }
+
+    pub(crate) fn page_text_batch(
+        &self,
+        pages: std::ops::Range<usize>,
+    ) -> Vec<Result<PageText, String>> {
+        pages.map(|page| self.page_text(page)).collect()
+    }
+
+    pub(crate) fn outline(&self) -> Result<Vec<OutlineEntry>, String> {
+        outline_in_pdf(&self.pdf)
+    }
+
+    pub(crate) fn page_links(&self, page: usize) -> Result<Vec<PageLink>, String> {
+        links::links_in_pdf(&self.pdf, &self.path, page)
+    }
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn render_bitmap(&self, page: usize, scale: f32) -> Result<RenderedBitmap, String> {
+        bitmap_in_pdf(&self.pdf, page, scale)
+    }
+}
 
 pub struct RenderedPage {
     pub png: Vec<u8>,
@@ -129,6 +183,10 @@ pub fn document_outline(path: &Path) -> Result<Vec<OutlineEntry>, String> {
 
 fn outline_bytes(data: Vec<u8>) -> Result<Vec<OutlineEntry>, String> {
     let pdf = open_pdf(data)?;
+    outline_in_pdf(&pdf)
+}
+
+fn outline_in_pdf(pdf: &Pdf) -> Result<Vec<OutlineEntry>, String> {
     let xref = pdf.xref();
     let Some(catalog) = xref.get::<Dict<'_>>(xref.root_id()) else {
         return Ok(Vec::new());
@@ -177,7 +235,7 @@ fn outline_bytes(data: Vec<u8>) -> Result<Vec<OutlineEntry>, String> {
             title,
             depth,
             destination: dest
-                .and_then(|dest| outline_destination(dest, &pdf, &catalog, &names, &page_ids)),
+                .and_then(|dest| outline_destination(dest, pdf, &catalog, &names, &page_ids)),
         });
     }
     Ok(entries)
@@ -557,7 +615,12 @@ pub fn render_page(path: &Path, page_index: usize, scale: f32) -> Result<Rendere
 pub fn render_bitmap(path: &Path, page_index: usize, scale: f32) -> Result<RenderedBitmap, String> {
     let data =
         std::fs::read(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
-    let (pixmap, page_count, page_width, page_height) = rasterize(data, page_index, scale)?;
+    bitmap_in_pdf(&open_pdf(data)?, page_index, scale)
+}
+
+#[cfg(feature = "gui")]
+fn bitmap_in_pdf(pdf: &Pdf, page_index: usize, scale: f32) -> Result<RenderedBitmap, String> {
+    let (pixmap, page_count, page_width, page_height) = rasterize_pdf(pdf, page_index, scale)?;
     let width = u32::from(pixmap.width());
     let height = u32::from(pixmap.height());
     let mut bgra = pixmap.data_as_u8_slice().to_vec();
@@ -623,11 +686,18 @@ fn rasterize(
     page_index: usize,
     scale: f32,
 ) -> Result<(Pixmap, usize, f32, f32), String> {
+    rasterize_pdf(&open_pdf(data)?, page_index, scale)
+}
+
+fn rasterize_pdf(
+    pdf: &Pdf,
+    page_index: usize,
+    scale: f32,
+) -> Result<(Pixmap, usize, f32, f32), String> {
     if !scale.is_finite() || !(0.25..=8.0).contains(&scale) {
         return Err("Raster scale must be between 0.25 and 8".into());
     }
 
-    let pdf = open_pdf(data)?;
     let page_count = pdf.pages().len();
     let page = pdf
         .pages()

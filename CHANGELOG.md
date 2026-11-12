@@ -10,6 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - Search settings and resize their sidebar in the new GPUI Kit settings layout. Appearance and keyboard preset can still be reset individually; other settings and their saved values are unchanged.
+- Opening the same PDF in multiple windows keeps them on one loaded version, with independent reading positions, zoom, reading modes, and text selections.
 
 ### Fixed
 

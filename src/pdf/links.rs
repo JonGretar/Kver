@@ -12,7 +12,7 @@ use hayro::hayro_syntax::object::{
 
 use crate::coordinates::{PageTransform, Point};
 
-use super::{OutlineDestination, named_destinations, open_pdf, outline_destination};
+use super::{OutlineDestination, Pdf, named_destinations, open_pdf, outline_destination};
 
 #[derive(Clone, Debug)]
 pub struct PageLink {
@@ -58,6 +58,14 @@ pub fn page_links(path: &Path, page_index: usize) -> Result<Vec<PageLink>, Strin
 
 fn links_bytes(data: Vec<u8>, path: &Path, page_index: usize) -> Result<Vec<PageLink>, String> {
     let pdf = open_pdf(data)?;
+    links_in_pdf(&pdf, path, page_index)
+}
+
+pub(super) fn links_in_pdf(
+    pdf: &Pdf,
+    path: &Path,
+    page_index: usize,
+) -> Result<Vec<PageLink>, String> {
     let page = pdf
         .pages()
         .get(page_index)
@@ -136,7 +144,7 @@ fn links_bytes(data: Vec<u8>, path: &Path, page_index: usize) -> Result<Vec<Page
             }
             let destination = annotation
                 .get::<Object<'_>>(b"Dest")
-                .and_then(|object| outline_destination(object, &pdf, &catalog, &names, &page_ids))
+                .and_then(|object| outline_destination(object, pdf, &catalog, &names, &page_ids))
                 .map(LinkDestination::SameDocument)
                 .or_else(|| {
                     let action = annotation.get::<Dict<'_>>(b"A")?;
@@ -146,7 +154,7 @@ fn links_bytes(data: Vec<u8>, path: &Path, page_index: usize) -> Result<Vec<Page
                     {
                         b"GoTo" => outline_destination(
                             action.get::<Object<'_>>(b"D")?,
-                            &pdf,
+                            pdf,
                             &catalog,
                             &names,
                             &page_ids,

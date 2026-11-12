@@ -3,7 +3,7 @@
 use super::rendering::BITMAP_BUDGET;
 use super::*;
 use crate::app::keymap::install as bind_reader_keys;
-use crate::reading_history::LocalMark;
+use crate::reading_history::{LocalMark, RecentStore};
 use crate::settings_ui::ShowSettings;
 use gpui_kit::{AnyWindowHandle, TestAppContext, point, size, test::TestWindowExt};
 use std::collections::BTreeMap;
@@ -17,6 +17,7 @@ mod positions;
 mod reading_mode;
 mod rendering;
 mod selection;
+mod sessions;
 mod vim;
 use rendering::cached_pages;
 

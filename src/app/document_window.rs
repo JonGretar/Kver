@@ -272,18 +272,16 @@ impl DocumentWindow {
         let reader = self.reader.read(cx);
         let generation = reader.document_generation();
         let count = reader.page_count().unwrap_or(0);
-        let path = (count > 0)
-            .then(|| reader.path().map(ToOwned::to_owned))
-            .flatten();
+        let document = reader.document();
         sidebar.update(cx, |sidebar, cx| {
             sidebar.contents().update(cx, |contents, cx| {
-                contents.set_document(generation, path.clone(), cx);
+                contents.set_document(generation, document.clone(), cx);
                 if sidebar.active() == Some(SidebarPanel::Contents) {
                     contents.ensure_loaded(cx);
                 }
             });
             sidebar.find().update(cx, |find, cx| {
-                find.set_document(generation, path, count, cx)
+                find.set_document(generation, document, count, cx)
             });
         });
     }

@@ -1,6 +1,6 @@
 //! Lazy outline loading, tree interaction, and document-space navigation.
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use crate::pdf::{self, OutlineDestination, OutlineEntry};
 use gpui_kit::{
@@ -39,7 +39,7 @@ impl OutlineNavigation {
 
 pub(crate) struct ContentsPanel {
     focus: FocusHandle,
-    path: Option<PathBuf>,
+    document: Option<Arc<pdf::Document>>,
     generation: u64,
     task: Option<Task<()>>,
     outline: Option<Result<Arc<Vec<OutlineEntry>>, String>>,
@@ -52,7 +52,7 @@ impl ContentsPanel {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle().tab_stop(true),
-            path: None,
+            document: None,
             generation: 0,
             task: None,
             outline: None,
@@ -65,11 +65,11 @@ impl ContentsPanel {
     pub(crate) fn set_document(
         &mut self,
         generation: u64,
-        path: Option<PathBuf>,
+        document: Option<Arc<pdf::Document>>,
         cx: &mut Context<Self>,
     ) {
         self.generation = generation;
-        self.path = path;
+        self.document = document;
         self.task = None;
         self.outline = None;
         self.tree.update(cx, |tree, cx| tree.set_items(vec![], cx));
@@ -80,13 +80,13 @@ impl ContentsPanel {
         if self.outline.is_some() || self.task.is_some() {
             return;
         }
-        let Some(path) = self.path.clone() else {
+        let Some(document) = self.document.clone() else {
             return;
         };
         let generation = self.generation;
         let work = cx
             .background_executor()
-            .spawn(async move { pdf::document_outline(&path) });
+            .spawn(async move { document.outline() });
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update_in(cx, |this, window, cx| {

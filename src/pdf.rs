@@ -356,9 +356,12 @@ pub struct TextGlyph {
 pub struct PageText {
     pub transform: PageTransform,
     pub glyphs: Vec<TextGlyph>,
-    /// Visual reading order for ordinary horizontal text, in PDF page coordinates.
+    /// Horizontal line fragments in geometric reading order. Ranges need not
+    /// be adjacent: a column continues down before reading its neighbor.
     pub lines: Vec<std::ops::Range<usize>>,
 }
+
+mod text_layout;
 
 fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> {
     glyphs.sort_by(|a, b| b.start.y.total_cmp(&a.start.y));
@@ -371,10 +374,23 @@ fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> 
             end += 1;
         }
         glyphs[start..end].sort_by(|a, b| a.start.x.total_cmp(&b.start.x));
-        lines.push(start..end);
+        // A common baseline does not imply a common line: columns and table
+        // cells can share it. Do not draw a selection rectangle over a gutter.
+        let mut fragment = start;
+        for index in start + 1..end {
+            let previous = &glyphs[index - 1];
+            let next = &glyphs[index];
+            let height = (previous.top - previous.bottom).min(next.top - next.bottom);
+            let right = previous.ink_right.unwrap_or(previous.end.x);
+            if next.start.x - right > text_layout::gutter_width(height) {
+                lines.push(fragment..index);
+                fragment = index;
+            }
+        }
+        lines.push(fragment..end);
         start = end;
     }
-    lines
+    text_layout::reading_order(glyphs, lines)
 }
 
 struct TextCollector {

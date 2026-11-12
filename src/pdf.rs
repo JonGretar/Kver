@@ -28,6 +28,8 @@ use hayro::{
 
 use crate::coordinates::{PageTransform, Point};
 
+mod annotation_read;
+pub mod annotations;
 mod links;
 #[cfg(test)]
 pub(crate) use links::linked_fixture;
@@ -77,6 +79,25 @@ impl Document {
 
     pub(crate) fn page_links(&self, page: usize) -> Result<Vec<PageLink>, String> {
         links::links_in_pdf(&self.pdf, &self.path, page)
+    }
+
+    pub(crate) fn page_annotations(
+        &self,
+        page: usize,
+        epoch: u64,
+    ) -> Result<Vec<annotations::Annotation>, String> {
+        annotation_read::page_annotations(&self.pdf, page, epoch)
+    }
+
+    pub(crate) fn annotation_bounds(
+        &self,
+        annotation: &annotations::Annotation,
+    ) -> Option<[f64; 4]> {
+        let page = self.pdf.pages().get(annotation.page())?;
+        annotation_read::page_bounds(
+            annotation,
+            PageTransform::from_coefficients(page.initial_transform(true).as_coeffs()),
+        )
     }
 
     #[cfg(feature = "gui")]

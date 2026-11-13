@@ -17,39 +17,25 @@ _Kver_ is Icelandic for a small book or booklet.
 
 ## Made for reading
 
-- **Read your way.** Scroll continuously or use Single Page mode. Zoom
-  freely, fit the page to the window, or fit its width.
-- **Find your place.** Search document text, browse the PDF's table of
-  contents, and follow supported PDF links. Go back and forward through
-  navigation jumps without retracing every scroll.
-- **Take text with you.** Select and copy passages from PDFs with a text layer.
-- **Keep useful places close.** Set document-local letter marks, optionally
-  name them, and return to them later. Open Recent can bring you back to
-  your last reading position.
-- **Use the keyboard—or the mouse.** Choose Standard or Vim shortcuts,
-  discover commands in the command palette, and customize bindings.
-- **Keep documents side by side.** Open independent windows with their own
-  reading position and zoom.
-- **Make it comfortable.** Choose Light, Dark, or System appearance, and
-  show or hide the toolbar and status bar. PDF pages keep their own colors.
+It like... reads PDFs. Just in a way that I like. With limited mouse-y-feel-y. TOC right when you need it. 
 
-Text selection, copying, and Find use the PDF's existing text layer. Kver
-does not perform OCR on image-only scans.
+No unneeded UI in your way and the little there is is mostly optional. Everything is behind a command palette thingy anyway.
+
+Oh... And vim style marks. Did I mention that?
 
 ![Kver displaying an illustrated PDF with the Contents sidebar open](docs/screenshots/reading.png)
 
 ### Text markup
 
-Select text to highlight, underline, strike through, or add a squiggly
-underline. Browse markup in the Annotations sidebar, jump to passages, and
-recolor or delete entries. Undo and redo edits, then save editable
-annotations into the PDF or use Save As to create a copy.
-
-Windows displaying the same PDF share annotation edits and unsaved state,
-while keeping their reading positions separate. Closing or replacing a
-modified document offers Save, Discard, or Cancel.
+It does that. Easy peasy with little thrill. Though it can also give you a list of annotation which is nice I guess.
 
 ![A selected highlight and an underlined passage, with both entries in the Annotations sidebar](docs/screenshots/annotations.png)
+
+### It's not finished yet
+
+A lot more is planned. check the [Roadmap](docs/roadmap.md) for some ideas of where I might take this..
+
+![Kver's onboarding display](docs/screenshots/onboarding.png)
 
 ## Install
 
@@ -72,8 +58,6 @@ Anyway** and confirm. Do not disable Gatekeeper globally.
 Windows and Linux are targets, but supported downloads are not available
 yet. Packaging and native testing need contributors—if you would like to
 help, [open an issue](https://github.com/JonGretar/Kver/issues).
-
-![Kver's onboarding display](docs/screenshots/onboarding.png)
 
 ## Get started
 

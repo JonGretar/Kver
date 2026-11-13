@@ -256,7 +256,8 @@ fn annotation_shortcuts_respect_find_input_undo_and_list_focus(cx: &mut TestAppC
     cx.update_window(handle, |_, window, cx| window.input("Alpha", cx))
         .unwrap();
     cx.run_until_parked();
-    press(cx, handle, "cmd-z");
+    // Kit inputs use Command on macOS and Control on Linux/Windows.
+    press(cx, handle, "secondary-z");
     assert_eq!(
         catalog(&document, cx),
         created,

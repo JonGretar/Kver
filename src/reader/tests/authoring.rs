@@ -14,6 +14,16 @@ pub(super) fn select_title(
     reader: &Entity<ReaderView>,
     path: &Path,
 ) {
+    select_glyphs(cx, window, reader, path, 0..=4);
+}
+
+pub(super) fn select_glyphs(
+    cx: &mut TestAppContext,
+    window: AnyWindowHandle,
+    reader: &Entity<ReaderView>,
+    path: &Path,
+    range: std::ops::RangeInclusive<usize>,
+) {
     let text = pdf::page_text(path, 0).unwrap();
     draw(cx, window);
     let (start, end) = reader.read_with(cx, |reader, _| {
@@ -26,7 +36,7 @@ pub(super) fn select_title(
             });
             point(px(screen.x as f32), px(screen.y as f32))
         };
-        (screen(0, 0.1), screen(4, 0.8))
+        (screen(*range.start(), 0.1), screen(*range.end(), 0.8))
     });
     cx.update_window(window, |_, frame, cx| frame.drag(start, end, cx))
         .unwrap();

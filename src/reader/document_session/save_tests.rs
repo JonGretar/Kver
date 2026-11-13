@@ -188,6 +188,21 @@ fn failed_background_commit_keeps_baseline_path_edits_and_retry_available(cx: &m
 fn identical_imported_highlight_keeps_identity_color_metadata_and_clean_baseline(
     cx: &mut TestAppContext,
 ) {
+    let root = tempfile::tempdir().unwrap();
+    let paths = crate::settings::AppPaths::for_locations(
+        root.path().join("config.toml"),
+        root.path().join("data"),
+    );
+    std::fs::write(
+        paths.config(),
+        "[application]\nannotation_author = 'Do not claim imported work'\n",
+    )
+    .unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        crate::settings_ui::install_with_paths(cx, Some(paths));
+    });
+    cx.run_until_parked();
     let path = std::fs::canonicalize("examples/annotations.pdf").unwrap();
     let session = cx.update(|cx| DocumentSession::join(path, cx));
     cx.run_until_parked();

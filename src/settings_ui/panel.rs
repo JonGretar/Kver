@@ -3,6 +3,7 @@ use super::*;
 use gpui_kit::AnyElement;
 use gpui_kit::component::{
     group_box::GroupBoxVariant,
+    input::{Input, InputEvent, InputState},
     setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings},
 };
 
@@ -12,6 +13,7 @@ pub(super) struct SettingsView {
     preset_focus: FocusHandle,
     zoom_focus: FocusHandle,
     settings: Entity<SettingsState>,
+    author: Entity<InputState>,
     clearing: bool,
     clear_error: Option<String>,
 }
@@ -20,6 +22,35 @@ impl SettingsView {
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let settings = state(cx);
         cx.observe(&settings, |_, _, cx| cx.notify()).detach();
+        let author = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(settings.read(cx).annotation_author())
+                .placeholder("No author")
+        });
+        cx.subscribe_in(&author, window, |this, input, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                let author = input.read(cx).value().to_string();
+                this.settings.update(cx, |settings, cx| {
+                    settings.choose(SettingsChange::AnnotationAuthor(author), cx);
+                });
+            }
+        })
+        .detach();
+        cx.observe_in(&settings, window, {
+            let mut previous = settings.read(cx).annotation_author().to_owned();
+            let author = author.clone();
+            move |_, settings, window, cx| {
+                let next = settings.read(cx).annotation_author();
+                if next != previous {
+                    previous = next.to_owned();
+                    if author.read(cx).value().as_str() != next {
+                        let next = next.to_owned();
+                        author.update(cx, |input, cx| input.set_value(next, window, cx));
+                    }
+                }
+            }
+        })
+        .detach();
         let focus = cx.focus_handle().tab_stop(true);
         let appearance_focus = cx.focus_handle().tab_stop(true);
         let preset_focus = cx.focus_handle().tab_stop(true);
@@ -31,6 +62,7 @@ impl SettingsView {
             preset_focus,
             zoom_focus,
             settings,
+            author,
             clearing: false,
             clear_error: None,
         }
@@ -204,6 +236,7 @@ impl Render for SettingsView {
         let preset = settings.keyboard_preset();
         let clear_owner = cx.weak_entity();
         let clearing = self.clearing;
+        let author = self.author.clone();
         let mut history = SettingGroup::new()
             .title("Reading history")
             .item(SettingItem::new(
@@ -306,6 +339,17 @@ impl Render for SettingsView {
                             reset: Some((Appearance::System, "appearance-reset")),
                             focus: Some(self.appearance_focus.clone()),
                         })),
+                        SettingGroup::new().title("Annotations").item(
+                            SettingItem::new("Annotation author", SettingField::render(move |options, _, _| {
+                                Input::new(&author)
+                                    .id("annotation-author")
+                                    .aria_label("Annotation author")
+                                    .with_size(options.size())
+                                    .disabled(options.is_disabled())
+                                    .w_48()
+                            }))
+                            .description("Used only for new annotations. Leave blank to omit your name; existing authors stay unchanged."),
+                        ),
                         SettingGroup::new()
                             .title("UI elements")
                             .items([

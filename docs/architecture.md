@@ -317,6 +317,14 @@ the working directory. The config chapters match the Settings pages:
 initial zoom is `[reader].initial_zoom` (`100_percent`, `fit_width`, or `fit_page`,
 default 100%); `[reader].reading_view` is `continuous` (default) or `page`.
 Both reader defaults apply once per document open, not to existing readers.
+`[application].annotation_author` is an optional string, blank by default.
+Settings changes apply only when creating new annotations, including in open
+documents. Blank or whitespace-only values omit personal authorship; Kver
+never looks up the OS identity. Existing/imported metadata is not rewritten,
+and author identity does not restrict editing. The Annotations list displays
+each annotation's stored author when nonblank, never the current preference
+as a fallback. Explicit PDF saving and in-memory annotation edits are independent
+of reading-history recording or deletion.
 `[application].quit_when_last_window_closes`, `[persistence].remember`, and
 `[persistence].reopen_at_last_position` default to true. Disabling restoration
 starts a new open at the beginning without erasing its previously saved place.

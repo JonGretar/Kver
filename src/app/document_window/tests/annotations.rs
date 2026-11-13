@@ -34,6 +34,11 @@ fn imported_annotations_browse_copy_and_identify_all_four_types(cx: &mut TestApp
                 "{:?}",
                 target.label()
             );
+            if serial == 3 {
+                assert!(target.label().unwrap().ends_with("; By Fixture author"));
+            } else {
+                assert!(!target.label().unwrap().contains("; By "));
+            }
             assert!(target.bounds().top() >= previous_bottom);
             previous_bottom = target.bounds().bottom();
             window.click(row(epoch, serial), cx);

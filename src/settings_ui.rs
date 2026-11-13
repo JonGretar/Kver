@@ -94,6 +94,10 @@ impl SettingsState {
         self.settings.keyboard_preset()
     }
 
+    pub fn annotation_author(&self) -> &str {
+        self.settings.annotation_author()
+    }
+
     pub fn ready(&self) -> bool {
         self.ready
     }
@@ -103,24 +107,26 @@ impl SettingsState {
     }
 
     fn choose(&mut self, change: SettingsChange, cx: &mut Context<Self>) {
-        let updated = match change {
-            SettingsChange::Appearance(choice) => self.settings.with_appearance(choice),
-            SettingsChange::ShowToolbar(show) => self.settings.with_show_toolbar(show),
-            SettingsChange::ShowStatusbar(show) => self.settings.with_show_statusbar(show),
-            SettingsChange::InitialZoom(choice) => self.settings.with_initial_zoom(choice),
-            SettingsChange::ReadingView(choice) => self.settings.with_reading_view(choice),
-            SettingsChange::KeyboardPreset(choice) => self.settings.with_keyboard_preset(choice),
+        let current = self.settings.clone();
+        let updated = match change.clone() {
+            SettingsChange::Appearance(choice) => current.with_appearance(choice),
+            SettingsChange::ShowToolbar(show) => current.with_show_toolbar(show),
+            SettingsChange::ShowStatusbar(show) => current.with_show_statusbar(show),
+            SettingsChange::InitialZoom(choice) => current.with_initial_zoom(choice),
+            SettingsChange::ReadingView(choice) => current.with_reading_view(choice),
+            SettingsChange::KeyboardPreset(choice) => current.with_keyboard_preset(choice),
+            SettingsChange::AnnotationAuthor(author) => current.with_annotation_author(author),
             SettingsChange::ReopenLastWindowsOnStartup(reopen) => {
-                self.settings.with_reopen_last_windows_on_startup(reopen)
+                current.with_reopen_last_windows_on_startup(reopen)
             }
             SettingsChange::QuitWhenLastWindowCloses(quit) => {
-                self.settings.with_quit_when_last_window_closes(quit)
+                current.with_quit_when_last_window_closes(quit)
             }
             SettingsChange::RememberReadingHistory(remember) => {
-                self.settings.with_remember_reading_history(remember)
+                current.with_remember_reading_history(remember)
             }
             SettingsChange::ReopenAtLastPosition(reopen) => {
-                self.settings.with_reopen_at_last_position(reopen)
+                current.with_reopen_at_last_position(reopen)
             }
         };
         if self.settings == updated && self.pending.is_none() {
@@ -162,9 +168,12 @@ impl SettingsState {
             .detach();
         }
         if self.paths.is_none() {
-            if let Err(error) =
-                self.apply_settings(self.settings.with_remember_reading_history(remember), cx)
-            {
+            if let Err(error) = self.apply_settings(
+                self.settings
+                    .clone()
+                    .with_remember_reading_history(remember),
+                cx,
+            ) {
                 self.error = Some(error);
             }
             self.error = Some(
@@ -709,6 +718,83 @@ mod tests {
         cx.background_executor
             .advance_clock(Duration::from_millis(400));
         cx.run_until_parked();
+    }
+
+    #[gpui_kit::test]
+    fn annotation_author_input_persists_and_tracks_valid_live_file_changes(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            AppPaths::for_locations(root.path().join("config.toml"), root.path().join("data"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(cx, Some(paths.clone()));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find("annotation-author").value(), Some(""));
+            window.click("annotation-author", cx);
+            window.input("Jón 中文", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            settings::load(paths.config()).unwrap().annotation_author(),
+            "Jón 中文"
+        );
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find("annotation-author").focused(), Some(true));
+            window.press("home", cx);
+            window.press("right", cx);
+            window.input("x", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            settings::load(paths.config()).unwrap().annotation_author(),
+            "Jxón 中文"
+        );
+        for (toml, expected, error) in [
+            (
+                "[application]\nannotation_author = 'Other reader'\n",
+                "Other reader",
+                false,
+            ),
+            (
+                "[application]\nannotation_author = 12\n",
+                "Other reader",
+                true,
+            ),
+            ("[application]\nannotation_author = ''\n", "", false),
+        ] {
+            std::fs::write(paths.config(), toml).unwrap();
+            poll(cx);
+            cx.update(|cx| {
+                assert_eq!(state(cx).read(cx).annotation_author(), expected);
+                assert_eq!(state(cx).read(cx).error().is_some(), error);
+            });
+            cx.update_window(window, |_, window, cx| {
+                window.render_frame(cx);
+                assert_eq!(window.find("annotation-author").value(), Some(expected));
+            })
+            .unwrap();
+        }
+        cx.update_window(window, |_, window, cx| {
+            window.click("annotation-author", cx);
+            window.input("Restart author", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| {
+            install_with_paths(cx, Some(paths.clone()));
+        });
+        cx.run_until_parked();
+        cx.update(|cx| assert_eq!(state(cx).read(cx).annotation_author(), "Restart author"));
     }
 
     #[gpui_kit::test]

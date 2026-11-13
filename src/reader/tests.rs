@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 mod authoring;
 mod authoring_geometry;
+mod authorship;
 mod current_save;
 mod find;
 mod links;

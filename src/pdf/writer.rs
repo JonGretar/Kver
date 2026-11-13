@@ -379,6 +379,69 @@ mod tests {
     }
 
     #[test]
+    fn saved_unicode_author_preserves_imported_authorship_and_metadata() {
+        let original = std::fs::read("examples/annotations.pdf").unwrap();
+        let previous = Document::load_mem(&original).unwrap();
+        let authored = annotation().with_metadata(Some("Jón 中文".into()), None, None);
+        let output = append_highlights(&original, &[authored]).unwrap();
+        let saved = Document::load_mem(&output).unwrap();
+        // Independent parser verifies the actual PDF /T string, not writer readback.
+        let first_page = previous.get_pages()[&1];
+        let old = previous
+            .get_dictionary(first_page)
+            .unwrap()
+            .get(b"Annots")
+            .unwrap();
+        let old = previous.dereference(old).unwrap().1.as_array().unwrap();
+        let new = saved
+            .get_dictionary(first_page)
+            .unwrap()
+            .get(b"Annots")
+            .unwrap();
+        let new = saved.dereference(new).unwrap().1.as_array().unwrap();
+        assert_eq!(new.len(), old.len() + 1);
+        for object in old {
+            assert_eq!(
+                previous.dereference(object).unwrap().1,
+                saved.dereference(object).unwrap().1
+            );
+        }
+        let added = saved
+            .dereference(new.last().unwrap())
+            .unwrap()
+            .1
+            .as_dict()
+            .unwrap();
+        assert_eq!(
+            lopdf::decode_text_string(added.get(b"T").unwrap()).unwrap(),
+            "Jón 中文"
+        );
+        assert_eq!(previous.catalog().unwrap(), saved.catalog().unwrap());
+        for page in previous.get_pages().into_values() {
+            assert_eq!(
+                previous.get_page_content(page),
+                saved.get_page_content(page)
+            );
+        }
+        if let Ok(info) = previous.trailer.get(b"Info") {
+            assert_eq!(
+                previous.dereference(info).unwrap().1,
+                saved
+                    .dereference(saved.trailer.get(b"Info").unwrap())
+                    .unwrap()
+                    .1
+            );
+        }
+        let parsed = super::super::open_pdf(output).unwrap();
+        let annotations = super::super::annotation_read::page_annotations(&parsed, 0, 99).unwrap();
+        assert!(
+            annotations
+                .iter()
+                .any(|annotation| annotation.author() == Some("Jón 中文"))
+        );
+    }
+
+    #[test]
     fn rejects_signature_and_encryption_declarations_without_writing() {
         let baseline = std::fs::read("examples/field-guide.pdf").unwrap();
         for marker in ["signature", "encryption"] {

@@ -20,9 +20,15 @@ complete; further goals have no fixed release sequence. See
 **Next work:** No further reader gate is scheduled. Internal and another-PDF
 links, the jumplist, and Back/Forward controls are covered by
 [navigation spec #96](https://github.com/JonGretar/Kver/issues/96).
-Portable text markup and the Annotations list have an approved
-[spec and implementation tickets (#123)](https://github.com/JonGretar/Kver/issues/123),
-without an assigned release date or numbered milestone.
+Portable text markup and the Annotations list are complete within
+[spec #123](https://github.com/JonGretar/Kver/issues/123), with integrated
+and native-Mac acceptance recorded in
+[#134](https://github.com/JonGretar/Kver/issues/134). This includes all four
+types, shared editing and save state, and external-change handling.
+The accepted malformed-array rendering limitation
+([#142](https://github.com/JonGretar/Kver/issues/142)), scripted PDFKit
+Squiggly rewriting limitation, and unavailable Acrobat validation remain explicit.
+No release date or numbered milestone is assigned.
 GitHub Issues tracks live ownership and blockers for subsequent keyboard
 work; the [feature workflow](agents/workflow.md) explains how to check status.
 
@@ -202,7 +208,7 @@ Keep these visible without implying a date or order:
 - Configurable keybindings, numeric counts, a general multi-key command
   language, independent named bookmarks, and drag-and-drop.
 - Password-protected PDFs if not shipped in the MVP.
-- Notes, persistent highlights, and annotation interchange.
+- Notes and broader annotation authoring beyond the completed text-markup scope.
 - Reload after PDF rebuilds and SyncTeX source/PDF navigation for LaTeX.
 - Split views, snapshots or overviews, smart reference jumping, and portals.
 

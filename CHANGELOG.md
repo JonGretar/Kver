@@ -21,6 +21,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Apply any text-markup type from a compact split toolbar button, with a separate creation-color picker. Annotations show styled text previews and compact page/author details; narrow sidebar tabs use icons, and annotation commands are grouped in the Edit menu.
+- Use dedicated Standard annotation shortcuts or Vim's `a` sequences to apply markup, including repeating the last type. Vim also adds `g a` for Annotations and `u`, Ctrl-R, and `x` for annotation undo, redo, and deletion; list deletion acts on the selected entry.
+- Vim now uses `J/K` for PDF page turns, `n/N` for Find matches, `g c` for Contents, and Ctrl-F/B and Ctrl-D/U for screen and half-screen scrolling. Modified Find/sidebar shortcuts belong to Standard; Space and Shift-Space remain half-screen aliases.
 - Red replaces Purple among the five markup color presets. Existing custom purple shortcuts and imported colors remain unchanged.
 - Search settings and resize their sidebar in the new GPUI Kit settings layout. Appearance and keyboard preset can still be reset individually; other settings and their saved values are unchanged.
 - Opening the same PDF in multiple windows keeps them on one loaded version, with independent reading positions, zoom, reading modes, and text selections.

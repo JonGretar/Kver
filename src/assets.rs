@@ -19,7 +19,12 @@ icon_assets!(
         SunMoon,
         Pencil,
         Palette,
-        Trash
+        Trash,
+        Highlighter,
+        Underline,
+        Strikethrough,
+        WavesHorizontal,
+        ListTree
     ]
 );
 
@@ -69,6 +74,11 @@ mod tests {
             "icons/pencil.svg",
             "icons/palette.svg",
             "icons/trash.svg",
+            "icons/highlighter.svg",
+            "icons/underline.svg",
+            "icons/strikethrough.svg",
+            "icons/waves-horizontal.svg",
+            "icons/list-tree.svg",
         ] {
             assert!(ReaderAssets.load(path).unwrap().is_some(), "{path}");
             assert!(ReaderAssets.list("icons/").unwrap().contains(&path.into()));

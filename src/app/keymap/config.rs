@@ -102,10 +102,7 @@ pub fn resolve_config(
             // Shift alone still types into a text field. Only Command,
             // Control, Option, or Function prevents a key from
             // becoming an ordinary typing shortcut in a native menu.
-            let current_is_typing_key = current.sequence.len() == 1 && {
-                let modifiers = current.sequence[0].modifiers;
-                !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function
-            };
+            let current_is_typing_key = resolved.has_typing_menu_shortcut(action.as_ref());
             if current_is_typing_key
                 && default.is_none_or(|default| current.sequence != default.sequence)
             {
@@ -125,7 +122,10 @@ pub fn resolve_config(
     Ok(resolved)
 }
 
-fn menu_binding_for<'a>(map: &'a ResolvedKeymap, action: &dyn Action) -> Option<&'a Slot> {
+pub(super) fn menu_binding_for<'a>(
+    map: &'a ResolvedKeymap,
+    action: &dyn Action,
+) -> Option<&'a Slot> {
     let matches = |slot: &&Slot| {
         slot.entry
             .action
@@ -164,6 +164,7 @@ commands! {
         "close-about" => CloseAbout, "command-palette" => ShowCommandPalette,
         "show-contents" => ShowContents, "show-find" => ShowFind,
         "show-annotations" => ShowAnnotations,
+        "apply-markup" => crate::reader::ApplyMarkup,
         "highlight" => Highlight,
         "underline" => crate::reader::Underline,
         "strikethrough" => crate::reader::StrikeOut,

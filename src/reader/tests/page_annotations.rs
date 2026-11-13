@@ -439,8 +439,10 @@ fn text_drag_over_a_highlight_clears_annotation_target_and_duplicate_ignores_las
     let (handle, reader) = recent_test_window(cx, Some(path.clone()));
     cx.run_until_parked();
     select_title(cx, handle, &reader, &path);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     let original = catalog(&reader, cx)[0].clone();
     // Make a distinct highlight and change its color. The first region remains
@@ -461,7 +463,7 @@ fn text_drag_over_a_highlight_clears_annotation_target_and_duplicate_ignores_las
     });
     cx.update_window(handle, |_, window, cx| {
         window.drag(start, end, cx);
-        window.press("cmd-shift-h", cx);
+        window.press("secondary-shift-h", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -478,7 +480,7 @@ fn text_drag_over_a_highlight_clears_annotation_target_and_duplicate_ignores_las
     cx.update_window(handle, |_, window, cx| {
         window.press("backspace", cx);
         window.press("cmd-c", cx);
-        window.press("cmd-shift-h", cx);
+        window.press("secondary-shift-h", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -513,7 +515,7 @@ fn text_drag_over_a_highlight_clears_annotation_target_and_duplicate_ignores_las
     });
     cx.update_window(handle, |_, window, cx| {
         window.drag(start, end, cx);
-        window.press("cmd-shift-h", cx);
+        window.press("secondary-shift-h", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -612,8 +614,10 @@ fn reapplying_highlight_to_duplicate_imported_regions_requires_choice_and_retain
     let (handle, reader) = recent_test_window(cx, Some(path.clone()));
     cx.run_until_parked();
     select_title(cx, handle, &reader, &path);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     let first = catalog(&reader, cx)[0].clone();
     let second = Annotation::new(
@@ -635,8 +639,10 @@ fn reapplying_highlight_to_duplicate_imported_regions_requires_choice_and_retain
     cx.run_until_parked();
     select_title(cx, handle, &reader, &imported);
     let text = reader.read_with(cx, |reader, _| reader.selected_text().unwrap());
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     let before = catalog(&reader, cx);
     reader.read_with(cx, |reader, cx| {
@@ -683,7 +689,7 @@ fn a_window_opened_after_unsaved_creation_immediately_displays_the_shared_edited
     let (first, reader) = recent_test_window(cx, Some(path.clone()));
     cx.run_until_parked();
     select_title(cx, first, &reader, &path);
-    cx.update_window(first, |_, window, cx| window.press("cmd-shift-h", cx))
+    cx.update_window(first, |_, window, cx| window.press("secondary-shift-h", cx))
         .unwrap();
     cx.run_until_parked();
     let created = catalog(&reader, cx);
@@ -788,8 +794,10 @@ fn assert_new_highlight_color(cx: &mut TestAppContext, path: &str, expected_coun
     let (handle, reader) = recent_test_window(cx, Some(path.clone()));
     cx.run_until_parked();
     select_title(cx, handle, &reader, &path);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     let document = reader.read_with(cx, |reader, _| reader.document().unwrap());
     let annotations = document.page_annotations(0, 901).unwrap();

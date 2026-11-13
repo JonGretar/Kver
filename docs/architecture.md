@@ -26,15 +26,23 @@ Standard is selected by default. Its reader-only arrows move by line or turn a
 page, Page Up/Down scroll by most of the measured viewport, Command/Ctrl plus
 or minus changes zoom, and modified page-turn keys follow the platform.
 Vim keeps reader-only `j/k` for vertical steps, `h/l` and Left/Right for
-horizontal steps, `n/p` for page turns, Space/Shift-Space for half-screen
-vertical scrolling, `gg/G` for document bounds, `o/O` for Open PDF/Recent,
-`/` for Find, `:` for the command palette, `=/−` for
+horizontal steps, `J/K` for page turns, `n/N` for Find matches, Ctrl-F/B for
+screen scrolling, Ctrl-D/U and Space/Shift-Space for half-screen scrolling,
+`gg/G` for document bounds, `o/O` for Open PDF/Recent,
+`/` for Find, `g c` for Contents, `:` for the command palette, `=/−` for
 zoom, `w/f` for fit, `s/c` for reading mode, and local-mark sequences.
 Horizontal keys do nothing when the current page fits the viewport.
 Standard leaves those letters free and uses the marks dialog and palette.
+Command-F/B/G/Shift-G/T for Find, sidebar toggling, Find matches, and Contents
+belong to Standard rather than the shared layer.
 Both presets inherit application commands (including macOS Command-Q/W)
-and the Reader/Contents-only Ctrl-O/I jumplist bindings. Settings persists
-`[keyboard].preset`; switching replaces only product bindings, preserving
+and the Reader/Contents-only Ctrl-O/I jumplist bindings. Annotation creation
+is preset-specific: Standard uses modified keys, while Vim uses `a a` to repeat
+the window-local type and `a h/u/s/w` for explicit types. Vim's `g a` opens
+Annotations; `u`, Ctrl-R, and `x` handle undo, redo, and deletion in Reader and
+Annotations. List deletion resolves the list's selected identity and uses the
+same revision-checked mutation intent as row controls, never a prior page target.
+Settings persists `[keyboard].preset`; switching replaces only product bindings, preserving
 Kit's bindings, and refreshes native menus. Keyboard Settings shows context-
 and task-grouped bindings. The command palette shows contextual reader hints
 alongside its Action-derived global hints.
@@ -43,6 +51,12 @@ later layer replaces that slot; an internal contextual unbind can mask an
 inherited key, but user-file unbinding is deferred. Other contexts retain
 their bindings. On macOS, edits that would promote a reader typing key to the
 first shortcut for a native menu action are rejected.
+Native menus wrap commands whose first shortcut is an unmodified single stroke
+in an unbound forwarding Action. Cocoa therefore cannot turn Vim's `/`, `s`,
+or `c`, or sidebar Escape, into window-independent key equivalents. The adapter
+defers dispatch of the original command to its initiating window through GPUI;
+it adds no editing state or alternate command behavior. Modified accelerators
+and multi-stroke bindings keep their normal menu representation.
 Duplicate slots within a layer and one-key/multi-key prefix collisions in
 overlapping contexts are diagnostics, not implicit GPUI ordering rules.
 Reader, Sidebar, Contents, Annotations, Settings, and About are stable product contexts;
@@ -114,6 +128,9 @@ Excerpts are extracted one annotated page at a time off-thread and published
 progressively. Document generations and catalog revisions reject late replies.
 Copy uses only text underneath valid quads, never attached comments. Missing
 text and malformed entries remain visible; usable geometry still navigates.
+Recovered excerpts preview the markup using text decorations and imported colors,
+not PDF raster appearances; fallback text remains undecorated. A type icon and
+page/author line keep rows identifiable without relying on color.
 The reader adds an identification outline rather than another markup fill.
 Each list entry exposes Color and Delete through the same session
 mutation as on-page editing, including all four imported markup kinds and
@@ -164,6 +181,14 @@ Highlight initially uses yellow at 45% opacity; line markup uses opaque red.
 The five UI presets are Yellow, Green, Blue, Pink, and Red. The older Purple
 keymap command remains accepted with its original color, but is not a UI preset.
 Imported arbitrary colors remain unchanged until explicitly recolored.
+The toolbar's split button repeats the window-local last creation type; choosing
+another type applies it immediately to the retained selection. This does not arm
+a persistent pointer tool. A separate creation-color command changes the shared
+per-type preference without recoloring the selected annotation or recording an
+edit. Narrow panes expose these commands through the existing overflow menu.
+The native Edit > Annotation submenu groups creation and selected-annotation
+editing; Undo/Redo remain top-level Edit commands. Sidebar destinations switch
+together from full labels to named, tooltip-equipped icons when space is tight.
 
 The session records successful annotation mutations as subtype-neutral before/after
 edits, retaining identity, metadata, and catalog position rather than window state.

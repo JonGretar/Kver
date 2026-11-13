@@ -51,8 +51,8 @@ another release version or date.
   layer have no searchable text; this does not include OCR.
 - Browse the PDF's table of contents when it provides an outline, and jump to
   its destinations. Show an honest empty state when no usable outline exists.
-  Command-T opens Contents; Kver uses independent windows rather than document
-  tabs.
+  Standard uses Command-T for Contents; Vim uses `g c`. Kver uses independent
+  windows rather than document tabs.
 - Give each reader window one sidebar hosting distinct Find and Contents
   panels. Show only one panel at a time by default; keep the sidebar
   dismissible and the PDF readable.
@@ -137,20 +137,25 @@ use case and an implementation path. They do not define a mandatory order.
 
 #### Text-markup behavior
 
-These are agreed requirements for the planned feature, not current app behavior.
+The portable text-markup feature implements the following behavior.
 The [text-markup spec (#123)](https://github.com/JonGretar/Kver/issues/123)
 defines the complete scope, implementation boundaries, and testing decisions.
+Integrated validation is recorded in [#134](https://github.com/JonGretar/Kver/issues/134).
+Hayro can hide annotations after malformed array entries
+([#142](https://github.com/JonGretar/Kver/issues/142)). Original Kver output
+and native Preview interchange are validated separately from scripted PDFKit
+rewriting, which can lose Squiggly paint. Acrobat compatibility remains unverified.
 
-- Start with one-shot creation from the current selection through keyboard
-  commands and a selection context menu. Keep the selection after creation;
+- Use one-shot creation from the current selection through the split toolbar,
+  keyboard commands, menus, or command palette. Keep the selection after creation;
   revisit a persistent markup-tool mode later.
 - Offer five named preset colors, initially yellow for highlights and red for
   line-based markup. Remember the last-used color per type during the session.
   Preserve imported colors until explicitly changed. Custom palettes, opacity,
   and line-thickness controls are deferred.
 - List supported markup in document order with copy text, navigation, recoloring,
-  and deletion. Use a plain list of marked text with a type indicator; decide the
-  GPUI Kit component and appearance during implementation. Keep entries whose
+  and deletion. Preview recovered text with its markup style and a type indicator.
+  Keep entries whose
   text cannot be recovered. Search, filters, whole-document annotation export,
   and cross-document lists are deferred.
 - Selecting markup directly on the page is essential, alongside list access.

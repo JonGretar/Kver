@@ -93,19 +93,69 @@ by the current keyboard configuration:
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `copy` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
-| Text markup | `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
+| Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
 
 The mark commands in this list open the corresponding mark chooser. The Vim
 letter-specific mark sequences are supplied by the Vim preset; the TOML
 command names do not accept a mark letter argument.
 
-With text selected in the reader, Command-Shift-H (Ctrl-Shift-H outside macOS)
-applies Highlight once and retains the selection. Underline, Strikethrough, and
-Squiggly underline are available in the selection context menu, Edit menu, and
-command palette; assign custom shortcuts with the command names above.
+## Find and navigation presets
+
+The Standard preset owns Command-F for Find, Command-B for the sidebar,
+Command-G / Command-Shift-G for Find matches, and Command-T for Contents.
+These shortcuts are not installed by Vim.
+
+Vim distinguishes PDF pages from viewport-sized scrolling:
+
+| Task | Vim shortcut |
+| --- | --- |
+| Scroll down / up | `j` / `k` |
+| Next / previous PDF page | `J` / `K` |
+| Forward / backward one screen | Ctrl-F / Ctrl-B |
+| Down / up half a screen | Ctrl-D / Ctrl-U or Space / Shift-Space |
+| Next / previous Find match | `n` / `N` |
+| Open Find | `/` |
+| Open Contents | `g c` |
+| Start / end of document | `g g` / `G` |
+
+These Vim keys belong to the reader, not text inputs or sidebar lists.
+`p` no longer turns pages and has no default binding. Escape dismisses the
+sidebar in either preset. Native menu commands remain available in Vim without
+turning bare reader keys into macOS shortcuts that intercept input text.
+
+## Annotation shortcuts
+
+Creation shortcuts apply once to the reader's current text selection, retain
+that selection, and remember the chosen type in that window. They do not arm a
+persistent tool or work while typing in an input. `apply-markup` repeats the
+window's remembered type, initially Highlight.
+
+| Command | Standard on macOS | Vim |
+| --- | --- | --- |
+| Apply remembered type | Command-Enter | `a a` |
+| Highlight | Command-Shift-H | `a h` |
+| Underline | Command-Shift-U | `a u` |
+| Strikethrough | Command-Shift-X | `a s` |
+| Squiggly underline | Command-Option-U | `a w` |
+| Open Annotations | Command-Shift-A | `g a` |
+
+The Standard shortcuts use Ctrl instead of Command outside macOS, and Alt
+instead of Option. The modified creation shortcuts are not installed by Vim.
+In Vim, `a` is a sequence prefix, not a mode; Escape cancels a pending sequence.
+Both presets also expose creation through the toolbar, selection context menu,
+Edit > Annotation menu, and command palette.
+
+Both presets retain Command-Z / Command-Shift-Z for annotation undo/redo and
+Backspace/Delete for deletion in the reader or Annotations list. Vim additionally
+uses `u` / Ctrl-R for annotation undo/redo and `x` for deletion. These commands
+operate only in their reader/list contexts; text inputs keep their own editing.
+List deletion targets the selected list entry, not a previous page target.
+
 All types share annotation undo/redo and the last-used color per type for the
-current document session. Despite their historical names, `delete-highlight` and
-`recolor-highlight-*` operate on the selected page annotation of any supported type.
+current document session. No individual colors have default shortcuts.
+Despite their historical names, `delete-highlight` handles supported markup of
+any type; `recolor-highlight-*` recolors the annotation selected in the focused
+page or Annotations list.
 The legacy `recolor-highlight-purple` command remains accepted with its original
 purple color; the five UI presets now offer Red instead of Purple.
 

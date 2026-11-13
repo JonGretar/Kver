@@ -410,7 +410,7 @@ fn closing_one_participant_keeps_shared_edits_and_the_last_close_can_save_elsewh
         recent_test_window(cx, Some(PathBuf::from("examples/field-guide.pdf")));
     cx.run_until_parked();
     select_title(cx, first, &reader, &source);
-    cx.update_window(first, |_, window, cx| window.press("cmd-shift-h", cx))
+    cx.update_window(first, |_, window, cx| window.press("secondary-shift-h", cx))
         .unwrap();
     cx.run_until_parked();
     reader.read_with(cx, |reader, cx| assert!(reader.is_dirty(cx)));
@@ -482,8 +482,10 @@ fn overwrite_cancellation_retains_edits_and_confirmation_saves_the_pdf(cx: &mut 
     let (handle, reader) = recent_test_window(cx, Some(source.clone()));
     cx.run_until_parked();
     select_title(cx, handle, &reader, &source);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     for confirm in [false, true] {
         cx.update_window(handle, |_, window, cx| {

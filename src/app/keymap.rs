@@ -308,6 +308,17 @@ impl ResolvedKeymap {
             .collect()
     }
 
+    /// Cocoa turns a one-stroke menu binding into a window-independent key
+    /// equivalent. Reader typing keys must instead stay in GPUI's focus tree.
+    pub(crate) fn has_typing_menu_shortcut(&self, action: &dyn Action) -> bool {
+        config::menu_binding_for(self, action).is_some_and(|slot| {
+            slot.sequence.len() == 1 && {
+                let modifiers = slot.sequence[0].modifiers;
+                !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function
+            }
+        })
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (Context, &str, &str)> {
         self.slots.iter().filter_map(|slot| {
             Some((
@@ -653,7 +664,6 @@ fn common() -> Vec<Entry> {
         Entry::bind("cmd-n", Context::Global, NewWindow),
         Entry::bind("cmd-shift-p", Context::Global, ShowCommandPalette),
         Entry::bind("cmd-shift-m", Context::Global, ShowMarks),
-        Entry::bind("cmd-shift-h", Context::Reader, Highlight),
         Entry::bind("cmd-z", Context::Reader, crate::reader::UndoAnnotation),
         Entry::bind(
             "cmd-shift-z",
@@ -668,13 +678,10 @@ fn common() -> Vec<Entry> {
         ),
         Entry::bind("backspace", Context::Reader, DeleteHighlight),
         Entry::bind("delete", Context::Reader, DeleteHighlight),
+        Entry::bind("backspace", Context::Annotations, DeleteHighlight),
+        Entry::bind("delete", Context::Annotations, DeleteHighlight),
         Entry::bind("cmd-shift-s", Context::Global, SaveAs),
         Entry::bind("cmd-s", Context::Global, Save),
-        Entry::bind("cmd-f", Context::Global, ShowFind),
-        Entry::bind("cmd-b", Context::Global, ToggleSidebar),
-        Entry::bind("cmd-g", Context::Global, NextMatch),
-        Entry::bind("cmd-shift-g", Context::Global, PreviousMatch),
-        Entry::bind("cmd-t", Context::Global, ShowContents),
         Entry::bind("escape", Context::Sidebar, ToggleSidebar),
         Entry::bind("enter", Context::Contents, ActivateOutline),
         Entry::bind("cmd-c", Context::Annotations, Copy),
@@ -714,6 +721,29 @@ fn platform_defaults() -> Vec<Entry> {
 fn preset_defaults(preset: Preset) -> Vec<Entry> {
     match preset {
         Preset::Standard => vec![
+            Entry::bind("cmd-f", Context::Global, ShowFind),
+            Entry::bind("cmd-b", Context::Global, ToggleSidebar),
+            Entry::bind("cmd-g", Context::Global, NextMatch),
+            Entry::bind("cmd-shift-g", Context::Global, PreviousMatch),
+            Entry::bind("cmd-t", Context::Global, ShowContents),
+            Entry::bind(
+                "secondary-enter",
+                Context::Reader,
+                crate::reader::ApplyMarkup,
+            ),
+            Entry::bind("secondary-shift-h", Context::Reader, Highlight),
+            Entry::bind(
+                "secondary-shift-u",
+                Context::Reader,
+                crate::reader::Underline,
+            ),
+            Entry::bind(
+                "secondary-shift-x",
+                Context::Reader,
+                crate::reader::StrikeOut,
+            ),
+            Entry::bind("secondary-alt-u", Context::Reader, crate::reader::Squiggly),
+            Entry::bind("secondary-shift-a", Context::Global, ShowAnnotations),
             Entry::bind("right", Context::Reader, NextPage),
             Entry::bind("left", Context::Reader, PreviousPage),
             Entry::bind("down", Context::Reader, ScrollDown),
@@ -736,14 +766,36 @@ fn preset_defaults(preset: Preset) -> Vec<Entry> {
             Entry::bind("alt-left", Context::Contents, NavigateBack),
             Entry::bind("alt-right", Context::Contents, NavigateForward),
         ],
-        // Keep bare reader keys inside Reader; native app/window commands and
-        // Contents navigation are inherited from common and platform layers.
+        // Keep bare reader keys inside Reader; app/window commands are inherited.
         Preset::Vim => {
             let mut entries = vec![
+                Entry::bind("a a", Context::Reader, crate::reader::ApplyMarkup),
+                Entry::bind("a h", Context::Reader, Highlight),
+                Entry::bind("a u", Context::Reader, crate::reader::Underline),
+                Entry::bind("a s", Context::Reader, crate::reader::StrikeOut),
+                Entry::bind("a w", Context::Reader, crate::reader::Squiggly),
+                Entry::bind("g a", Context::Reader, ShowAnnotations),
+                Entry::bind("g c", Context::Reader, ShowContents),
+                Entry::bind("u", Context::Reader, crate::reader::UndoAnnotation),
+                Entry::bind("ctrl-r", Context::Reader, crate::reader::RedoAnnotation),
+                Entry::bind("x", Context::Reader, DeleteHighlight),
+                Entry::bind("u", Context::Annotations, crate::reader::UndoAnnotation),
+                Entry::bind(
+                    "ctrl-r",
+                    Context::Annotations,
+                    crate::reader::RedoAnnotation,
+                ),
+                Entry::bind("x", Context::Annotations, DeleteHighlight),
                 Entry::bind("right", Context::Reader, ScrollRight),
-                Entry::bind("n", Context::Reader, NextPage),
+                Entry::bind("shift-j", Context::Reader, NextPage),
                 Entry::bind("left", Context::Reader, ScrollLeft),
-                Entry::bind("p", Context::Reader, PreviousPage),
+                Entry::bind("shift-k", Context::Reader, PreviousPage),
+                Entry::bind("n", Context::Reader, NextMatch),
+                Entry::bind("shift-n", Context::Reader, PreviousMatch),
+                Entry::bind("ctrl-f", Context::Reader, ScrollScreenDown),
+                Entry::bind("ctrl-b", Context::Reader, ScrollScreenUp),
+                Entry::bind("ctrl-d", Context::Reader, ScrollHalfScreenDown),
+                Entry::bind("ctrl-u", Context::Reader, ScrollHalfScreenUp),
                 Entry::bind("down", Context::Reader, ScrollDown),
                 Entry::bind("j", Context::Reader, ScrollDown),
                 Entry::bind("up", Context::Reader, ScrollUp),

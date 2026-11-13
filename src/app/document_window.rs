@@ -444,6 +444,21 @@ impl DocumentWindow {
             accepts_shortcut && self.reader.read(cx).has_annotation_undo(cx),
             accepts_shortcut && self.reader.read(cx).has_annotation_redo(cx),
         );
+        menu::set_annotation_edit_availability(
+            cx,
+            accepts_shortcut
+                && self
+                    .sidebar
+                    .as_ref()
+                    .and_then(|sidebar| {
+                        let sidebar = sidebar.read(cx);
+                        let panel = sidebar.annotations().read(cx);
+                        (sidebar.active() == Some(SidebarPanel::Annotations)
+                            && panel.contains_focus(window, cx))
+                        .then(|| panel.edit_available(cx))
+                    })
+                    .unwrap_or_else(|| self.reader.read(cx).annotation_edit_available(cx)),
+        );
         menu::refresh_navigation(
             cx,
             accepts_shortcut && self.jumplist.can_back(),
@@ -782,6 +797,7 @@ impl Render for DocumentWindow {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(|this, _: &OpenPdf, _, cx| this.open_dialog(cx)))
+            .on_action(|action: &menu::NativeMenuAction, window, cx| action.dispatch(window, cx))
             .on_action(cx.listener(|this, _: &ShowRecent, window, cx| this.show_recent(window, cx)))
             .on_action(
                 cx.listener(|this, _: &ShowCommandPalette, window, cx| {
@@ -817,11 +833,13 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<Continuous>))
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::ApplyMarkup>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Underline>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::StrikeOut>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Squiggly>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::RecolorHighlight>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::SetMarkupColor>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::DeleteHighlight>))
             .on_action(
                 cx.listener(|this, _: &crate::reader::UndoAnnotation, _, cx| {

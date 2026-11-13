@@ -6,8 +6,8 @@ use gpui_kit::{
     base::{Disableable, TestSupportExt as _},
     component::{
         ActiveTheme, Selectable, Sizable, TITLE_BAR_HEIGHT, TitleBar,
-        button::{Button, ButtonCustomVariant, ButtonVariants},
-        menu::{DropdownMenu as _, PopupMenuItem},
+        button::{Button, ButtonCustomVariant, ButtonVariants, DropdownButton},
+        menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
         status_bar::StatusBar,
         toolbar::{Toolbar, ToolbarGroup},
         tooltip::Tooltip,
@@ -18,11 +18,11 @@ use std::path::Path;
 use super::sidebar::ToggleSidebar;
 use super::{NavigateBack, NavigateForward, OpenPdf, Save, SaveAs};
 use crate::{
+    pdf::annotations::{HighlightColor, MarkupKind},
     reader::{
-        Continuous, FitPage, FitWidth, Highlight, NextPage, PreviousPage, ReaderView, ReadingMode,
-        SinglePage, ZoomIn, ZoomMode, ZoomOut,
+        Continuous, FitPage, FitWidth, NextPage, PreviousPage, ReaderView, ReadingMode, SinglePage,
+        ZoomIn, ZoomMode, ZoomOut,
     },
-    settings_ui::ShowSettings,
 };
 
 pub(super) fn reading_toolbar(
@@ -39,6 +39,8 @@ pub(super) fn reading_toolbar(
     let show_fit_labels = available_rems >= 54.;
     let overflow = available_rems < 38.;
     let highlight_available = reader.highlight_available(cx);
+    let kind = reader.active_markup();
+    let creation_color = reader.markup_color(cx);
     let save_available = reader.save_available(cx);
     let save_as_available = reader.save_as_available(cx);
     let history = ToolbarGroup::new("history-controls")
@@ -183,14 +185,55 @@ pub(super) fn reading_toolbar(
         })
         .content(div().flex_1())
         .when(!overflow, |toolbar| {
-            toolbar.content(
-                Button::new("highlight-selection")
-                    .label("Highlight")
-                    .ghost()
-                    .small()
-                    .disabled(!highlight_available)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(Highlight), cx)),
-            )
+            toolbar
+                .content(
+                    DropdownButton::new("annotation-tool")
+                        .ghost()
+                        .small()
+                        .menu_accessibility_label("Apply another annotation type")
+                        .button(
+                            Button::new("highlight-selection")
+                                .icon(crate::reader::markup_icon(kind))
+                                .accessibility_label(kind.label())
+                                .tooltip(kind.label())
+                                .when(show_fit_labels, |button| button.label(kind.label()))
+                                .disabled(!highlight_available)
+                                .on_click(move |_, window, cx| {
+                                    window
+                                        .dispatch_action(Box::new(crate::reader::ApplyMarkup), cx);
+                                }),
+                        )
+                        .dropdown_menu(move |menu, _, _| {
+                            creation_types(menu, kind, highlight_available)
+                        }),
+                )
+                .content(
+                    Button::new("annotation-color")
+                        .ghost()
+                        .small()
+                        .accessibility_label(format!(
+                            "Annotation color: {}",
+                            creation_color.label()
+                        ))
+                        .tooltip(format!(
+                            "{} color: {}",
+                            kind.label(),
+                            creation_color.label()
+                        ))
+                        .disabled(!has_document)
+                        .child(
+                            div()
+                                .size_3()
+                                .rounded_sm()
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                // A color swatch represents PDF data, not a UI status.
+                                .when_some(creation_color.color().rgb(), |swatch, [r, g, b]| {
+                                    swatch.bg(gpui_kit::Rgba { r, g, b, a: 1. })
+                                }),
+                        )
+                        .dropdown_menu(move |menu, _, _| creation_colors(menu, creation_color)),
+                )
         })
         .when(overflow, |toolbar| {
             toolbar.content(
@@ -200,96 +243,96 @@ pub(super) fn reading_toolbar(
                     .icon(IconName::Ellipsis)
                     .accessibility_label("More reader controls")
                     .tooltip("More reader controls")
-                    .dropdown_menu(move |menu, _, _| {
-                        menu.item(
-                            PopupMenuItem::new("Highlight")
-                                .action(Box::new(Highlight))
-                                .disabled(!highlight_available),
-                        )
-                        .item(
-                            PopupMenuItem::new("Underline")
-                                .action(Box::new(crate::reader::Underline))
-                                .disabled(!highlight_available),
-                        )
-                        .item(
-                            PopupMenuItem::new("Strikethrough")
-                                .action(Box::new(crate::reader::StrikeOut))
-                                .disabled(!highlight_available),
-                        )
-                        .item(
-                            PopupMenuItem::new("Squiggly underline")
-                                .action(Box::new(crate::reader::Squiggly))
-                                .disabled(!highlight_available),
-                        )
-                        .item(
-                            PopupMenuItem::new("Save")
-                                .action(Box::new(Save))
-                                .disabled(!save_available),
-                        )
-                        .item(
-                            PopupMenuItem::new("Save As…")
-                                .action(Box::new(SaveAs))
-                                .disabled(!save_as_available),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new("Back")
-                                .action(Box::new(NavigateBack))
-                                .disabled(!can_back),
-                        )
-                        .item(
-                            PopupMenuItem::new("Forward")
-                                .action(Box::new(NavigateForward))
-                                .disabled(!can_forward),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new("Single page")
-                                .action(Box::new(SinglePage))
-                                .checked(single_page)
-                                .disabled(!has_document),
-                        )
-                        .item(
-                            PopupMenuItem::new("Continuous")
-                                .action(Box::new(Continuous))
-                                .checked(!single_page)
-                                .disabled(!has_document),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new("Zoom in")
-                                .action(Box::new(ZoomIn))
-                                .disabled(!has_document),
-                        )
-                        .item(
-                            PopupMenuItem::new("Zoom out")
-                                .action(Box::new(ZoomOut))
-                                .disabled(!has_document),
-                        )
-                        .item(
-                            PopupMenuItem::new("Fit width")
-                                .action(Box::new(FitWidth))
-                                .checked(zoom == ZoomMode::FitWidth)
-                                .disabled(!has_document),
-                        )
-                        .item(
-                            PopupMenuItem::new("Fit page")
-                                .action(Box::new(FitPage))
-                                .checked(zoom == ZoomMode::FitPage)
-                                .disabled(!has_document),
-                        )
+                    .dropdown_menu(move |menu, window, cx| {
+                        creation_types(menu, kind, highlight_available)
+                            .submenu("Creation color", window, cx, move |menu, _, _| {
+                                creation_colors(menu, creation_color)
+                            })
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Save")
+                                    .action(Box::new(Save))
+                                    .disabled(!save_available),
+                            )
+                            .item(
+                                PopupMenuItem::new("Save As…")
+                                    .action(Box::new(SaveAs))
+                                    .disabled(!save_as_available),
+                            )
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Back")
+                                    .action(Box::new(NavigateBack))
+                                    .disabled(!can_back),
+                            )
+                            .item(
+                                PopupMenuItem::new("Forward")
+                                    .action(Box::new(NavigateForward))
+                                    .disabled(!can_forward),
+                            )
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Single page")
+                                    .action(Box::new(SinglePage))
+                                    .checked(single_page)
+                                    .disabled(!has_document),
+                            )
+                            .item(
+                                PopupMenuItem::new("Continuous")
+                                    .action(Box::new(Continuous))
+                                    .checked(!single_page)
+                                    .disabled(!has_document),
+                            )
+                            .separator()
+                            .item(
+                                PopupMenuItem::new("Zoom in")
+                                    .action(Box::new(ZoomIn))
+                                    .disabled(!has_document),
+                            )
+                            .item(
+                                PopupMenuItem::new("Zoom out")
+                                    .action(Box::new(ZoomOut))
+                                    .disabled(!has_document),
+                            )
+                            .item(
+                                PopupMenuItem::new("Fit width")
+                                    .action(Box::new(FitWidth))
+                                    .checked(zoom == ZoomMode::FitWidth)
+                                    .disabled(!has_document),
+                            )
+                            .item(
+                                PopupMenuItem::new("Fit page")
+                                    .action(Box::new(FitPage))
+                                    .checked(zoom == ZoomMode::FitPage)
+                                    .disabled(!has_document),
+                            )
                     }),
             )
         })
-        .content(reader_button(
-            "settings-button",
-            "Settings…",
-            IconName::Settings,
-            Box::new(ShowSettings),
-            true,
-            false,
-            cx,
-        ))
+}
+
+fn creation_types(mut menu: PopupMenu, kind: MarkupKind, available: bool) -> PopupMenu {
+    for choice in MarkupKind::ALL {
+        menu = menu.item(
+            PopupMenuItem::new(choice.label())
+                .icon(crate::reader::markup_icon(choice))
+                .checked(choice == kind)
+                .disabled(!available)
+                .action(crate::reader::markup_action(choice)),
+        );
+    }
+    menu
+}
+
+fn creation_colors(mut menu: PopupMenu, current: HighlightColor) -> PopupMenu {
+    for color in HighlightColor::ALL {
+        menu = menu.item(
+            PopupMenuItem::new(color.label())
+                .checked(color == current)
+                .action(Box::new(crate::reader::SetMarkupColor(color))),
+        );
+    }
+    menu
 }
 
 pub(super) fn status_bar(reader: &ReaderView, cx: &App) -> StatusBar {

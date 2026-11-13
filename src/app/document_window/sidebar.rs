@@ -4,6 +4,7 @@ use gpui_kit::{
     Axis, Context, DragMoveEvent, Empty, Entity, FocusHandle, IntoElement, Window, div, prelude::*,
 };
 use gpui_kit::{
+    assets::IconName,
     base::{InteractiveElementExt as _, TestSupportExt as _},
     component::{
         ActiveTheme, Selectable as _, Sizable as _,
@@ -208,7 +209,11 @@ impl Render for ReaderSidebar {
                             )
                             .child(
                                 Button::new("sidebar-contents")
-                                    .label("Contents")
+                                    .accessibility_label("Contents")
+                                    .when(width_rems >= 21., |button| button.label("Contents"))
+                                    .when(width_rems < 21., |button| {
+                                        button.icon(IconName::ListTree)
+                                    })
                                     .tooltip("Contents")
                                     .flex_1()
                                     .min_w_0()
@@ -219,7 +224,11 @@ impl Render for ReaderSidebar {
                             )
                             .child(
                                 Button::new("sidebar-annotations")
-                                    .label("Annotations")
+                                    .accessibility_label("Annotations")
+                                    .when(width_rems >= 21., |button| button.label("Annotations"))
+                                    .when(width_rems < 21., |button| {
+                                        button.icon(IconName::Highlighter)
+                                    })
                                     .tooltip("Annotations")
                                     .flex_1()
                                     .min_w_0()
@@ -230,7 +239,9 @@ impl Render for ReaderSidebar {
                             )
                             .child(
                                 Button::new("sidebar-find")
-                                    .label("Find")
+                                    .accessibility_label("Find")
+                                    .when(width_rems >= 21., |button| button.label("Find"))
+                                    .when(width_rems < 21., |button| button.icon(IconName::Search))
                                     .tooltip("Find")
                                     .flex_1()
                                     .min_w_0()

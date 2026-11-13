@@ -100,8 +100,10 @@ fn save_conflict_keeps_external_version_and_offers_a_copy_of_kvers_loaded_versio
     let (handle, reader) = recent_test_window(cx, Some(source.clone()));
     cx.run_until_parked();
     select_title(cx, handle, &reader, &source);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     let external = [original.as_slice(), b"\n% external version\n"].concat();
     std::fs::write(&source, &external).unwrap();
     cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
@@ -158,8 +160,10 @@ fn save_routes_a_newly_readonly_original_to_save_as_and_cancel_keeps_edits(
     let (handle, reader) = recent_test_window(cx, Some(source.clone()));
     cx.run_until_parked();
     select_title(cx, handle, &reader, &source);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o444)).unwrap();
     cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
         .unwrap();
@@ -187,7 +191,7 @@ fn default_save_from_last_close_writes_the_current_pdf_without_a_save_as_picker(
     cx.run_until_parked();
     select_title(cx, handle, &reader, &source);
     cx.update_window(handle, |_, window, cx| {
-        window.press("cmd-shift-h", cx);
+        window.press("secondary-shift-h", cx);
         window.dispatch_action(Box::new(crate::app::windows::CloseWindow), cx);
     })
     .unwrap();

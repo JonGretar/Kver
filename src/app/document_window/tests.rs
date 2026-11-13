@@ -2,12 +2,14 @@ use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
 mod annotation_history;
+mod annotation_shortcuts;
 mod annotations;
 mod chrome;
 mod contents;
 mod external;
 mod find;
 mod jumplist;
+mod keyboard;
 mod links;
 mod palette;
 mod recent_history;

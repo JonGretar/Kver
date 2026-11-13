@@ -17,6 +17,7 @@ pub use crate::app::document_window::sidebar::{
     ShowAnnotations, ShowContents, ShowFind, ToggleSidebar,
 };
 pub use crate::reading_history::ShowRecent;
+pub(crate) use annotations::markup_icon;
 pub(crate) use annotations::{AnnotationEdit, AnnotationNavigation, AnnotationsPanel};
 pub use commands::*;
 pub use contents::ActivateOutline;
@@ -94,6 +95,8 @@ pub struct ReaderView {
     rasters: PageRasters,
     document_generation: u64,
     selection: Selection,
+    // A remembered one-shot command, not a persistent pointer tool.
+    active_markup: pdf::annotations::MarkupKind,
     links: PageLinks,
     page_index: usize,
     // A deliberate page turn remains current even if the viewport also shows
@@ -220,6 +223,7 @@ impl ReaderView {
             rasters: PageRasters::default(),
             document_generation: 0,
             selection: Selection::default(),
+            active_markup: pdf::annotations::MarkupKind::Highlight,
             links: PageLinks::default(),
             page_index: 0,
             selected_page: None,
@@ -1043,12 +1047,26 @@ impl ReaderView {
             })
     }
 
+    pub(crate) fn active_markup(&self) -> pdf::annotations::MarkupKind {
+        self.active_markup
+    }
+
+    pub(crate) fn markup_color(&self, cx: &App) -> pdf::annotations::HighlightColor {
+        self.session
+            .as_ref()
+            .map_or(pdf::annotations::HighlightColor::Yellow, |session| {
+                session.read(cx).markup_color(self.active_markup)
+            })
+    }
+
     fn markup_selection(
         &mut self,
         kind: pdf::annotations::MarkupKind,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.active_markup = kind;
+        cx.notify();
         let Some(page) = self.selection.page() else {
             return;
         };
@@ -1834,6 +1852,9 @@ impl Render for ReaderView {
                 this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
+            .on_action(cx.listener(|this, _: &ApplyMarkup, window, cx| {
+                this.markup_selection(this.active_markup, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &Highlight, window, cx| {
                 this.markup_selection(pdf::annotations::MarkupKind::Highlight, window, cx)
             }))
@@ -1848,6 +1869,13 @@ impl Render for ReaderView {
             }))
             .on_action(cx.listener(|this, action: &RecolorHighlight, _, cx| {
                 this.edit_selected_highlight(Some(action.0), cx);
+            }))
+            .on_action(cx.listener(|this, action: &SetMarkupColor, _, cx| {
+                if let Some(session) = &this.session {
+                    session.update(cx, |session, cx| {
+                        session.set_markup_color(this.active_markup, action.0, cx);
+                    });
+                }
             }))
             .on_action(cx.listener(|this, _: &DeleteHighlight, _, cx| {
                 this.edit_selected_highlight(None, cx);

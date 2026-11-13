@@ -2,7 +2,7 @@
 
 use std::cell::Cell;
 
-use gpui_kit::{AnyWindowHandle, App, AppContext as _};
+use gpui_kit::{Action, AnyWindowHandle, App, AppContext as _};
 #[cfg(target_os = "macos")]
 use gpui_kit::{Global, Menu, MenuItem};
 
@@ -23,6 +23,59 @@ use crate::settings_ui::ShowSettings;
 
 pub use super::commands::{AboutKver, CheckForUpdates, Quit};
 
+/// A native-menu adapter, deliberately never bound to keys. Forward the
+/// original command through GPUI so bare reader bindings cannot become Cocoa
+/// key equivalents in text inputs. This owns no reader behavior or state.
+#[derive(gpui_kit::Action)]
+#[action(namespace = kver, no_json)]
+pub(crate) struct NativeMenuAction {
+    action: Box<dyn Action>,
+}
+
+impl Clone for NativeMenuAction {
+    fn clone(&self) -> Self {
+        Self {
+            action: self.action.boxed_clone(),
+        }
+    }
+}
+
+impl PartialEq for NativeMenuAction {
+    fn eq(&self, other: &Self) -> bool {
+        self.action.partial_eq(other.action.as_ref())
+    }
+}
+
+impl NativeMenuAction {
+    pub(crate) fn dispatch(&self, window: &mut gpui_kit::Window, cx: &mut App) {
+        window.dispatch_action(self.action.boxed_clone(), cx);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn protect_menu_input(mut menus: Vec<Menu>, cx: &App) -> Vec<Menu> {
+    fn protect(menu: &mut Menu, cx: &App) {
+        for item in &mut menu.items {
+            match item {
+                MenuItem::Submenu(menu) => protect(menu, cx),
+                MenuItem::Action { action, .. }
+                    if super::keymap::active_map(cx)
+                        .is_some_and(|map| map.has_typing_menu_shortcut(action.as_ref())) =>
+                {
+                    *action = Box::new(NativeMenuAction {
+                        action: action.boxed_clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    for menu in &mut menus {
+        protect(menu, cx);
+    }
+    menus
+}
+
 /// Commands displayed in the native menu. The keymap checks that overriding
 /// a modified accelerator cannot promote a reader-only bare key into it.
 pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
@@ -36,10 +89,18 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "save",
     "show-recent",
     "copy",
+    "apply-markup",
+    "show-annotations",
     "highlight",
     "underline",
     "strikethrough",
     "squiggly-underline",
+    "delete-highlight",
+    "recolor-highlight-yellow",
+    "recolor-highlight-green",
+    "recolor-highlight-blue",
+    "recolor-highlight-pink",
+    "recolor-highlight-red",
     "undo-annotation",
     "redo-annotation",
     "show-find",
@@ -67,6 +128,7 @@ struct MenuState {
     save_as_available: Cell<bool>,
     annotation_undo_available: Cell<bool>,
     annotation_redo_available: Cell<bool>,
+    annotation_edit_available: Cell<bool>,
 }
 #[cfg(target_os = "macos")]
 impl Global for MenuState {}
@@ -85,6 +147,7 @@ pub fn install(cx: &mut App) {
         save_as_available: Cell::new(false),
         annotation_undo_available: Cell::new(false),
         annotation_redo_available: Cell::new(false),
+        annotation_edit_available: Cell::new(false),
     });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {
@@ -127,62 +190,89 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
     if let Some(state) = cx.try_global::<MenuState>() {
         state.can_back.set(can_back);
         state.can_forward.set(can_forward);
-        cx.set_menus([
-            Menu::new("Kver").items([
-                MenuItem::action("About Kver", AboutKver),
-                MenuItem::action("Check for Updates…", CheckForUpdates)
-                    .disabled(!state.updates_available),
-                MenuItem::separator(),
-                MenuItem::action("Settings…", ShowSettings),
-                MenuItem::separator(),
-                MenuItem::action("Quit Kver", Quit),
-            ]),
-            Menu::new("File").items([
-                MenuItem::action("New Window", NewWindow),
-                MenuItem::action("Open PDF…", OpenPdf),
-                MenuItem::action("Open Recent…", ShowRecent),
-                MenuItem::action("Save", Save).disabled(!state.save_available.get()),
-                MenuItem::action("Save As…", SaveAs).disabled(!state.save_as_available.get()),
-            ]),
-            Menu::new("Edit").items([
-                MenuItem::action("Undo", crate::reader::UndoAnnotation)
-                    .disabled(!state.annotation_undo_available.get()),
-                MenuItem::action("Redo", crate::reader::RedoAnnotation)
-                    .disabled(!state.annotation_redo_available.get()),
-                MenuItem::separator(),
-                MenuItem::action("Copy", Copy),
-                MenuItem::action("Highlight", Highlight).disabled(!state.highlight_available.get()),
-                MenuItem::action("Underline", crate::reader::Underline)
-                    .disabled(!state.highlight_available.get()),
-                MenuItem::action("Strikethrough", crate::reader::StrikeOut)
-                    .disabled(!state.highlight_available.get()),
-                MenuItem::action("Squiggly underline", crate::reader::Squiggly)
-                    .disabled(!state.highlight_available.get()),
-                MenuItem::action("Find", ShowFind),
-            ]),
-            Menu::new("View").items([
-                MenuItem::action("Toggle Sidebar", ToggleSidebar),
-                MenuItem::separator(),
-                MenuItem::action("Single Page", SinglePage),
-                MenuItem::action("Continuous", Continuous),
-                MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
-            ]),
-            Menu::new("Navigate").items([
-                MenuItem::action("Contents", ShowContents),
-                MenuItem::action("Annotations", ShowAnnotations),
-                MenuItem::separator(),
-                MenuItem::action("Forward", NavigateForward).disabled(!can_forward),
-                MenuItem::action("Back", NavigateBack).disabled(!can_back),
-                MenuItem::separator(),
-                MenuItem::action("Next Page", NextPage),
-                MenuItem::action("Previous Page", PreviousPage),
-            ]),
-            Menu::new("Window").items([
-                MenuItem::action("Close Window", CloseWindow),
-                MenuItem::action("Next Window", NextWindow),
-                MenuItem::action("Previous Window", PreviousWindow),
-            ]),
-        ]);
+        cx.set_menus(protect_menu_input(
+            vec![
+                Menu::new("Kver").items([
+                    MenuItem::action("About Kver", AboutKver),
+                    MenuItem::action("Check for Updates…", CheckForUpdates)
+                        .disabled(!state.updates_available),
+                    MenuItem::separator(),
+                    MenuItem::action("Settings…", ShowSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Kver", Quit),
+                ]),
+                Menu::new("File").items([
+                    MenuItem::action("New Window", NewWindow),
+                    MenuItem::action("Open PDF…", OpenPdf),
+                    MenuItem::action("Open Recent…", ShowRecent),
+                    MenuItem::action("Save", Save).disabled(!state.save_available.get()),
+                    MenuItem::action("Save As…", SaveAs).disabled(!state.save_as_available.get()),
+                ]),
+                Menu::new("Edit").items([
+                    MenuItem::action("Undo", crate::reader::UndoAnnotation)
+                        .disabled(!state.annotation_undo_available.get()),
+                    MenuItem::action("Redo", crate::reader::RedoAnnotation)
+                        .disabled(!state.annotation_redo_available.get()),
+                    MenuItem::separator(),
+                    MenuItem::action("Copy", Copy),
+                    MenuItem::submenu(
+                        Menu::new("Annotation").items([
+                            MenuItem::action("Apply Annotation", crate::reader::ApplyMarkup)
+                                .disabled(!state.highlight_available.get()),
+                            MenuItem::separator(),
+                            MenuItem::action("Highlight", Highlight)
+                                .disabled(!state.highlight_available.get()),
+                            MenuItem::action("Underline", crate::reader::Underline)
+                                .disabled(!state.highlight_available.get()),
+                            MenuItem::action("Strikethrough", crate::reader::StrikeOut)
+                                .disabled(!state.highlight_available.get()),
+                            MenuItem::action("Squiggly Underline", crate::reader::Squiggly)
+                                .disabled(!state.highlight_available.get()),
+                            MenuItem::separator(),
+                            MenuItem::submenu(
+                                Menu::new("Color").items(
+                                    crate::pdf::annotations::HighlightColor::ALL
+                                        .into_iter()
+                                        .map(|color| {
+                                            MenuItem::action(
+                                                color.label(),
+                                                crate::reader::RecolorHighlight(color),
+                                            )
+                                            .disabled(!state.annotation_edit_available.get())
+                                        }),
+                                ),
+                            ),
+                            MenuItem::action("Delete Annotation", crate::reader::DeleteHighlight)
+                                .disabled(!state.annotation_edit_available.get()),
+                        ]),
+                    ),
+                    MenuItem::action("Find", ShowFind),
+                ]),
+                Menu::new("View").items([
+                    MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                    MenuItem::separator(),
+                    MenuItem::action("Single Page", SinglePage),
+                    MenuItem::action("Continuous", Continuous),
+                    MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
+                ]),
+                Menu::new("Navigate").items([
+                    MenuItem::action("Contents", ShowContents),
+                    MenuItem::action("Annotations", ShowAnnotations),
+                    MenuItem::separator(),
+                    MenuItem::action("Forward", NavigateForward).disabled(!can_forward),
+                    MenuItem::action("Back", NavigateBack).disabled(!can_back),
+                    MenuItem::separator(),
+                    MenuItem::action("Next Page", NextPage),
+                    MenuItem::action("Previous Page", PreviousPage),
+                ]),
+                Menu::new("Window").items([
+                    MenuItem::action("Close Window", CloseWindow),
+                    MenuItem::action("Next Window", NextWindow),
+                    MenuItem::action("Previous Window", PreviousWindow),
+                ]),
+            ],
+            cx,
+        ));
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (cx, can_back, can_forward);
@@ -218,6 +308,15 @@ pub(crate) fn set_annotation_history_availability(cx: &App, undo: bool, redo: bo
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (cx, undo, redo);
+}
+
+pub(crate) fn set_annotation_edit_availability(cx: &App, editable: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(state) = cx.try_global::<MenuState>() {
+        state.annotation_edit_available.set(editable);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (cx, editable);
 }
 
 #[cfg(test)]

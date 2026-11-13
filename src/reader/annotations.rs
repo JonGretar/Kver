@@ -8,7 +8,7 @@ use gpui_kit::{
     assets::IconName,
     base::TestSupportExt as _,
     component::{
-        ActiveTheme, Disableable as _, IndexPath, Sizable as _,
+        ActiveTheme, Disableable as _, Icon, IndexPath, Sizable as _,
         button::{Button, ButtonVariants as _},
         list::{List, ListDelegate, ListEvent, ListItem, ListState},
         menu::{DropdownMenu as _, PopupMenuItem},
@@ -19,8 +19,54 @@ use gpui_kit::{
 
 use crate::pdf::{
     self,
-    annotations::{Annotation, AnnotationId, HighlightColor},
+    annotations::{Annotation, AnnotationId, HighlightColor, MarkupKind},
 };
+
+pub(crate) fn markup_icon(kind: MarkupKind) -> IconName {
+    match kind {
+        MarkupKind::Highlight => IconName::Highlighter,
+        MarkupKind::Underline => IconName::Underline,
+        MarkupKind::StrikeOut => IconName::Strikethrough,
+        MarkupKind::Squiggly => IconName::WavesHorizontal,
+    }
+}
+
+/// A text sample, not another rendering of the PDF appearance. Keep the
+/// foreground readable in both themes and never decorate extraction fallbacks.
+fn marked_excerpt(
+    annotation: &Annotation,
+    text: String,
+    recovered: bool,
+    window: &Window,
+) -> gpui_kit::StyledText {
+    let mut style = gpui_kit::HighlightStyle::default();
+    if recovered && let Some([r, g, b]) = annotation.color().rgb() {
+        // Imported PDF colors are data; do not normalize them to UI presets.
+        let color = gpui_kit::Hsla::from(gpui_kit::Rgba { r, g, b, a: 1. });
+        // Decoration thickness follows interface scale, unlike PDF-space paint.
+        let thickness = window.rem_size() / 14.;
+        match annotation.kind() {
+            MarkupKind::Highlight => {
+                style.background_color = Some(color.opacity(0.3));
+            }
+            MarkupKind::Underline | MarkupKind::Squiggly => {
+                style.underline = Some(gpui_kit::UnderlineStyle {
+                    color: Some(color),
+                    thickness,
+                    wavy: annotation.kind() == MarkupKind::Squiggly,
+                });
+            }
+            MarkupKind::StrikeOut => {
+                style.strikethrough = Some(gpui_kit::StrikethroughStyle {
+                    color: Some(color),
+                    thickness,
+                });
+            }
+        }
+    }
+    let len = text.len();
+    gpui_kit::StyledText::new(text).with_highlights([(0..len, style)])
+}
 
 pub(crate) struct AnnotationNavigation {
     pub(crate) generation: u64,
@@ -79,7 +125,7 @@ impl ListDelegate for AnnotationRows {
     fn render_item(
         &mut self,
         ix: IndexPath,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<ListItem> {
         let annotation = self.entries.get(ix.row)?;
@@ -111,6 +157,12 @@ impl ListDelegate for AnnotationRows {
             Some(author) => format!("{text}; {metadata}; By {author}"),
             None => format!("{text}; {metadata}"),
         };
+        let summary = match author {
+            Some(author) => format!("Page {} · {author}", annotation.page() + 1),
+            None => format!("Page {}", annotation.page() + 1),
+        };
+        let recovered = matches!(self.excerpts.get(&annotation.id()), Some(Excerpt::Text(_)));
+        let preview = marked_excerpt(annotation, text, recovered, window);
         let id = format!(
             "annotation-{}-{}",
             annotation.id().epoch(),
@@ -194,7 +246,7 @@ impl ListDelegate for AnnotationRows {
             ListItem::new(id)
                 .accessibility_label(label)
                 .track_focus(&focus.row)
-                .h_16()
+                .h_12()
                 .child(
                     div()
                         .flex()
@@ -207,7 +259,7 @@ impl ListDelegate for AnnotationRows {
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(div().flex_1().min_w_0().text_sm().truncate().child(text))
+                                .child(div().flex_1().min_w_0().text_sm().truncate().child(preview))
                                 .child(actions),
                         )
                         .child(
@@ -217,26 +269,13 @@ impl ListDelegate for AnnotationRows {
                                 .gap_1()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .when_some(annotation.color().rgb(), |row, rgb| {
-                                    // This swatch is PDF data, not an application palette.
-                                    row.child(div().size_2().flex_shrink_0().bg(gpui_kit::Rgba {
-                                        r: rgb[0],
-                                        g: rgb[1],
-                                        b: rgb[2],
-                                        a: 1.,
-                                    }))
-                                })
-                                .child(div().truncate().child(metadata)),
-                        )
-                        .when_some(author, |row, author| {
-                            row.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .truncate()
-                                    .child(format!("By {author}")),
-                            )
-                        }),
+                                .child(
+                                    Icon::new(markup_icon(annotation.kind()))
+                                        .small()
+                                        .flex_shrink_0(),
+                                )
+                                .child(div().truncate().child(summary)),
+                        ),
                 ),
         )
     }
@@ -478,6 +517,37 @@ impl AnnotationsPanel {
         }
     }
 
+    pub(crate) fn edit_available(&self, cx: &App) -> bool {
+        self.editable
+            && self
+                .selected(cx)
+                .is_some_and(|annotation| !annotation.is_readonly())
+    }
+
+    pub(crate) fn contains_focus(&self, window: &Window, cx: &App) -> bool {
+        self.focus.contains_focused(window, cx)
+    }
+
+    fn edit_selected(
+        &self,
+        color: Option<HighlightColor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let (Some(annotation), Some(revision)) = (self.selected(cx), self.revision) {
+            self.edit(
+                AnnotationEdit {
+                    generation: self.generation,
+                    revision,
+                    id: annotation.id(),
+                    color,
+                },
+                window,
+                cx,
+            );
+        }
+    }
+
     fn edit(&self, request: AnnotationEdit, window: &mut Window, cx: &mut Context<Self>) {
         // A menu may outlive its catalog/document. Never retarget a late command.
         if !self.editable
@@ -519,6 +589,14 @@ impl Render for AnnotationsPanel {
             .track_focus(&self.focus)
             .key_context(crate::key_context::ANNOTATIONS)
             .on_action(cx.listener(|this, _: &super::Copy, _, cx| this.copy(cx)))
+            .on_action(cx.listener(|this, _: &super::DeleteHighlight, window, cx| {
+                this.edit_selected(None, window, cx);
+            }))
+            .on_action(
+                cx.listener(|this, action: &super::RecolorHighlight, window, cx| {
+                    this.edit_selected(Some(action.0), window, cx);
+                }),
+            )
             .flex()
             .flex_col()
             .size_full()

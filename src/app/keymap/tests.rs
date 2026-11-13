@@ -5,6 +5,51 @@ use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
 #[test]
+fn annotation_creation_keys_are_preset_specific_and_never_input_bindings() {
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        let standard = resolve(platform, Preset::Standard).unwrap();
+        let vim = resolve(platform, Preset::Vim).unwrap();
+        let modified = if platform == Platform::Mac {
+            "cmd"
+        } else {
+            "ctrl"
+        };
+        for (standard_key, vim_key, action) in [
+            (format!("{modified}-enter"), "a a", "kver::ApplyMarkup"),
+            (format!("{modified}-shift-h"), "a h", "kver::Highlight"),
+            (format!("{modified}-shift-u"), "a u", "kver::Underline"),
+            (format!("{modified}-shift-x"), "a s", "kver::StrikeOut"),
+            (format!("{modified}-alt-u"), "a w", "kver::Squiggly"),
+        ] {
+            assert_eq!(
+                standard.action(&standard_key, Context::Reader),
+                Some(action)
+            );
+            assert_eq!(vim.action(vim_key, Context::Reader), Some(action));
+            assert_eq!(vim.action(&standard_key, Context::Reader), None);
+            assert_eq!(standard.action(vim_key, Context::Reader), None);
+            for context in [Context::Settings, Context::About, Context::Annotations] {
+                assert_eq!(standard.action(&standard_key, context), None);
+                assert_eq!(vim.action(vim_key, context), None);
+            }
+        }
+        assert_eq!(
+            standard.action(&format!("{modified}-shift-a"), Context::Reader),
+            Some("kver::ShowAnnotations")
+        );
+        assert_eq!(
+            vim.action("g a", Context::Reader),
+            Some("kver::ShowAnnotations")
+        );
+        for context in [Context::Reader, Context::Annotations] {
+            assert_eq!(vim.action("u", context), Some("kver::UndoAnnotation"));
+            assert_eq!(vim.action("ctrl-r", context), Some("kver::RedoAnnotation"));
+            assert_eq!(vim.action("x", context), Some("kver::DeleteHighlight"));
+        }
+    }
+}
+
+#[test]
 fn later_layers_replace_a_key_slot_and_unbind_masks_a_global_key() {
     let map = resolve_with(
         Platform::Mac,
@@ -131,7 +176,36 @@ fn config_errors_point_to_the_entry_and_remedy() {
 
 #[test]
 fn markup_commands_preserve_legacy_colors_and_require_safe_mac_accelerators() {
-    for command in ["underline", "strikethrough", "squiggly-underline"] {
+    for (command, default_key) in [
+        ("apply-markup", "cmd-enter"),
+        ("highlight", "cmd-shift-h"),
+        ("underline", "cmd-shift-u"),
+        ("strikethrough", "cmd-shift-x"),
+        ("squiggly-underline", "cmd-alt-u"),
+    ] {
+        // A typing alias is safe while the modified native shortcut remains first.
+        let alias = format!(
+            "[[keyboard.bindings]]\nkeys = 'a z'\ncontext = 'reader'\ncommand = '{command}'\n"
+        );
+        assert!(resolve_config(&alias, Platform::Mac, Preset::Standard).is_ok());
+        let promoted = format!(
+            "[[keyboard.bindings]]\nkeys = '{default_key}'\ncontext = 'reader'\ncommand = 'zoom-in'\n[[keyboard.bindings]]\nkeys = 'u'\ncontext = 'reader'\ncommand = '{command}'\n"
+        );
+        assert!(
+            resolve_config(&promoted, Platform::Mac, Preset::Standard)
+                .err()
+                .expect("promoted typing key must be rejected")
+                .contains("typing-key macOS menu accelerator"),
+            "{command}"
+        );
+    }
+    for command in [
+        "recolor-highlight-yellow",
+        "recolor-highlight-green",
+        "recolor-highlight-blue",
+        "recolor-highlight-pink",
+        "recolor-highlight-red",
+    ] {
         let config = format!(
             "[[keyboard.bindings]]\nkeys = 'cmd-shift-u'\ncontext = 'reader'\ncommand = '{command}'\n"
         );
@@ -145,7 +219,11 @@ fn markup_commands_preserve_legacy_colors_and_require_safe_mac_accelerators() {
         );
         assert!(resolve_config(&bare, Platform::Linux, Preset::Standard).is_ok());
     }
-    for command in ["recolor-highlight-red", "recolor-highlight-purple"] {
+    for command in [
+        "delete-highlight",
+        "recolor-highlight-red",
+        "recolor-highlight-purple",
+    ] {
         let config = format!(
             "[[keyboard.bindings]]\nkeys = 'ctrl-alt-r'\ncontext = 'reader'\ncommand = '{command}'\n"
         );
@@ -157,8 +235,7 @@ fn markup_commands_preserve_legacy_colors_and_require_safe_mac_accelerators() {
 fn mac_menu_rejects_promoting_bare_reader_keys_after_rebind() {
     for (preset, changed, bare) in [
         (Preset::Standard, "cmd-alt-right", "right"),
-        (Preset::Vim, "cmd-alt-right", "n"),
-        (Preset::Vim, "cmd-f", "/"),
+        (Preset::Vim, "cmd-alt-right", "shift-j"),
         (Preset::Standard, "cmd-b", "escape"),
         (Preset::Vim, "cmd-o", "o"),
         (Preset::Vim, "cmd-shift-o", "shift-o"),
@@ -507,7 +584,7 @@ fn switching_presets_replaces_reader_bindings_without_losing_kit_or_app_keys(
         select_preset(cx, Preset::Vim).unwrap();
         assert_eq!(active_preset(cx), Preset::Vim);
         assert_reader(cx, "right", "kver::ScrollRight");
-        assert_reader(cx, "n", "kver::NextPage");
+        assert_reader(cx, "n", "kver::NextMatch");
         assert_reader(cx, "cmd-o", "kver::OpenPdf");
         let vim_count = cx.key_bindings().borrow().bindings().count();
         select_preset(cx, Preset::Standard).unwrap();
@@ -641,7 +718,13 @@ fn overlapping_prefixes_and_duplicate_slots_are_reported() {
             context: Context::Contents,
         }),
     );
-    for (key, continuation) in [("'", "' a"), ("d", "d m a"), ("d m", "d m a"), ("g", "g g")] {
+    for (key, continuation) in [
+        ("'", "' a"),
+        ("d", "d m a"),
+        ("d m", "d m a"),
+        ("g", "g a"),
+        ("a", "a a"),
+    ] {
         assert_eq!(
             resolve_with(
                 Platform::Mac,
@@ -711,7 +794,6 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             ("cmd-w", "kver::CloseWindow"),
             ("cmd-n", "kver::NewWindow"),
             ("cmd-o", "kver::OpenPdf"),
-            ("cmd-f", "kver::ShowFind"),
         ] {
             assert_eq!(map.action(keys, Context::Global), Some(action));
             assert_eq!(map.action(keys, Context::Reader), Some(action));
@@ -727,8 +809,15 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             ("shift-space", "kver::ScrollHalfScreenUp"),
             ("g g", "kver::GoToDocumentStart"),
             ("shift-g", "kver::GoToDocumentEnd"),
-            ("n", "kver::NextPage"),
-            ("p", "kver::PreviousPage"),
+            ("shift-j", "kver::NextPage"),
+            ("shift-k", "kver::PreviousPage"),
+            ("n", "kver::NextMatch"),
+            ("shift-n", "kver::PreviousMatch"),
+            ("ctrl-f", "kver::ScrollScreenDown"),
+            ("ctrl-b", "kver::ScrollScreenUp"),
+            ("ctrl-d", "kver::ScrollHalfScreenDown"),
+            ("ctrl-u", "kver::ScrollHalfScreenUp"),
+            ("g c", "kver::ShowContents"),
             ("o", "kver::OpenPdf"),
             ("shift-o", "kver::ShowRecent"),
             ("/", "kver::ShowFind"),
@@ -747,6 +836,9 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             assert_eq!(map.action(key, Context::Settings), None, "{key}");
         }
         let standard = resolve(platform, Preset::Standard).unwrap();
+        for key in ["cmd-f", "cmd-b", "cmd-g", "cmd-shift-g", "cmd-t", "p"] {
+            assert_eq!(map.action(key, Context::Reader), None, "{key}");
+        }
         for key in ["o", "shift-o", "/", ":"] {
             assert_eq!(standard.action(key, Context::Reader), None, "{key}");
         }

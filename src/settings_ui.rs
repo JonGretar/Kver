@@ -435,6 +435,7 @@ fn shortcut_help(cx: &App, preset: Preset) -> gpui::AnyElement {
         (KeyContext::Reader, "Reader"),
         (KeyContext::Sidebar, "Sidebar"),
         (KeyContext::Contents, "Contents"),
+        (KeyContext::Annotations, "Annotations"),
         (KeyContext::Settings, "Settings"),
         (KeyContext::About, "About"),
     ] {
@@ -445,6 +446,7 @@ fn shortcut_help(cx: &App, preset: Preset) -> gpui::AnyElement {
             ("Navigate", "Navigate and scroll"),
             ("Find", "Find and contents"),
             ("View", "View and zoom"),
+            ("Annotations", "Annotations"),
             ("Marks", "Marks"),
             ("Other", "Other"),
         ] {
@@ -638,7 +640,21 @@ fn displayed_shortcuts(action: &str, keys: &[&str], cx: &App) -> String {
 
 fn shortcut_task(action: &str) -> &'static str {
     let name = action.rsplit("::").next().unwrap_or(action);
-    if name.contains("Mark") {
+    if matches!(
+        name,
+        "ApplyMarkup"
+            | "Highlight"
+            | "Underline"
+            | "StrikeOut"
+            | "Squiggly"
+            | "ShowAnnotations"
+            | "DeleteHighlight"
+            | "UndoAnnotation"
+            | "RedoAnnotation"
+            | "RecolorHighlight"
+    ) {
+        "Annotations"
+    } else if name.contains("Mark") {
         "Marks"
     } else if name.contains("Window")
         || matches!(
@@ -679,6 +695,13 @@ fn shortcut_task(action: &str) -> &'static str {
 
 fn shortcut_label(action: &str) -> String {
     let name = action.rsplit("::").next().unwrap_or(action);
+    match name {
+        "ApplyMarkup" => return "Apply annotation".into(),
+        "StrikeOut" => return "Strikethrough".into(),
+        "Squiggly" => return "Squiggly underline".into(),
+        "DeleteHighlight" => return "Delete annotation".into(),
+        _ => {}
+    }
     let mut label = String::new();
     for (index, ch) in name.chars().enumerate() {
         if index > 0 && ch.is_uppercase() {
@@ -913,6 +936,22 @@ mod tests {
                     Some("Keyboard preset: Vim")
                 );
                 assert_eq!(
+                    frame.find("shortcut-Reader-ApplyMarkup").label(),
+                    Some("Apply annotation: aa")
+                );
+                assert_eq!(
+                    frame.find("shortcut-Reader-Squiggly").label(),
+                    Some("Squiggly underline: aw")
+                );
+                assert!(
+                    frame
+                        .find("shortcut-Annotations-DeleteHighlight")
+                        .label()
+                        .unwrap()
+                        .ends_with(", x")
+                );
+                assert_eq!(shortcut_task("kver::ApplyMarkup"), "Annotations");
+                assert_eq!(
                     frame.find("shortcut-Reader-SetLocalMark").label(),
                     Some("Set Local Mark: m <LETTER>")
                 );
@@ -957,7 +996,7 @@ mod tests {
                     frame.find("shortcut-Reader-NextPage").label(),
                     Some(
                         format!(
-                            "Next Page: {}, n",
+                            "Next Page: {}, J",
                             shortcut_label::format("cmd-alt-right", cx)
                         )
                         .as_str()
@@ -1232,7 +1271,8 @@ mod tests {
                 cx.update(|cx| {
                     cx.update_window(*reader, |_, frame, cx| {
                         frame.render_frame(cx);
-                        assert_eq!(frame.try_find("settings-button").is_some(), toolbar);
+                        assert_eq!(frame.try_find("toggle-sidebar").is_some(), toolbar);
+                        assert!(frame.try_find("settings-button").is_none());
                         assert_eq!(frame.try_find("reader-status").is_some(), statusbar);
                         assert!(frame.find("page").visible());
                     })
@@ -1250,7 +1290,7 @@ mod tests {
             cx.update(|cx| {
                 cx.update_window(reader, |_, frame, cx| {
                     frame.render_frame(cx);
-                    assert!(frame.try_find("settings-button").is_none());
+                    assert!(frame.try_find("toggle-sidebar").is_none());
                     assert!(frame.try_find("reader-status").is_none());
                 })
                 .unwrap();
@@ -1873,7 +1913,7 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(reader.into(), |_, frame, cx| {
                 frame.render_frame(cx);
-                frame.click("settings-button", cx);
+                frame.press("cmd-,", cx);
             })
             .unwrap();
         });

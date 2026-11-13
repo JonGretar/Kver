@@ -305,9 +305,9 @@ fn toolbar_back_and_forward_use_jumplist_actions_and_disable_at_boundaries(
         assert!(frame.find("reader-overflow").visible());
         assert!(frame.try_find("navigate-back").is_none());
         assert!(frame.try_find("navigate-forward").is_none());
-        assert!(frame.find("settings-button").visible());
+        assert!(frame.try_find("settings-button").is_none());
         assert!(
-            frame.find("settings-button").bounds().right()
+            frame.find("reader-overflow").bounds().right()
                 <= frame.find("document-window").bounds().right()
         );
     })

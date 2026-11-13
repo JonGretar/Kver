@@ -231,6 +231,20 @@ impl DocumentSession {
         self.editing_rejection.as_deref()
     }
 
+    pub(crate) fn markup_color(&self, kind: MarkupKind) -> HighlightColor {
+        self.markup_colors[kind.color_slot()]
+    }
+
+    pub(crate) fn set_markup_color(
+        &mut self,
+        kind: MarkupKind,
+        color: HighlightColor,
+        cx: &mut Context<Self>,
+    ) {
+        self.markup_colors[kind.color_slot()] = color;
+        cx.notify();
+    }
+
     pub(crate) fn existing_markup(
         &self,
         kind: MarkupKind,

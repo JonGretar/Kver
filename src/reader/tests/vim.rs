@@ -21,14 +21,14 @@ fn vim_reader_navigation_and_marks_share_one_focused_workflow(cx: &mut TestAppCo
     let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
     cx.run_until_parked();
 
-    cx.simulate_keystrokes(window, "n");
+    cx.simulate_keystrokes(window, "shift-j");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
     cx.simulate_keystrokes(window, "m a");
     cx.run_until_parked();
     let saved = RecentStore::new(&paths).marks(&pdf).unwrap()[&'a'].position;
     assert_eq!(saved.page, 1);
 
-    cx.simulate_keystrokes(window, "n");
+    cx.simulate_keystrokes(window, "shift-j");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 2));
     cx.simulate_keystrokes(window, "' a");
     cx.run_until_parked();
@@ -78,7 +78,7 @@ fn vim_reader_navigation_and_marks_share_one_focused_workflow(cx: &mut TestAppCo
             .unwrap()
             .contains_key(&'a')
     );
-    cx.simulate_keystrokes(window, "p");
+    cx.simulate_keystrokes(window, "shift-k");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
 }
 
@@ -103,7 +103,7 @@ fn vim_pending_prefix_cancels_on_escape_and_focus_transfer(cx: &mut TestAppConte
     reader.update(cx, |reader, cx| reader.select_page(1, cx));
     let store = RecentStore::new(&paths);
 
-    for prefix in ["m", "'", "d", "d m", "g"] {
+    for prefix in ["m", "'", "d", "d m", "g", "a"] {
         cx.simulate_keystrokes(window, prefix);
         cx.update_window(window, |_, frame, _| {
             assert!(frame.has_pending_keystrokes())
@@ -116,7 +116,7 @@ fn vim_pending_prefix_cancels_on_escape_and_focus_transfer(cx: &mut TestAppConte
         .unwrap();
     }
     cx.simulate_keystrokes(window, "m");
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "/");
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         assert!(!frame.has_pending_keystrokes());
@@ -127,7 +127,7 @@ fn vim_pending_prefix_cancels_on_escape_and_focus_transfer(cx: &mut TestAppConte
     assert!(!store.marks(&pdf).unwrap().contains_key(&'a'));
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
     // Dismissing Find returns the reader's bare-key ownership.
-    cx.simulate_keystrokes(window, "escape n");
+    cx.simulate_keystrokes(window, "escape shift-j");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 2));
 }
 
@@ -148,7 +148,7 @@ fn vim_native_window_command_survives_focused_find_input(cx: &mut TestAppContext
         frame.render_frame(cx);
         frame.press("m", cx);
         assert!(frame.has_pending_keystrokes());
-        frame.press("cmd-f", cx);
+        frame.press("/", cx);
         frame.render_frame(cx);
         assert!(!frame.has_pending_keystrokes());
         frame.input("n", cx);
@@ -249,6 +249,6 @@ fn vim_find_slash_and_wide_keys_do_not_intercept_its_input(cx: &mut TestAppConte
         assert_eq!(reader.page_index(), 0);
         assert_eq!(reader.reading_position(), (0, 0.0));
     });
-    cx.simulate_keystrokes(window, "escape n");
+    cx.simulate_keystrokes(window, "escape shift-j");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
 }

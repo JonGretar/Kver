@@ -129,12 +129,8 @@ fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
             cx.update_window(handle, |_, window, cx| {
                 window.render_frame(cx);
                 let left = window.find("reader-sidebar").bounds().right();
-                for id in [
-                    "toggle-sidebar",
-                    "previous-page",
-                    "next-page",
-                    "settings-button",
-                ] {
+                assert!(window.try_find("settings-button").is_none());
+                for id in ["toggle-sidebar", "previous-page", "next-page"] {
                     let control = window.find(id);
                     assert!(control.visible(), "{id} at {width}/{font_size}");
                     assert!(
@@ -156,10 +152,7 @@ fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
                     "fit-page",
                 ] {
                     if let Some(control) = window.try_find(id) {
-                        assert!(
-                            control.bounds().right()
-                                <= window.find("settings-button").bounds().left()
-                        );
+                        assert!(control.bounds().right() <= px(width));
                     } else {
                         assert!(window.find("reader-overflow").visible());
                     }
@@ -194,7 +187,7 @@ fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
     );
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.click("settings-button", cx);
+        window.press("cmd-,", cx);
     })
     .unwrap();
     cx.run_until_parked();

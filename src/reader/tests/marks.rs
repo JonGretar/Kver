@@ -68,10 +68,10 @@ fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
     assert!(!store.marks(&pdf).unwrap().contains_key(&'p'));
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
     // Once a sequence completes, the ordinary one-key binding is active again.
-    cx.simulate_keystrokes(window, "p");
+    cx.simulate_keystrokes(window, "shift-k");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
     reader.update(cx, |reader, cx| reader.select_page(2, cx));
-    cx.simulate_keystrokes(window, "m escape p");
+    cx.simulate_keystrokes(window, "m escape shift-k");
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
     cx.simulate_keystrokes(window, "m");
     cx.update(|cx| {

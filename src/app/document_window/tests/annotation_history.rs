@@ -415,7 +415,12 @@ fn palette_annotation_history_commands_work_from_either_preset(cx: &mut TestAppC
         let (handle, document) = open(cx, Some(PathBuf::from("examples/selection-sample.pdf")));
         cx.run_until_parked();
         select_text(cx, handle, &document);
-        press(cx, handle, "cmd-shift-h");
+        if preset == crate::app::keymap::Preset::Vim {
+            press(cx, handle, "a");
+            press(cx, handle, "h");
+        } else {
+            press(cx, handle, "cmd-shift-h");
+        }
         let created = catalog(&document, cx);
         for (query, expected) in [("Undo", 0), ("Redo", 1)] {
             press(cx, handle, "cmd-shift-p");

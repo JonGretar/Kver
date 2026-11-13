@@ -223,6 +223,11 @@ impl DocumentSession {
         }
         let id = AnnotationId::new(self.epoch, (1 << 63) | self.next_serial);
         self.next_serial += 1;
+        // Capture identity once, after duplicate detection. Later settings
+        // changes and edits must not claim existing or imported annotations.
+        let settings = crate::settings_ui::state(cx);
+        let author = settings.read(cx).annotation_author();
+        let author = (!author.trim().is_empty()).then(|| author.to_owned());
         let annotation = Annotation::new(
             id,
             page,
@@ -230,7 +235,8 @@ impl DocumentSession {
             quads,
             AnnotationColor::Rgb([1., 0.85, 0.]),
         )
-        .with_opacity(0.45);
+        .with_opacity(0.45)
+        .with_metadata(author, None, None);
         let key = |annotation: &Annotation| {
             document
                 .annotation_bounds(annotation)

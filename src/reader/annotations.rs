@@ -85,42 +85,55 @@ impl ListDelegate for AnnotationRows {
             annotation.page() + 1,
             color
         );
+        let author = annotation
+            .author()
+            .filter(|author| !author.trim().is_empty());
+        let label = match author {
+            Some(author) => format!("{text}; {metadata}; By {author}"),
+            None => format!("{text}; {metadata}"),
+        };
         let id = format!(
             "annotation-{}-{}",
             annotation.id().epoch(),
             annotation.id().serial()
         );
         Some(
-            ListItem::new(id)
-                .accessibility_label(format!("{text}; {metadata}"))
-                .h_16()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .min_w_0()
-                        .w_full()
-                        .gap_1()
-                        .child(div().text_sm().truncate().child(text))
-                        .child(
+            ListItem::new(id).accessibility_label(label).h_16().child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .w_full()
+                    .gap_1()
+                    .child(div().text_sm().truncate().child(text))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .when_some(annotation.color().rgb(), |row, rgb| {
+                                // This swatch is PDF data, not an application palette.
+                                row.child(div().size_2().flex_shrink_0().bg(gpui_kit::Rgba {
+                                    r: rgb[0],
+                                    g: rgb[1],
+                                    b: rgb[2],
+                                    a: 1.,
+                                }))
+                            })
+                            .child(div().truncate().child(metadata)),
+                    )
+                    .when_some(author, |row, author| {
+                        row.child(
                             div()
-                                .flex()
-                                .items_center()
-                                .gap_1()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .when_some(annotation.color().rgb(), |row, rgb| {
-                                    // This swatch is PDF data, not an application palette.
-                                    row.child(div().size_2().flex_shrink_0().bg(gpui_kit::Rgba {
-                                        r: rgb[0],
-                                        g: rgb[1],
-                                        b: rgb[2],
-                                        a: 1.,
-                                    }))
-                                })
-                                .child(div().truncate().child(metadata)),
-                        ),
-                ),
+                                .truncate()
+                                .child(format!("By {author}")),
+                        )
+                    }),
+            ),
         )
     }
 }

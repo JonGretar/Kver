@@ -154,7 +154,7 @@ impl ReadingView {
 
 /// The complete set of preferences understood by this version of Kver.
 /// Unknown TOML entries remain in the file, but are not applied as settings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     appearance: Appearance,
     show_toolbar: bool,
@@ -166,10 +166,11 @@ pub struct AppSettings {
     reopen_last_windows_on_startup: bool,
     reading_view: ReadingView,
     keyboard_preset: Preset,
+    annotation_author: String,
 }
 
 impl AppSettings {
-    pub fn show_toolbar(self) -> bool {
+    pub fn show_toolbar(&self) -> bool {
         self.show_toolbar
     }
 
@@ -178,7 +179,7 @@ impl AppSettings {
         self
     }
 
-    pub fn show_statusbar(self) -> bool {
+    pub fn show_statusbar(&self) -> bool {
         self.show_statusbar
     }
 
@@ -187,7 +188,7 @@ impl AppSettings {
         self
     }
 
-    pub fn appearance(self) -> Appearance {
+    pub fn appearance(&self) -> Appearance {
         self.appearance
     }
 
@@ -196,7 +197,7 @@ impl AppSettings {
         self
     }
 
-    pub fn remember_reading_history(self) -> bool {
+    pub fn remember_reading_history(&self) -> bool {
         self.remember_reading_history
     }
 
@@ -205,7 +206,7 @@ impl AppSettings {
         self
     }
 
-    pub fn reopen_at_last_position(self) -> bool {
+    pub fn reopen_at_last_position(&self) -> bool {
         self.reopen_at_last_position
     }
 
@@ -214,7 +215,7 @@ impl AppSettings {
         self
     }
 
-    pub fn quit_when_last_window_closes(self) -> bool {
+    pub fn quit_when_last_window_closes(&self) -> bool {
         self.quit_when_last_window_closes
     }
 
@@ -223,7 +224,7 @@ impl AppSettings {
         self
     }
 
-    pub fn initial_zoom(self) -> InitialZoom {
+    pub fn initial_zoom(&self) -> InitialZoom {
         self.initial_zoom
     }
 
@@ -232,7 +233,7 @@ impl AppSettings {
         self
     }
 
-    pub fn reopen_last_windows_on_startup(self) -> bool {
+    pub fn reopen_last_windows_on_startup(&self) -> bool {
         self.reopen_last_windows_on_startup
     }
 
@@ -241,7 +242,7 @@ impl AppSettings {
         self
     }
 
-    pub fn reading_view(self) -> ReadingView {
+    pub fn reading_view(&self) -> ReadingView {
         self.reading_view
     }
 
@@ -250,7 +251,7 @@ impl AppSettings {
         self
     }
 
-    pub fn keyboard_preset(self) -> Preset {
+    pub fn keyboard_preset(&self) -> Preset {
         self.keyboard_preset
     }
 
@@ -259,11 +260,28 @@ impl AppSettings {
         self
     }
 
+    /// Blank means no personal authorship; never derive identity from the OS.
+    pub fn annotation_author(&self) -> &str {
+        &self.annotation_author
+    }
+
+    pub fn with_annotation_author(mut self, author: String) -> Self {
+        self.annotation_author = author;
+        self
+    }
+
     fn from_document(document: &DocumentMut) -> Result<Self, String> {
         let application = table_in(document, "application")?;
         let reader = table_in(document, "reader")?;
         let keyboard = table_in(document, "keyboard")?;
         Ok(Self {
+            annotation_author: match application.and_then(|table| table.get("annotation_author")) {
+                None => String::new(),
+                Some(value) => value
+                    .as_str()
+                    .ok_or("Settings [application].annotation_author must be a string")?
+                    .to_owned(),
+            },
             appearance: appearance_in(document)?,
             show_toolbar: bool_in(
                 application.and_then(|table| table.get("show_toolbar")),
@@ -322,12 +340,13 @@ impl Default for AppSettings {
             reopen_last_windows_on_startup: false,
             reading_view: ReadingView::default(),
             keyboard_preset: Preset::default(),
+            annotation_author: String::new(),
         }
     }
 }
 
 /// An intentional edit to one known preference, not a replacement of the file.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum SettingsChange {
     Appearance(Appearance),
     ShowToolbar(bool),
@@ -339,6 +358,7 @@ pub enum SettingsChange {
     ReopenLastWindowsOnStartup(bool),
     ReadingView(ReadingView),
     KeyboardPreset(Preset),
+    AnnotationAuthor(String),
 }
 
 impl SettingsChange {
@@ -362,6 +382,7 @@ impl SettingsChange {
             ),
             Self::ReadingView(view) => ("reader", "reading_view", value(view.key())),
             Self::KeyboardPreset(preset) => ("keyboard", "preset", value(preset.key())),
+            Self::AnnotationAuthor(author) => ("application", "annotation_author", value(author)),
         };
         if document.get(section).is_none() {
             document[section] = Item::Table(Table::new());
@@ -598,6 +619,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn annotation_author_defaults_blank_round_trips_and_rejects_invalid_toml() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert_eq!(super::load(&path).unwrap().annotation_author(), "");
+        fs::write(
+            &path,
+            "# retain\n[application]\nannotation_author = '' # identity\n[future]\nvalue = 42\n",
+        )
+        .unwrap();
+        for author in ["Jón 中文", "", "   "] {
+            let updated =
+                super::save(&path, SettingsChange::AnnotationAuthor(author.into())).unwrap();
+            assert_eq!(updated.annotation_author(), author);
+            assert_eq!(super::load(&path).unwrap().annotation_author(), author);
+            let text = fs::read_to_string(&path).unwrap();
+            assert!(text.contains("# retain"));
+            assert!(text.contains("# identity"));
+            assert!(text.contains("[future]\nvalue = 42"));
+        }
+        for invalid in ["42", "false", "[]"] {
+            let text = format!("[application]\nannotation_author = {invalid}\n");
+            fs::write(&path, &text).unwrap();
+            assert!(
+                super::load(&path)
+                    .unwrap_err()
+                    .contains("annotation_author must be a string")
+            );
+            assert!(super::save(&path, SettingsChange::AnnotationAuthor("New".into())).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        }
+    }
+
+    #[test]
     fn keyboard_preset_round_trips_without_losing_other_settings() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config.toml");
@@ -637,7 +691,7 @@ mod tests {
     }
 
     fn load(path: &Path) -> Result<Appearance, String> {
-        super::load(path).map(AppSettings::appearance)
+        super::load(path).map(|settings| settings.appearance())
     }
 
     #[test]
@@ -710,6 +764,7 @@ mod tests {
         assert_eq!(
             updated,
             before
+                .clone()
                 .with_reopen_last_windows_on_startup(true)
                 .with_reading_view(ReadingView::Page)
         );

@@ -69,12 +69,13 @@ for examples, command names, contexts, and error recovery.
 
 Kver is written in Rust.
 
-The current prototype uses:
+Kver uses:
 
 - **UI:** [GPUI](https://gpui.rs) & [GPUI Kit](https://gpui-kit.com)
 - **PDF engine:** [Hayro](https://github.com/LaurenzV/hayro)
 
-See [Architecture](docs/architecture.md) for implementation details.
+See [Architecture](docs/architecture.md) for a source map and ownership
+boundaries, and [Future direction](docs/roadmap.md) for longer-term ideas.
 
 ## Run from source
 
@@ -86,26 +87,27 @@ component. Install [Corgi](https://github.com/ConradIrwin/corgi) with
 corgi run -- examples/field-guide.pdf
 ```
 
-Run `corgi run` without a path to choose a PDF from the window. Standard is the
-default keyboard preset. While the reader has focus, use ↑/↓ to scroll a line,
-Page Up/Down to scroll most of a screen, and ←/→ to turn pages. On macOS,
-Option-↑/↓ also turns pages; Command-Plus/Minus zooms, and
-Command-Option-W/F fits width/page. These modified shortcuts work from the
-reader, not while typing in Find or using a dialog. The toolbar, menus, and
-command palette invoke the same reader commands. `Ctrl-O`/`Ctrl-I` go back and
-forward through semantic jumps when the reader or Contents has focus;
-Option-←/→ are Standard aliases for those commands. Command-Shift-M opens the
-marks dialog without requiring a letter sequence. Command-T opens Contents;
-Kver has no tabs.
+Run `corgi run` without a path to choose a PDF from the window. Standard is
+the default keyboard preset; Settings → Keyboard shows the active shortcuts.
+The toolbar, menus, and command palette expose reader commands too.
+Use `corgi run --release -- examples/field-guide.pdf` to evaluate performance.
 
-The prototype renders visible pages in background work. The illustrated,
-24-page field guide includes a contents page, bookmarks, images, tables, and a
-graph. The separate `examples/readme-sample.pdf` is a 100-page navigation and
-test fixture.
+The illustrated field guide includes bookmarks, images, tables, and a graph.
+The separate `examples/readme-sample.pdf` is a long-document test fixture.
 
-For a local unsigned `.app`, see the [macOS build guide](docs/macos-app.md).
-For rendering evidence and known limitations, see the
-[validation record](docs/rendering-validation.md).
+To build a local ad-hoc-signed `.app` (not Developer ID signed or notarized):
+
+```sh
+sh scripts/build-macos-app.sh
+open -n -a "$PWD/target/release/Kver.app"
+```
+
+If `CARGO_TARGET_DIR` is set, use its `release/Kver.app` instead. The bundle
+includes the app icon and Finder PDF association. Build on the Mac where you
+intend to run it; binaries are architecture-specific. If the Metal toolchain
+is missing, install it with `xcodebuild -downloadComponent MetalToolchain`.
+
+Maintainers: see [macOS packaging and releases](docs/releasing.md).
 
 ### Build and test
 
@@ -118,18 +120,11 @@ corgi build --release
 corgi test
 ```
 
-Until Corgi's feature-planning issue is fixed, Kver enables GPUI Kit's
-`test-support` dependencies for normal GUI builds so Corgi can run the visual
-capture tool when requested. The `screenshot` feature gates that opt-in target;
-plain `corgi test` and CI do not run it. This adds build dependencies to normal GUI
-builds, but the measured release binary grew by about 0.5 MiB. The first
-Corgi build populates the shared store; it does not remove existing Cargo
-`target/` directories or the user-local `sccache` cache.
-
 Corgi is macOS-only. Linux Cloud Runners and CI continue using Cargo
 (`cargo +stable test --locked --all-targets` in CI). For an opt-in capture,
 run `corgi test --features screenshot --test visual` on macOS. Local macOS
-packaging uses Corgi when available and falls back to Cargo.
+packaging uses Corgi when available and falls back to Cargo. The capture tool
+is not run by plain `corgi test` or PR CI.
 
 ## License
 

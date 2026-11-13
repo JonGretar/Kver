@@ -9,8 +9,9 @@ archive by default. If these docs do not exist yet, proceed without creating
 empty files.
 
 Add a glossary entry when a domain term is settled. Before creating an ADR,
-apply the [ADR criteria](../adr/README.md); brief rationale normally belongs
-in the existing architecture doc.
+apply the [ADR criteria](../adr/README.md). Local rationale belongs beside
+the code; the architecture doc maps major boundaries rather than cataloguing
+implementation decisions.
 
 Use glossary terms consistently in issues, design discussions, hypotheses,
 and tests. Flag a proposed change that conflicts with an existing ADR rather

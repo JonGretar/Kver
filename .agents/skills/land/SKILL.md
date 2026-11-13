@@ -15,8 +15,8 @@ An invocation of this skill is the landing request. Carry it through to the
 destination; do not ask for the same merge authorization again. Stop for a
 genuine blocker, unresolved scope, or an ambiguous conflict, and report that
 the change has **not landed**. Follow the project's review and approval policy
-in `docs/agents/workflow.md` (steps 2–4); keep incomplete roadmap gates
-explicit rather than declaring them finished merely because code was merged.
+in `docs/agents/workflow.md` (steps 2–4); apply its documentation lifecycle
+instead of maintaining a parallel roadmap status ledger.
 
 1. **Establish scope and destination.** Inspect the complete branch diff,
    uncommitted and untracked files, recent history, remotes, and the current

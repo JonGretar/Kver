@@ -5,22 +5,14 @@ worktree is a separate checkout for that thread; an additional Git worktree
 is not part of the routine workflow. Git and `jj` are both acceptable for
 version-control operations in this repository.
 
-Keep repository Markdown files for durable decisions, their reasons, and
-information needed to build or use Kver. Before creating a new Markdown file,
-identify who will use it after the task ends and why an existing document or
-issue is not the right home. Prefer updating the existing source of truth.
-Use `docs/architecture.md` for the current system structure and brief rationale,
-and [ADRs](../adr/README.md) only for decisions that meet their criteria.
-Keep reusable build, use, and validation instructions in how-to or reference
-docs; keep plans and task history in issues and PRs.
-
 Keep working conversations and requests for human checks in the Delta thread;
 ask the person directly there, launching the app yourself when possible.
 Put brief verification results and remaining limitations in the relevant
 GitHub issue or PR, not in architecture docs or a test diary.
 
-1. **Decide what to build.** Use `docs/roadmap.md` for release gates and
-   `docs/features.md` for scope. For a multi-session feature, agree on a spec
+1. **Decide what to build.** Use the agreed request or issue for scope;
+   `docs/roadmap.md` supplies broad future direction, not live status.
+   For a multi-session feature, agree on a spec
    and small, verifiable tickets before publishing them to
    [GitHub Issues](issue-tracker.md). Use `to-spec` to agree on the scope and
    test seams, then `to-tickets` to propose demoable slices and their genuine
@@ -68,11 +60,12 @@ GitHub issue or PR, not in architecture docs or a test diary.
    feedback. Implementation threads create PRs only when explicitly instructed;
    orchestrators should not ask them to create PRs by default. During an
    explicitly requested landing, the Land skill creates a PR if needed; an
-   existing PR can also be used. While the repository is private, require the
-   passing Linux and macOS PR checks before landing, plus the real-Mac check
+   existing PR can also be used. Require passing Linux and macOS PR checks
+   before landing, plus the real-Mac check
    for native window/input changes. Before tagging a release, run the
    unsigned archive verification in `scripts/package-macos-app.sh` on an Apple
-   silicon Mac. An independent thread's changes reach the project through
+   silicon Mac; see [macOS releases](../releasing.md) for the full procedure.
+   An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree
    pull into its parent. Landing on `main` requires approval for that specific
    change.
@@ -80,11 +73,48 @@ GitHub issue or PR, not in architecture docs or a test diary.
    `Closes #<number>` only when merging that PR will satisfy the ticket's
    acceptance criteria; otherwise use `Refs #<number>` and keep the issue
    open. Do not auto-close a parent spec when only one child ticket is done.
-   Update project docs when a durable fact changes: check off each
-   `docs/roadmap.md` item fully completed by that change, leaving partial
-   items unchecked. Update **Where we are** when the milestone status or next
-   work changes.
+   Apply the [documentation lifecycle](#documentation-lifecycle): update only
+   affected durable guidance and remove finished working files.
    Add a user-facing `CHANGELOG.md` entry for notable changes.
+
+## Documentation lifecycle
+
+Maintain the smallest useful set of durable documents. Before adding or
+updating prose, identify its reader, purpose, and authoritative home:
+
+| Information | Home |
+| --- | --- |
+| Product introduction, installation, quick start | `README.md` |
+| Source map, major ownership boundaries, cross-cutting invariants | `docs/architecture.md` |
+| Non-obvious local reason or constraint | Comment beside the enforcing code |
+| Behavioral contract | Code and tests |
+| Hard-to-reverse, surprising decision with real alternatives | ADR, only if it meets the [criteria](../adr/README.md) |
+| Reusable user or maintainer procedure | Existing focused how-to/reference, such as `docs/keybindings.md` or `docs/releasing.md` |
+| Broad future direction | `docs/roadmap.md` |
+| Scope, acceptance criteria, unresolved limitations, live status | Issue/spec |
+| Implementation discussion and verification results | PR or issue |
+| Notable reader-facing changes | `CHANGELOG.md` |
+
+Code comments should explain the essential reason locally; link to an issue
+or PR for supporting history. A link alone is not an explanation. Prefer
+reading the source over maintaining prose inventories of fields, shortcuts,
+UI details, or feature behavior.
+
+Temporary plans and research are welcome when they help execute the task.
+Use `docs/plans/` or `docs/research/`, identify the active task, and keep them
+only while needed. At completion or abandonment:
+
+1. Check for vital information not already captured in its authoritative home.
+2. Move only that information: a constraint to a comment/test, a qualifying
+   decision to an ADR, a reusable procedure to a how-to, or unresolved work to
+   the relevant issue (publishing still requires approval).
+3. Delete the working files and fix their incoming links. Revision history
+   preserves the original material; do not create a completed-plan archive.
+
+Research does not automatically warrant an ADR. Keep test observations and
+release acceptance evidence in issues/PRs rather than maintained validation
+diaries. Finishing a feature does not require architecture or roadmap edits
+unless their actual purpose is affected.
 
 ## Modal command lists
 
@@ -135,23 +165,14 @@ establish pointer routing or keyboard ownership.
 GitHub Issues is the source of truth for **what remains**, **what is active**,
 and **what depends on what**. A spec issue describes the agreed scope; its
 implementation tickets are separate issues, linked as sub-issues where
-supported. Do not count the spec as an implementation ticket. The roadmap
-summarizes milestone outcomes and current state; use issues for the finer
-task graph and live ownership. When tickets are published, replace the
-roadmap's "no open implementation tickets" note with a link to the spec or
-ticket set. Do not mirror each ticket's mutable status in the roadmap.
+supported. Do not count the spec as an implementation ticket. Use issues
+for the task graph and live ownership, not a repository status summary.
 
-Keep active implementation plans directly under `docs/plans/`. Retain completed
-plans with useful rationale under `docs/plans/completed/`, marked historical
-and linked to current architecture or ADRs. Completion of a plan does not imply
-that its changes have landed or been released.
-
-For a quick "what next?" answer, read the roadmap's **Where we are** and the
-linked spec's open child issues. Check each candidate's native blockers (or
+For a quick "what next?" answer, inspect open issues and the relevant spec's
+open child issues. Check each candidate's native blockers (or
 `Blocked by` text), assignee, start comments, and linked PR before calling it
 ready. Report ready, in-progress, and blocked tickets with links, then suggest
-unclaimed work from the current milestone's ready frontier. The roadmap's
-initial task list is a pointer, not live status; if GitHub cannot be checked,
+unclaimed work within the agreed scope. If GitHub cannot be checked,
 say that current ownership and blockers are unverified rather than guessing.
 Explore code only when deciding how to implement a particular ticket.
 
@@ -192,12 +213,7 @@ Write notable changes under `## [Unreleased]`, using only relevant categories
 such as `Added`, `Changed`, and `Fixed`. Describe the change from a reader's
 perspective, not as a list of commits; omit routine internal work. The changelog is meant for the users of the app to see changes. Avoid lengthy technical information or instructions unless it's valuable for the user.
 
-Prepare a release only when explicitly requested. Move the released entries
-under `## [x.y.z] - YYYY-MM-DD`, leave a new `## [Unreleased]` at the top,
-set the package version to `x.y.z`, and use a `vx.y.z` tag. The automated
-release workflow should check that these agree before attaching assets to
-the GitHub Release; creating the tag or publishing the release requires
-authorization for that release. The separate `.github/workflows/release.yml`
-runs a macOS archive build only for `v*` tag pushes, not for routine PRs or
-pushes to `main`. Verify the archive before tagging; do not push a release
-tag to test a CI change.
+Prepare or publish a release only when explicitly requested. Follow
+[macOS packaging and releases](../releasing.md) for versioning, signing,
+candidate checks, and publication. Creating or pushing a release tag requires
+authorization for that release.

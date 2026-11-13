@@ -2,8 +2,8 @@
 
 ## Project Overview
 
-Kver is a planned keyboard-first PDF reader in Rust. The first downloadable
-release targets macOS; Linux and Windows have separate delivery gates.
+Kver is a keyboard-first PDF reader in Rust. macOS leads; Linux and Windows
+need separate native testing and packaging.
 
 It is inspired by Sioyek, but aims to be a general-purpose PDF reader rather than an academic-specific application.
 
@@ -23,7 +23,7 @@ Primary priorities:
 
 ## Technology
 
-Preferred stack:
+Stack:
 
 - Rust
 - GPUI
@@ -31,9 +31,6 @@ Preferred stack:
   warrants revisiting the backend
 - SQLite for persistent state
 - TOML for user configuration
-
-Hayro is the chosen initial backend. SQLite and TOML are planned, not yet
-implemented.
 
 Do not introduce major frameworks or dependencies without explaining their purpose and tradeoffs.
 
@@ -148,18 +145,28 @@ result in the Delta thread with the opt-in `tests/visual.rs` tool. See
 ## Documentation
 
 Keep `README.md` focused on the reader-facing project description and quick
-start, not agent memory or work status. Record architecture changes in
-`docs/architecture.md`, scope changes in `docs/features.md`, and release-gate
-progress in `docs/roadmap.md`; GitHub Issues track live ticket status.
+start. `docs/architecture.md` is a short source map and ownership overview;
+update it only when those boundaries change. `docs/roadmap.md` holds broad
+future direction, not ticket status. Issues/specs own scope and live work;
+PRs own implementation discussion and verification evidence.
 
-Document important architectural decisions and tradeoffs.
+Keep one authoritative home for each fact. Code and tests describe behavior;
+add comments only for non-obvious reasons or constraints, with issue/PR links
+for deeper context. State the essential reason locally. Use ADRs only for
+decisions meeting `docs/adr/README.md`'s criteria.
+
+Plans and research may live under `docs/plans/` and `docs/research/` while
+their work is active. At completion or abandonment, move only vital,
+otherwise missing information to its proper home, then delete the working
+files. Revision history retains the originals; completed-plan archives and
+validation diaries are not maintained documentation. See
+`docs/agents/workflow.md#documentation-lifecycle` for destinations.
 
 For ticketed work:
 
 - Reference the issue number (`#N`) in commits. Use `Closes #N` in a PR only
   when merging it completes the issue; otherwise use `Refs #N`.
-- In the landing PR, check off roadmap items only when fully complete, and add
-  notable reader-facing changes to `CHANGELOG.md` under `Unreleased`.
+- Add notable reader-facing changes to `CHANGELOG.md` under `Unreleased`.
 - Create a release or tag only when explicitly requested.
 
 For the full close-out and release process, see `docs/agents/workflow.md`.
@@ -176,9 +183,9 @@ Use a single-context glossary and ADR layout. See `docs/agents/domain.md`.
 
 ### Feature workflow
 
-For task suggestions or "what's next", start with `docs/roadmap.md` and the
-linked GitHub issues; check live blockers and ownership before recommending
-ready work. For specs, tickets, work status, parallel implementation, review,
+For task suggestions or "what's next", use GitHub issues for live blockers
+and ownership; consult `docs/roadmap.md` only for broad direction.
+For specs, tickets, work status, parallel implementation, review,
 or landing in Delta, see `docs/agents/workflow.md`. Use isolated Delta
 worktrees for independent implementation; Git and `jj` are both acceptable
 in this project.
@@ -189,8 +196,5 @@ default.
 
 ## Scope
 
-Do not implement features outside the current milestone without a clear reason.
-
-The first objective is to validate the stack, then ship a buildable,
-downloadable macOS PDF reader with smooth navigation and zooming. See
-`docs/features.md` and `docs/roadmap.md` for later goals.
+Implement the agreed task scope. Protect responsive reading and navigation;
+future ideas in `docs/roadmap.md` are not implementation commitments.

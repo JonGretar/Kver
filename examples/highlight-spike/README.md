@@ -64,8 +64,14 @@ case, not a recommended geometry policy.
 For the consolidated Preview check, use the Hayro-derived PDFs and inspect all
 three regions after interactive recoloring, not just annotation counts/colors.
 Do not regenerate files while somebody is editing them. The one-off native
-comparison/debug probes have been removed; their implementation-relevant
-conclusions are in the [research report](../../docs/research/pdf-highlighting.md#writer-feasibility).
+comparison/debug probes have been removed. Approximate padded geometry lost
+regions during Preview's interactive recoloring; both Hayro-derived controls
+preserved the three fixture regions. Direct PDFKit color/count checks did not
+expose that interactive difference. This is fixture-specific prior art, not
+a guarantee for arbitrary PDFs. See
+[spec #123](https://github.com/JonGretar/Kver/issues/123) and
+[integrated validation #134](https://github.com/JonGretar/Kver/issues/134)
+for the production feature's scope and acceptance evidence.
 
 Limitations:
 

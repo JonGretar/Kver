@@ -1,12 +1,16 @@
 ---
 name: research
-description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+description: Investigate a question against high-trust primary sources. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
 ---
 
-Spin up a **background agent** to do the research, so you keep working while it reads.
+Investigate against **primary sources**: official docs, source code, specs,
+and first-party APIs. Cite the source that owns each material claim;
+distinguish verified facts from proposals and untested assumptions.
 
-Its job:
+Answer in the thread unless a working file helps a multi-session task or the
+user requests one. Temporary notes go in `docs/research/`, identify their task,
+and follow the [documentation lifecycle](../../../docs/agents/workflow.md#documentation-lifecycle).
+At completion, move only vital findings to their authoritative homes and
+delete the notes. Research does not automatically become an ADR.
 
-1. Investigate the question against **primary sources** (official docs, source code, specs, first-party APIs), not a secondary write-up of them. Follow every claim back to the source that owns it.
-2. Write the findings to a single Markdown file in `docs/research/`, citing each claim's source.
-3. Save it where the repo already keeps such notes; match the existing convention, and if there is none, put it somewhere sensible and say where.
+Delegate reading only when the current delegation policy permits it.

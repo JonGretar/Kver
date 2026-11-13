@@ -2,7 +2,7 @@
 //!
 //! No GPUI fork or patch. The macOS adapter depends on the pinned framework's
 //! native delegate layout; dependency upgrades must follow the checklist in
-//! `docs/macos-app.md#recheck-native-quit-protection-after-dependency-upgrades`.
+//! `docs/releasing.md#native-quit-checks-after-dependency-upgrades`.
 
 use gpui_kit::App;
 

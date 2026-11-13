@@ -13,8 +13,8 @@ Contents:
 ## macOS
 
 Run `sh scripts/build-macos-app.sh` on a Mac to build the release binary and
-package it with `kver.icns`. See the [unsigned app guide](../../docs/macos-app.md)
-for launch, inspection, and security instructions. A plain `cargo run`
+package it with `kver.icns`. See the [README](../../README.md#run-from-source)
+for local launch and [release guide](../../docs/releasing.md) for archive checks. A plain `cargo run`
 executable is not an app bundle.
 
 ## Windows

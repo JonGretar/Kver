@@ -1,4 +1,4 @@
-//! Provisional PDF backend for the reader prototype.
+//! PDF backend boundary for rendering, extraction, and annotation encoding.
 //!
 //! The UI receives bitmap pixels and document-space text geometry, never Hayro types.
 #[cfg(feature = "gui")]
@@ -835,6 +835,9 @@ fn rasterize_pdf(
         return Err("Page is too large to render at this scale".into());
     }
 
+    // Hayro can stop at malformed /Annots entries and omit later appearances,
+    // even though the catalog/writer preserves them. Do not infer data loss
+    // from missing paint: https://github.com/JonGretar/Kver/issues/142.
     let pixmap = render(
         page,
         &RenderCache::new(),

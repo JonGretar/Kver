@@ -7,8 +7,8 @@ Create the next sequentially numbered file only when a decision meets all
 three conditions. Keep it short: context, decision, alternatives and trade-offs,
 and consequences. Link it from the relevant section of
 [`architecture.md`](../architecture.md) and the active issue, if there is one.
-Keep the current design in the architecture doc; link to the ADR for the
-reasoning rather than duplicating it.
+Keep the architecture doc as a source map and ownership overview; link to the
+ADR for reasoning rather than repeating it or expanding it into a feature spec.
 
 ADRs are optional, not a feature-completion requirement. Do not backfill them
 unless missing reasoning is causing recurring questions or risks a costly

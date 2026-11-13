@@ -13,7 +13,7 @@ _Kver_ is Icelandic for a small book or booklet.
 **[Download for macOS](https://github.com/JonGretar/Kver/releases)** ·
 [Keyboard customization](docs/keybindings.md) · [Changelog](CHANGELOG.md)
 
-![Kver displaying an illustrated PDF with the Contents sidebar open](docs/screenshots/reading.png)
+![Kver displaying an illustrated PDF with the Contents sidebar closed](docs/screenshots/openfile.png)
 
 ## Made for reading
 
@@ -35,6 +35,8 @@ _Kver_ is Icelandic for a small book or booklet.
 
 Text selection, copying, and Find use the PDF's existing text layer. Kver
 does not perform OCR on image-only scans.
+
+![Kver displaying an illustrated PDF with the Contents sidebar open](docs/screenshots/reading.png)
 
 ### Text markup
 
@@ -70,6 +72,8 @@ Anyway** and confirm. Do not disable Gatekeeper globally.
 Windows and Linux are targets, but supported downloads are not available
 yet. Packaging and native testing need contributors—if you would like to
 help, [open an issue](https://github.com/JonGretar/Kver/issues).
+
+![Kver's onboarding display](docs/screenshots/onboarding.png)
 
 ## Get started
 

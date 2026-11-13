@@ -116,6 +116,29 @@ release acceptance evidence in issues/PRs rather than maintained validation
 diaries. Finishing a feature does not require architecture or roadmap edits
 unless their actual purpose is affected.
 
+### Research and discussion history
+
+Research normally stays in the working conversation. Use primary sources and
+distinguish verified findings from proposals and untested assumptions. When
+delegation is permitted and an independent investigation benefits from a
+separate context, use the Scout subagent. A fork or separate thread is not
+required merely to produce a research record.
+
+ADRs are the source of truth for the engineering decisions they record.
+Include the essential context, decision, alternatives, and consequences in
+the ADR itself, following the existing ADR criteria. An ADR may link to a
+Delta passage for optional background, but must remain understandable without
+opening it. Keep other vital information in its authoritative home from the
+table above, never solely in a thread.
+
+Delta links are exceptional supporting references, not routine task metadata.
+Add one only for consequential reasoning or evidence that would be costly to
+reconstruct and is not already adequately captured elsewhere. Prefer links in
+issues and PRs; source comments should normally reference those instead.
+Use a focused passage link and check intended readers' access. Leave sharing
+permissions unchanged unless explicitly authorized. No thread indexes or
+per-feature link requirements.
+
 ## Modal command lists
 
 Use Kit's modal behavior for searchable lists, pickers, and their confirmation

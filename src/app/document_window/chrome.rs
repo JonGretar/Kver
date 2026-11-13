@@ -207,6 +207,21 @@ pub(super) fn reading_toolbar(
                                 .disabled(!highlight_available),
                         )
                         .item(
+                            PopupMenuItem::new("Underline")
+                                .action(Box::new(crate::reader::Underline))
+                                .disabled(!highlight_available),
+                        )
+                        .item(
+                            PopupMenuItem::new("Strikethrough")
+                                .action(Box::new(crate::reader::StrikeOut))
+                                .disabled(!highlight_available),
+                        )
+                        .item(
+                            PopupMenuItem::new("Squiggly underline")
+                                .action(Box::new(crate::reader::Squiggly))
+                                .disabled(!highlight_available),
+                        )
+                        .item(
                             PopupMenuItem::new("Save")
                                 .action(Box::new(Save))
                                 .disabled(!save_available),

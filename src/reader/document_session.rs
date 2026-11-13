@@ -50,7 +50,7 @@ pub(crate) struct DocumentSession {
     preview: Option<Arc<pdf::Document>>,
     preview_work: Option<Task<()>>,
     preview_error: Option<String>,
-    highlight_color: HighlightColor,
+    markup_colors: [HighlightColor; 4],
     annotation_load: Option<Task<()>>,
     editing_rejection: Option<String>,
     next_serial: u64,
@@ -132,7 +132,12 @@ impl DocumentSession {
             preview: None,
             preview_work: None,
             preview_error: None,
-            highlight_color: HighlightColor::default(),
+            markup_colors: [
+                HighlightColor::Yellow,
+                HighlightColor::Red,
+                HighlightColor::Red,
+                HighlightColor::Red,
+            ],
             annotation_load: None,
             editing_rejection: None,
             next_serial: 1,
@@ -212,7 +217,12 @@ impl DocumentSession {
         self.editing_rejection.as_deref()
     }
 
-    pub(crate) fn existing_highlights(&self, page: usize, quads: &[Quad]) -> Vec<Annotation> {
+    pub(crate) fn existing_markup(
+        &self,
+        kind: MarkupKind,
+        page: usize,
+        quads: &[Quad],
+    ) -> Vec<Annotation> {
         let Some(Ok(annotations)) = &self.annotations else {
             return Vec::new();
         };
@@ -221,15 +231,25 @@ impl DocumentSession {
         annotations[start..end]
             .iter()
             .filter(|annotation| {
-                annotation.kind() == MarkupKind::Highlight
-                    && identical_region(annotation.quads(), quads)
+                annotation.kind() == kind && identical_region(annotation.quads(), quads)
             })
             .cloned()
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn create_highlight(
         &mut self,
+        page: usize,
+        quads: Vec<Quad>,
+        cx: &mut Context<Self>,
+    ) -> Result<AnnotationId, String> {
+        self.create_markup(MarkupKind::Highlight, page, quads, cx)
+    }
+
+    pub(crate) fn create_markup(
+        &mut self,
+        kind: MarkupKind,
         page: usize,
         quads: Vec<Quad>,
         cx: &mut Context<Self>,
@@ -238,19 +258,19 @@ impl DocumentSession {
             return Err(reason.clone());
         }
         if quads.is_empty() {
-            return Err("Select text before highlighting.".into());
+            return Err("Select text before creating markup.".into());
         }
         let document = self
             .result()
             .and_then(Result::ok)
             .ok_or("Document is not ready.")?;
         if document.page_transform(page).is_none() {
-            return Err("Cannot highlight a missing PDF page.".into());
+            return Err("Cannot annotate a missing PDF page.".into());
         }
-        match self.existing_highlights(page, &quads).as_slice() {
+        match self.existing_markup(kind, page, &quads).as_slice() {
             [existing] => return Ok(existing.id()),
             [] => {}
-            _ => return Err("Choose one of the existing highlights before editing it.".into()),
+            _ => return Err("Choose one of the existing annotations before editing it.".into()),
         }
         let Some(Ok(annotations)) = &mut self.annotations else {
             return Err(
@@ -269,11 +289,15 @@ impl DocumentSession {
         let annotation = Annotation::new(
             id,
             page,
-            MarkupKind::Highlight,
+            kind,
             quads,
-            self.highlight_color.color(),
+            self.markup_colors[kind.color_slot()].color(),
         )
-        .with_opacity(0.45)
+        .with_opacity(if kind == MarkupKind::Highlight {
+            0.45
+        } else {
+            1.
+        })
         .with_metadata(author, None, None);
         let key = |annotation: &Annotation| {
             document
@@ -318,9 +342,7 @@ impl DocumentSession {
             return Err("This annotation cannot be edited.".into());
         }
         if let Some(color) = color {
-            if annotation.kind() == MarkupKind::Highlight {
-                self.highlight_color = color;
-            }
+            self.markup_colors[annotation.kind().color_slot()] = color;
             if annotation.color() == color.color() {
                 return Ok(());
             }

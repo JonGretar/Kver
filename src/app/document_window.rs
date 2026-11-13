@@ -803,6 +803,9 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::Underline>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::StrikeOut>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::Squiggly>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::RecolorHighlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::DeleteHighlight>))
             .on_action(

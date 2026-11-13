@@ -37,6 +37,9 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "show-recent",
     "copy",
     "highlight",
+    "underline",
+    "strikethrough",
+    "squiggly-underline",
     "undo-annotation",
     "redo-annotation",
     "show-find",
@@ -149,6 +152,12 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 MenuItem::separator(),
                 MenuItem::action("Copy", Copy),
                 MenuItem::action("Highlight", Highlight).disabled(!state.highlight_available.get()),
+                MenuItem::action("Underline", crate::reader::Underline)
+                    .disabled(!state.highlight_available.get()),
+                MenuItem::action("Strikethrough", crate::reader::StrikeOut)
+                    .disabled(!state.highlight_available.get()),
+                MenuItem::action("Squiggly underline", crate::reader::Squiggly)
+                    .disabled(!state.highlight_available.get()),
                 MenuItem::action("Find", ShowFind),
             ]),
             Menu::new("View").items([

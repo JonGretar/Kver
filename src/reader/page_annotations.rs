@@ -1,6 +1,6 @@
 //! Window-local annotation targeting. Mutations stay in the shared session.
 use super::*;
-use crate::pdf::annotations::{Annotation, AnnotationId, HighlightColor, MarkupKind};
+use crate::pdf::annotations::{Annotation, AnnotationId, HighlightColor};
 use gpui_kit::{
     base::{Dialog, DialogPopup, Disableable, StyledExt as _},
     component::{
@@ -36,7 +36,7 @@ impl ReaderView {
             && self.annotation_editing_rejection(cx).is_none()
             && self
                 .selected_page_annotation(cx)
-                .is_some_and(|a| a.kind() == MarkupKind::Highlight && !a.is_readonly())
+                .is_some_and(|a| !a.is_readonly())
     }
 
     fn select_page_annotation(&mut self, id: AnnotationId, cx: &mut Context<Self>) {
@@ -47,7 +47,7 @@ impl ReaderView {
                 .annotation_bounds(&annotation)
                 .map(|bounds| (annotation.id(), annotation.page(), bounds))
         });
-        self.status = "Highlight selected".into();
+        self.status = "Annotation selected".into();
         cx.notify();
     }
 
@@ -82,9 +82,7 @@ impl ReaderView {
         let end = catalog.partition_point(|a| a.page() <= page);
         let candidates: Vec<_> = catalog[start..end]
             .iter()
-            .filter(|a| {
-                a.kind() == MarkupKind::Highlight && a.quads().iter().any(|q| q.contains(at))
-            })
+            .filter(|a| a.quads().iter().any(|q| q.contains(at)))
             .cloned()
             .collect();
         match candidates.as_slice() {
@@ -134,9 +132,9 @@ impl ReaderView {
             Ok(()) if color.is_none() => {
                 self.selected_annotation = None;
                 self.annotation_identification = None;
-                self.status = "Highlight deleted".into();
+                self.status = "Annotation deleted".into();
             }
-            Ok(()) => self.status = "Highlight recolored".into(),
+            Ok(()) => self.status = "Annotation recolored".into(),
             Err(error) => self.status = error,
         }
         cx.notify();
@@ -194,8 +192,8 @@ impl ReaderView {
             .border_b_1()
             .border_color(cx.theme().border)
             .child(div().min_w_0().truncate().text_sm().child(
-                annotation.as_ref().map_or("Highlight".to_owned(), |a| {
-                    format!("Highlight · {}", color_label(a))
+                annotation.as_ref().map_or("Annotation".to_owned(), |a| {
+                    format!("{} · {}", a.kind().label(), color_label(a))
                 }),
             ))
             .child(
@@ -218,7 +216,7 @@ impl ReaderView {
             )
             .child(
                 Button::new("delete-highlight")
-                    .label("Delete highlight")
+                    .label("Delete annotation")
                     .ghost()
                     .small()
                     .disabled(!editable)
@@ -250,7 +248,8 @@ impl ReaderView {
                 // The ordinal distinguishes even identical imported annotations.
                 // Comments are explicitly labelled, never presented as marked text.
                 let heading = format!(
-                    "Highlight {} · {} · {} {}",
+                    "{} {} · {} · {} {}",
+                    annotation.kind().label(),
                     ix + 1,
                     color_label(annotation),
                     annotation.quads().len(),
@@ -311,10 +310,10 @@ impl ReaderView {
                     .on_close(cx.listener(|this, _, window, cx| this.dismiss_annotation_choice(window, cx)))
                     .p_4()
                     .popup(DialogPopup::new().w_full().max_w(gpui::rems(32.)).popover_style(cx)
-                        .child(div().px_3().pt_3().pb_2().font_semibold().child("Choose a highlight"))
+                        .child(div().px_3().pt_3().pb_2().font_semibold().child("Choose an annotation"))
                         .child(Command::new(&choice.command)
                             .bordered(false)
-                            .placeholder("Choose an overlapping highlight…")
+                            .placeholder("Choose an overlapping annotation…")
                             .items(items)
                             .on_confirm({
                                 let owner = owner.clone();

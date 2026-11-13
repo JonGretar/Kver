@@ -297,7 +297,10 @@ fn unsaved_title_reserves_status_space_at_narrow_widths_and_larger_text(cx: &mut
                 let status = window.find("document-unsaved").bounds();
                 let open = window.find("open-pdf").bounds();
                 let title = window.find("document-title").bounds();
-                assert!(name.size.width > px(0.), "width={width}, font={font_size}");
+                assert!(
+                    name.size.width > px(0.),
+                    "width={width}, font={font_size}, name={name:?}, status={status:?}, title={title:?}"
+                );
                 assert!(status.left() > name.right());
                 assert_eq!(name.center().y, status.center().y);
                 assert!(status.right() < open.left());

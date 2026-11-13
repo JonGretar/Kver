@@ -399,6 +399,11 @@ pub(super) fn title_bar(
     let rem = window.rem_size();
     let width = window.viewport_size().width;
     let compact_open = width < rem * 40.;
+    let unsaved_label = if compact_open {
+        "— Unsaved"
+    } else {
+        "— Unsaved changes"
+    };
     // Leave room for all three Kit window controls on platforms that draw them.
     let window_controls = if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
         px(0.)
@@ -460,7 +465,7 @@ pub(super) fn title_bar(
                             .flex_shrink_0()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("— Unsaved changes"),
+                            .child(unsaved_label),
                     )
                 }),
         )

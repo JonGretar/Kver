@@ -296,14 +296,15 @@ fn unsaved_title_reserves_status_space_at_narrow_widths_and_larger_text(cx: &mut
                 let name = window.find("document-name").bounds();
                 let status = window.find("document-unsaved").bounds();
                 let open = window.find("open-pdf").bounds();
-                assert!(name.size.width > px(0.));
+                let title = window.find("document-title").bounds();
+                assert!(name.size.width > px(0.), "width={width}, font={font_size}");
                 assert!(status.left() > name.right());
                 assert_eq!(name.center().y, status.center().y);
                 assert!(status.right() < open.left());
                 assert!(status.size.width > px(0.));
                 assert!(status.top() >= px(0.));
                 assert!(status.bottom() <= window.find("title-bar").bounds().bottom());
-                assert!(((name.left() + status.right()) / 2. - px(width / 2.)).abs() <= px(0.5));
+                assert!(((name.left() + status.right()) / 2. - title.center().x).abs() <= px(0.5));
             })
             .unwrap();
         }

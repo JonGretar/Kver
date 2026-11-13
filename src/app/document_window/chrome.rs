@@ -406,6 +406,14 @@ pub(super) fn title_bar(
         TITLE_BAR_HEIGHT * 3.
     };
     let inset = native_inset.max(window_controls + rem * if compact_open { 3. } else { 8. });
+    // At narrow widths, native controls can consume most of one edge.
+    // Give the unsaved title the available lane instead of reserving that
+    // occupied space a second time on the opposite edge.
+    let leading_inset = if unsaved && compact_open {
+        native_inset
+    } else {
+        inset
+    };
     TitleBar::new()
         .relative()
         .pl_0()
@@ -413,12 +421,14 @@ pub(super) fn title_bar(
         .child(div().flex_1())
         .child(
             div()
+                .id("document-title")
+                .test_support()
                 .absolute()
                 .top_0()
-                .left(inset)
-                // Equal clearance at both edges centers on the window, not
-                // the asymmetric space between window controls and Open PDF.
-                .w((width - inset * 2.).max(px(0.)))
+                .left(leading_inset)
+                // Center on the window when space permits, or within the
+                // available lane when the unsaved title needs that space.
+                .w((width - leading_inset - inset).max(px(0.)))
                 .h(TITLE_BAR_HEIGHT)
                 .flex()
                 .items_center()

@@ -288,16 +288,26 @@ impl DocumentWindow {
                         });
                     }
                 }),
-                cx.subscribe(&annotations, |this, _, navigation, cx| {
-                    this.reader.update(cx, |reader, cx| {
-                        reader.navigate_annotation(
-                            navigation.generation,
-                            navigation.revision,
-                            &navigation.annotation,
-                            cx,
-                        );
-                    });
-                }),
+                cx.subscribe(
+                    &annotations,
+                    |this, _, navigation: &crate::reader::AnnotationNavigation, cx| {
+                        this.reader.update(cx, |reader, cx| {
+                            reader.navigate_annotation(
+                                navigation.generation,
+                                navigation.revision,
+                                &navigation.annotation,
+                                cx,
+                            );
+                        });
+                    },
+                ),
+                cx.subscribe(
+                    &annotations,
+                    |this, _, edit: &crate::reader::AnnotationEdit, cx| {
+                        this.reader
+                            .update(cx, |reader, cx| reader.edit_annotation_from_list(edit, cx));
+                    },
+                ),
             ];
             self.sidebar = Some(sidebar);
             self.sync_sidebar_document(window, cx);
@@ -327,13 +337,14 @@ impl DocumentWindow {
         };
         let session = session.read(cx);
         let revision = session.revision();
+        let editable = session.editing_rejection().is_none();
         let catalog = session.annotations();
         sidebar
             .read(cx)
             .annotations()
             .clone()
             .update(cx, |panel, cx| {
-                panel.set_catalog(revision, catalog, window, cx)
+                panel.set_catalog(revision, editable, catalog, window, cx)
             });
     }
 

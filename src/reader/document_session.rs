@@ -297,7 +297,7 @@ impl DocumentSession {
         Ok(id)
     }
 
-    pub(crate) fn edit_highlight(
+    pub(crate) fn edit_annotation(
         &mut self,
         id: AnnotationId,
         color: Option<HighlightColor>,
@@ -314,14 +314,13 @@ impl DocumentSession {
             .position(|a| a.id() == id)
             .ok_or("This annotation is no longer available.")?;
         let annotation = annotations[ix].clone();
-        if id.epoch() != self.epoch
-            || annotation.is_readonly()
-            || annotation.kind() != MarkupKind::Highlight
-        {
+        if id.epoch() != self.epoch || annotation.is_readonly() {
             return Err("This annotation cannot be edited.".into());
         }
         if let Some(color) = color {
-            self.highlight_color = color;
+            if annotation.kind() == MarkupKind::Highlight {
+                self.highlight_color = color;
+            }
             if annotation.color() == color.color() {
                 return Ok(());
             }
@@ -722,16 +721,16 @@ mod tests {
             .id();
         first.update(cx, |session, cx| {
             session
-                .edit_highlight(target, Some(HighlightColor::Green), cx)
+                .edit_annotation(target, Some(HighlightColor::Green), cx)
                 .unwrap();
-            session.edit_highlight(target, None, cx).unwrap();
+            session.edit_annotation(target, None, cx).unwrap();
             assert!(session.is_dirty());
             session.discard(cx);
             assert!(!session.is_dirty());
             assert_eq!(session.annotations().unwrap().unwrap(), original);
         });
         other.update(cx, |session, cx| {
-            assert!(session.edit_highlight(target, None, cx).is_err());
+            assert!(session.edit_annotation(target, None, cx).is_err());
             assert!(!session.is_dirty());
             let id = session
                 .annotations()
@@ -743,7 +742,7 @@ mod tests {
                 .id();
             assert!(
                 session
-                    .edit_highlight(id, Some(HighlightColor::Blue), cx)
+                    .edit_annotation(id, Some(HighlightColor::Blue), cx)
                     .is_err()
             );
             assert!(!session.is_dirty());

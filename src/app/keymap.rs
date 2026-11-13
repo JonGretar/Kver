@@ -318,7 +318,8 @@ impl ResolvedKeymap {
         })
     }
 
-    /// Bind only the resolved policy, rather than adding each layer to GPUI.
+    /// Bind the resolved policy and component behavior masks, rather than
+    /// adding each configuration layer to GPUI.
     pub fn bindings(&self, cx: &App) -> Vec<KeyBinding> {
         self.slots
             .iter()
@@ -356,6 +357,14 @@ impl ResolvedKeymap {
                     .expect("sequence validated by resolver"),
                 )
             })
+            // Nested row buttons use native Enter/Space activation, not List's
+            // inherited Enter-to-confirm binding. Reinstall this mask with the
+            // product bindings so preset/config replacement cannot lose it.
+            .chain([KeyBinding::new(
+                "enter",
+                gpui_kit::NoAction,
+                Some(crate::key_context::ANNOTATION_ROW_ACTIONS),
+            )])
             .collect()
     }
 }

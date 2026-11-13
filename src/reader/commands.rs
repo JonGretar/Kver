@@ -25,6 +25,11 @@ gpui::actions!(
         Continuous,
         UseDefaultReadingMode,
         Highlight,
+        DeleteHighlight,
         Copy
     ]
 );
+
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = kver, no_json)]
+pub struct RecolorHighlight(pub crate::pdf::annotations::HighlightColor);

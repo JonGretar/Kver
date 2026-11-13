@@ -98,7 +98,7 @@ fn edits_during_save_remain_dirty_and_next_save_does_not_duplicate_saved_annotat
     assert!(
         std::fs::read(second)
             .unwrap()
-            .starts_with(&std::fs::read(first).unwrap())
+            .starts_with(&std::fs::read(source).unwrap())
     );
 }
 

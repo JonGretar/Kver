@@ -53,7 +53,9 @@ fn save_updates_the_baseline_without_changing_session_identity_and_keeps_newer_e
     });
     session.update(cx, |session, cx| session.start_save(cx).unwrap());
     cx.run_until_parked();
-    assert!(std::fs::read(&source).unwrap().starts_with(&first));
+    // Each coherent edit snapshot is encoded against the session's immutable
+    // editing source, not accumulated against previous preview/save increments.
+    assert!(std::fs::read(&source).unwrap().starts_with(&original));
     assert_eq!(
         pdf::Document::open(&source)
             .unwrap()

@@ -662,7 +662,7 @@ impl DocumentWindow {
         let generation = match event {
             DocumentEvent::Replaced { generation }
             | DocumentEvent::Opened { generation, .. }
-            | DocumentEvent::Saved { generation } => *generation,
+            | DocumentEvent::Updated { generation } => *generation,
             DocumentEvent::OpenLinkedDocument { .. } => unreachable!(),
         };
         if generation != self.reader.read(cx).document_generation() {
@@ -787,6 +787,8 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::RecolorHighlight>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::DeleteHighlight>))
             .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
                 this.show_sidebar(SidebarPanel::Contents, window, cx)
             }))
@@ -860,6 +862,7 @@ impl Render for DocumentWindow {
                         mode_override: reader.mode_override(),
                         has_selection: reader.selected_text().is_some(),
                         highlight_available: reader.highlight_available(cx),
+                        annotation_edit_available: reader.annotation_edit_available(cx),
                         save_available: reader.save_available(cx),
                         save_as_available: reader.save_as_available(cx),
                         has_matches: self.has_matches(cx),

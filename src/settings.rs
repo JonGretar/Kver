@@ -160,6 +160,7 @@ pub struct AppSettings {
     show_toolbar: bool,
     show_statusbar: bool,
     remember_reading_history: bool,
+    remove_missing_recent_files: bool,
     reopen_at_last_position: bool,
     quit_when_last_window_closes: bool,
     initial_zoom: InitialZoom,
@@ -203,6 +204,15 @@ impl AppSettings {
 
     pub fn with_remember_reading_history(mut self, remember: bool) -> Self {
         self.remember_reading_history = remember;
+        self
+    }
+
+    pub fn remove_missing_recent_files(&self) -> bool {
+        self.remove_missing_recent_files
+    }
+
+    pub fn with_remove_missing_recent_files(mut self, remove: bool) -> Self {
+        self.remove_missing_recent_files = remove;
         self
     }
 
@@ -294,6 +304,12 @@ impl AppSettings {
                 "[application].show_statusbar",
             )?,
             remember_reading_history: history_in(document)?,
+            remove_missing_recent_files: bool_in(
+                table_in(document, "persistence")?
+                    .and_then(|table| table.get("remove_missing_recent_files")),
+                false,
+                "[persistence].remove_missing_recent_files",
+            )?,
             reopen_at_last_position: bool_in(
                 table_in(document, "persistence")?
                     .and_then(|table| table.get("reopen_at_last_position")),
@@ -334,6 +350,7 @@ impl Default for AppSettings {
             show_toolbar: true,
             show_statusbar: true,
             remember_reading_history: true,
+            remove_missing_recent_files: false,
             reopen_at_last_position: true,
             quit_when_last_window_closes: true,
             initial_zoom: InitialZoom::default(),
@@ -352,6 +369,7 @@ pub enum SettingsChange {
     ShowToolbar(bool),
     ShowStatusbar(bool),
     RememberReadingHistory(bool),
+    RemoveMissingRecentFiles(bool),
     ReopenAtLastPosition(bool),
     QuitWhenLastWindowCloses(bool),
     InitialZoom(InitialZoom),
@@ -368,6 +386,9 @@ impl SettingsChange {
             Self::ShowToolbar(show) => ("application", "show_toolbar", value(show)),
             Self::ShowStatusbar(show) => ("application", "show_statusbar", value(show)),
             Self::RememberReadingHistory(remember) => ("persistence", "remember", value(remember)),
+            Self::RemoveMissingRecentFiles(remove) => {
+                ("persistence", "remove_missing_recent_files", value(remove))
+            }
             Self::ReopenAtLastPosition(reopen) => {
                 ("persistence", "reopen_at_last_position", value(reopen))
             }
@@ -617,6 +638,33 @@ pub fn save(path: &Path, change: SettingsChange) -> Result<AppSettings, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_recent_cleanup_defaults_off_round_trips_and_rejects_invalid_values() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert!(!super::load(&path).unwrap().remove_missing_recent_files());
+        fs::write(&path, "# keep\n[persistence]\nremember = false\nremove_missing_recent_files = false # choice\n[other]\nvalue = 7\n").unwrap();
+        for remove in [true, false] {
+            let updated =
+                super::save(&path, SettingsChange::RemoveMissingRecentFiles(remove)).unwrap();
+            assert_eq!(updated.remove_missing_recent_files(), remove);
+            assert_eq!(
+                super::load(&path).unwrap().remove_missing_recent_files(),
+                remove
+            );
+            assert!(!updated.remember_reading_history());
+            let content = fs::read_to_string(&path).unwrap();
+            assert!(content.contains("# keep"));
+            assert!(content.contains("# choice"));
+            assert!(content.contains("[other]\nvalue = 7"));
+        }
+        let invalid = "[persistence]\nremove_missing_recent_files = 'yes'\n";
+        fs::write(&path, invalid).unwrap();
+        assert!(super::load(&path).is_err());
+        assert!(super::save(&path, SettingsChange::RemoveMissingRecentFiles(true)).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+    }
 
     #[test]
     fn annotation_author_defaults_blank_round_trips_and_rejects_invalid_toml() {

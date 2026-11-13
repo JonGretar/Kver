@@ -253,6 +253,13 @@ impl Render for SettingsView {
                 }),
             ).description("Keep recently opened PDFs on this device. Turning this off does not erase saved data."))
             .item(toggle(
+                "Automatically remove missing files from Open Recent",
+                "Check files when searching Open Recent. Saved marks and reading positions stay intact. Disconnected drives can count as missing.",
+                "remove-missing-recent-files",
+                SettingsState::remove_missing_recent_files,
+                SettingsChange::RemoveMissingRecentFiles,
+            ))
+            .item(toggle(
                 "Reopen at last position",
                 "Resume a PDF where you stopped. Turning this off leaves the saved place intact.",
                 "reopen-at-last-position",

@@ -135,6 +135,124 @@ fn install_history(cx: &mut gpui_kit::TestAppContext, root: &std::path::Path) ->
 }
 
 #[gpui_kit::test]
+fn missing_cleanup_preserves_session_state_and_stays_removed_when_recording_changes(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (root, store) = store();
+    let history = install_history(cx, root.path());
+    let path = root.path().join("missing.pdf");
+    let position = ReadingPosition { page: 2, y: 30.0 };
+    complete(cx, history.set_recording(false)).unwrap();
+    complete(cx, history.record(path.clone())).unwrap();
+    complete(cx, history.save_position(path.clone(), position)).unwrap();
+    complete(cx, history.change_mark(path.clone(), 'a', Some(position))).unwrap();
+    assert_eq!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .len(),
+        1
+    );
+    let epoch = history.epoch();
+    history.set_remove_missing_recent_files(true).unwrap();
+    assert!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(history.epoch(), epoch);
+    assert_eq!(
+        complete(cx, history.position(path.clone(), epoch)).unwrap(),
+        Some(position)
+    );
+    assert!(
+        complete(cx, history.marks(path.clone(), epoch))
+            .unwrap()
+            .contains_key(&'a')
+    );
+
+    // Saving session state must not resurrect automatically removed entries.
+    complete(cx, history.set_recording(true)).unwrap();
+    history.set_remove_missing_recent_files(false).unwrap();
+    assert!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.search("").unwrap().is_empty());
+    assert_eq!(store.position(&path).unwrap(), Some(position));
+    assert!(store.marks(&path).unwrap().contains_key(&'a'));
+
+    fs::write(&path, b"%PDF").unwrap();
+    complete(cx, history.record(path.clone())).unwrap();
+    assert_eq!(
+        complete(cx, history.search_excluding(String::new(), None)).unwrap(),
+        vec![RecentFile { path }]
+    );
+}
+
+#[gpui_kit::test]
+fn missing_cleanup_uses_startup_preference_and_handles_persisted_and_session_entries(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (root, store) = store();
+    let path = root.path().join("stored.pdf");
+    store.record(&path).unwrap();
+    fs::write(
+        root.path().join("config.toml"),
+        "[persistence]\nremove_missing_recent_files = true\n",
+    )
+    .unwrap();
+    let history = install_history(cx, root.path());
+    assert!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.contains(&path).unwrap());
+
+    history.set_remove_missing_recent_files(false).unwrap();
+    complete(cx, history.record(path.clone())).unwrap();
+    assert_eq!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .len(),
+        1
+    );
+    history.set_remove_missing_recent_files(true).unwrap();
+    assert!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.search("").unwrap().is_empty());
+    assert!(store.contains(&path).unwrap());
+}
+
+#[gpui_kit::test]
+fn missing_session_membership_is_persisted_even_beyond_database_result_limit(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (root, store) = store();
+    let history = install_history(cx, root.path());
+    let missing = root.path().join("missing.pdf");
+    complete(cx, history.record(missing.clone())).unwrap();
+    for n in 0..RESULT_LIMIT {
+        let path = root.path().join(format!("existing-{n}.pdf"));
+        fs::write(&path, b"%PDF").unwrap();
+        store.record(&path).unwrap();
+    }
+    history.set_remove_missing_recent_files(true).unwrap();
+    assert_eq!(
+        complete(cx, history.search_excluding(String::new(), None))
+            .unwrap()
+            .len(),
+        RESULT_LIMIT as usize,
+    );
+    assert!(store.search("missing").unwrap().is_empty());
+    assert!(store.contains(&missing).unwrap());
+}
+
+#[gpui_kit::test]
 fn dropped_reply_futures_do_not_cancel_ordered_writes(cx: &mut gpui_kit::TestAppContext) {
     let (root, store) = store();
     let history = install_history(cx, root.path());

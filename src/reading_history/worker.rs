@@ -9,7 +9,7 @@ use super::{LocalMark, ReadingPosition, RecentFile, RecentStore};
 use crate::settings::{AppPaths, ReadingView};
 use gpui_kit::{App, AppContext as _, Entity, Global};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     future::Future,
     path::PathBuf,
     sync::{
@@ -33,6 +33,7 @@ enum Request {
     Remove(PathBuf, async_channel::Sender<Result<bool, String>>),
     Clear(async_channel::Sender<Result<(), String>>),
     SetRecording(bool, async_channel::Sender<Result<(), String>>),
+    SetRemoveMissingRecentFiles(bool),
     Position(
         PathBuf,
         u64,
@@ -84,10 +85,11 @@ impl RecentHistory {
             .spawn(async move {
                 // Read before the first queued open: an off preference must
                 // never briefly write history during startup.
-                let mut recording = crate::settings::load(&config)
-                    .map(|settings| settings.remember_reading_history())
-                    .unwrap_or(true);
+                let settings = crate::settings::load(&config).unwrap_or_default();
+                let mut recording = settings.remember_reading_history();
+                let mut remove_missing = settings.remove_missing_recent_files();
                 let mut session = Vec::<PathBuf>::new();
+                let mut hidden_recent = HashSet::<PathBuf>::new();
                 let mut positions = HashMap::<PathBuf, ReadingPosition>::new();
                 let mut modes = HashMap::<PathBuf, Option<ReadingView>>::new();
                 let mut marks = HashMap::<PathBuf, BTreeMap<char, LocalMark>>::new();
@@ -102,23 +104,41 @@ impl RecentHistory {
                                 Ok(())
                             };
                             if result.is_ok() && token == worker_epoch.load(Ordering::SeqCst) {
+                                hidden_recent.remove(&path);
                                 session.retain(|entry| entry != &path);
                                 session.insert(0, path);
                             }
                             let _ = reply.try_send(result);
                         }
                         Request::Search(query, excluded, reply) => {
-                            let result = store
-                                .search_excluding(&query, excluded.as_deref())
+                            let query_lowercase = query.to_lowercase();
+                            let cleanup: Result<(), String> = if remove_missing {
+                                session.iter().try_for_each(|path| {
+                                    if excluded.as_ref() != Some(path)
+                                        && !hidden_recent.contains(path)
+                                        && path.to_string_lossy().to_lowercase().contains(&query_lowercase)
+                                        && matches!(path.try_exists(), Ok(false))
+                                    {
+                                        store.hide_recent(path)?;
+                                        hidden_recent.insert(path.clone());
+                                    }
+                                    Ok(())
+                                })
+                            } else {
+                                Ok(())
+                            };
+                            let result = cleanup
+                                .and_then(|()| store.search_excluding_with_cleanup(&query, excluded.as_deref(), remove_missing))
                                 .map(|files| {
                                     let mut merged = session
                                         .iter()
                                         .filter(|path| {
                                             excluded.as_ref() != Some(path)
+                                                && !hidden_recent.contains(*path)
                                                 && path
                                                     .to_string_lossy()
                                                     .to_lowercase()
-                                                    .contains(&query.to_lowercase())
+                                                    .contains(&query_lowercase)
                                         })
                                         .map(|path| RecentFile { path: path.clone() })
                                         .collect::<Vec<_>>();
@@ -136,6 +156,7 @@ impl RecentHistory {
                             let result = store.remove(&path);
                             if result.is_ok() {
                                 session.retain(|entry| entry != &path);
+                                hidden_recent.remove(&path);
                                 positions.remove(&path);
                                 modes.remove(&path);
                                 marks.remove(&path);
@@ -147,6 +168,7 @@ impl RecentHistory {
                             let result = store.clear();
                             if result.is_ok() {
                                 session.clear();
+                                hidden_recent.clear();
                                 positions.clear();
                                 modes.clear();
                                 marks.clear();
@@ -161,6 +183,9 @@ impl RecentHistory {
                                     .rev()
                                     .try_for_each(|path| {
                                         store.record(path)?;
+                                        if hidden_recent.contains(path) {
+                                            store.hide_recent(path)?;
+                                        }
                                         if let Some(position) = positions.get(path) {
                                             store.save_position(path, *position)?;
                                         }
@@ -185,6 +210,9 @@ impl RecentHistory {
                                 recording = enabled;
                             }
                             let _ = reply.try_send(result);
+                        }
+                        Request::SetRemoveMissingRecentFiles(enabled) => {
+                            remove_missing = enabled;
                         }
                         Request::Position(path, token, reply) => {
                             let result = if token != worker_epoch.load(Ordering::SeqCst) {
@@ -290,6 +318,12 @@ impl RecentHistory {
 
     pub fn epoch(&self) -> u64 {
         self.epoch.load(Ordering::SeqCst)
+    }
+
+    pub fn set_remove_missing_recent_files(&self, enabled: bool) -> Result<(), String> {
+        self.sender
+            .try_send(Request::SetRemoveMissingRecentFiles(enabled))
+            .map_err(|_| "Reading history worker is unavailable".to_owned())
     }
 
     /// Enqueue on the UI thread without doing disk work there. The returned

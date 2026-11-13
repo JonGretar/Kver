@@ -26,6 +26,8 @@ gpui::actions!(
         UseDefaultReadingMode,
         Highlight,
         DeleteHighlight,
+        UndoAnnotation,
+        RedoAnnotation,
         Copy
     ]
 );

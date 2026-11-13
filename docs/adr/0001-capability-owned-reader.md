@@ -29,14 +29,16 @@ replies. Background work never owns session membership or keeps a closed reader
 alive. Raster tickets also reject obsolete zoom/density work. All persistent
 reading data uses the same serialized history worker, separate from the PDF
 baseline. The session also owns one shared, lazy annotation catalog, annotation
-revisions, dirty state, and serialized background Save/Save As operations.
+revisions, annotation undo/redo, dirty state, and serialized background Save/Save As operations.
 Annotations panels retain window-local list selection and extracted excerpts,
 not competing document models. Backend-neutral, epoch-scoped annotation
 identities let imported and newly authored annotations use the same representation.
 Save and Save As install a new immutable baseline only after the file transaction succeeds;
 all participating readers use it without sharing viewport or text selection.
 Only Save As changes the shared path. A completed save records its captured
-revision, not newer edits.
+catalog, not newer edits. Undo history survives saving and restores document
+content without restoring window-local interaction. Dirty state compares content
+with that saved catalog; monotonic revisions separately invalidate obsolete work.
 Windows own file prompts and Save/Discard/Cancel continuations; the session owns
 the changes those decisions affect. In-place Save verifies the captured file version
 through the commit path rather than trusting a preflight alone. External-change

@@ -645,6 +645,18 @@ fn common() -> Vec<Entry> {
         Entry::bind("cmd-shift-p", Context::Global, ShowCommandPalette),
         Entry::bind("cmd-shift-m", Context::Global, ShowMarks),
         Entry::bind("cmd-shift-h", Context::Reader, Highlight),
+        Entry::bind("cmd-z", Context::Reader, crate::reader::UndoAnnotation),
+        Entry::bind(
+            "cmd-shift-z",
+            Context::Reader,
+            crate::reader::RedoAnnotation,
+        ),
+        Entry::bind("cmd-z", Context::Annotations, crate::reader::UndoAnnotation),
+        Entry::bind(
+            "cmd-shift-z",
+            Context::Annotations,
+            crate::reader::RedoAnnotation,
+        ),
         Entry::bind("backspace", Context::Reader, DeleteHighlight),
         Entry::bind("delete", Context::Reader, DeleteHighlight),
         Entry::bind("cmd-shift-s", Context::Global, SaveAs),

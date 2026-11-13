@@ -43,6 +43,8 @@ pub(crate) struct CommandAvailability {
     pub(crate) has_selection: bool,
     pub(crate) highlight_available: bool,
     pub(crate) annotation_edit_available: bool,
+    pub(crate) has_annotation_undo: bool,
+    pub(crate) has_annotation_redo: bool,
     pub(crate) save_available: bool,
     pub(crate) save_as_available: bool,
     pub(crate) has_matches: bool,
@@ -83,6 +85,18 @@ impl CommandPalette {
             command("Open PDF…", OpenPdf, true),
             command("Save", Save, available.save_available),
             command("Save As…", SaveAs, available.save_as_available),
+            reader_command(
+                "Undo",
+                crate::reader::UndoAnnotation,
+                available.has_annotation_undo,
+                cx,
+            ),
+            reader_command(
+                "Redo",
+                crate::reader::RedoAnnotation,
+                available.has_annotation_redo,
+                cx,
+            ),
             reader_command("Highlight", Highlight, available.highlight_available, cx),
             reader_command(
                 "Delete highlight",

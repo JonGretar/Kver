@@ -37,6 +37,8 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "show-recent",
     "copy",
     "highlight",
+    "undo-annotation",
+    "redo-annotation",
     "show-find",
     "navigate-back",
     "navigate-forward",
@@ -60,6 +62,8 @@ struct MenuState {
     highlight_available: Cell<bool>,
     save_available: Cell<bool>,
     save_as_available: Cell<bool>,
+    annotation_undo_available: Cell<bool>,
+    annotation_redo_available: Cell<bool>,
 }
 #[cfg(target_os = "macos")]
 impl Global for MenuState {}
@@ -76,6 +80,8 @@ pub fn install(cx: &mut App) {
         highlight_available: Cell::new(false),
         save_available: Cell::new(false),
         save_as_available: Cell::new(false),
+        annotation_undo_available: Cell::new(false),
+        annotation_redo_available: Cell::new(false),
     });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {
@@ -136,6 +142,11 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 MenuItem::action("Save As…", SaveAs).disabled(!state.save_as_available.get()),
             ]),
             Menu::new("Edit").items([
+                MenuItem::action("Undo", crate::reader::UndoAnnotation)
+                    .disabled(!state.annotation_undo_available.get()),
+                MenuItem::action("Redo", crate::reader::RedoAnnotation)
+                    .disabled(!state.annotation_redo_available.get()),
+                MenuItem::separator(),
                 MenuItem::action("Copy", Copy),
                 MenuItem::action("Highlight", Highlight).disabled(!state.highlight_available.get()),
                 MenuItem::action("Find", ShowFind),
@@ -188,6 +199,16 @@ pub(crate) fn set_authoring_availability(cx: &App, highlight: bool, save: bool, 
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (cx, highlight, save, save_as);
+}
+
+pub(crate) fn set_annotation_history_availability(cx: &App, undo: bool, redo: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(state) = cx.try_global::<MenuState>() {
+        state.annotation_undo_available.set(undo);
+        state.annotation_redo_available.set(redo);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (cx, undo, redo);
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 
 #[cfg(test)]
 mod current_save_tests;
+mod history;
 mod save_file;
 #[cfg(test)]
 mod save_tests;
@@ -53,7 +54,8 @@ pub(crate) struct DocumentSession {
     annotation_load: Option<Task<()>>,
     editing_rejection: Option<String>,
     next_serial: u64,
-    saved_revision: u64,
+    history: history::AnnotationHistory,
+    dirty: bool,
     saved_serial: u64,
     save: Option<Task<()>>,
     save_ticket: u64,
@@ -134,7 +136,8 @@ impl DocumentSession {
             annotation_load: None,
             editing_rejection: None,
             next_serial: 1,
-            saved_revision: 0,
+            history: history::AnnotationHistory::default(),
+            dirty: false,
             saved_serial: 0,
             save: None,
             save_ticket: 0,
@@ -181,7 +184,7 @@ impl DocumentSession {
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
-        self.revision != self.saved_revision
+        self.dirty
     }
 
     pub(super) fn attach(&mut self, participant: EntityId) {
@@ -201,10 +204,8 @@ impl DocumentSession {
             return;
         }
         self.annotations = Some(Ok(self.saved_annotations.clone()));
-        self.revision += 1;
-        self.saved_revision = self.revision;
-        self.refresh_preview(cx);
-        cx.notify();
+        self.history = history::AnnotationHistory::default();
+        self.annotations_changed(cx);
     }
 
     pub(crate) fn editing_rejection(&self) -> Option<&str> {
@@ -291,11 +292,8 @@ impl DocumentSession {
                     .then(existing.id().serial().cmp(&id.serial()))
                     .is_le()
             });
-        Arc::make_mut(annotations).insert(insertion, annotation);
-        self.revision += 1;
-        crate::app::quit_guard::invalidate_approval();
-        self.refresh_preview(cx);
-        cx.notify();
+        Arc::make_mut(annotations).insert(insertion, annotation.clone());
+        self.record_edit(insertion, None, Some(annotation), cx);
         Ok(id)
     }
 
@@ -315,7 +313,7 @@ impl DocumentSession {
             .iter()
             .position(|a| a.id() == id)
             .ok_or("This annotation is no longer available.")?;
-        let annotation = &annotations[ix];
+        let annotation = annotations[ix].clone();
         if id.epoch() != self.epoch
             || annotation.is_readonly()
             || annotation.kind() != MarkupKind::Highlight
@@ -332,10 +330,8 @@ impl DocumentSession {
         } else {
             Arc::make_mut(annotations).remove(ix);
         }
-        self.revision += 1;
-        crate::app::quit_guard::invalidate_approval();
-        self.refresh_preview(cx);
-        cx.notify();
+        let after = color.map(|color| annotation.clone().with_color(color.color()));
+        self.record_edit(ix, Some(annotation), after, cx);
         Ok(())
     }
 
@@ -520,7 +516,7 @@ impl DocumentSession {
                     }
                     this.result = Some(Ok(document));
                     this.saved_annotations = saved_snapshot;
-                    this.saved_revision = revision;
+                    this.update_dirty();
                     this.saved_serial = serial;
                     if this.revision != revision {
                         // Save As changes relative-link resolution for every

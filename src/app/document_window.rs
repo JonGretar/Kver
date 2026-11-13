@@ -421,6 +421,11 @@ impl DocumentWindow {
             self.reader.read(cx).save_available(cx),
             self.reader.read(cx).save_as_available(cx),
         );
+        menu::set_annotation_history_availability(
+            cx,
+            accepts_shortcut && self.reader.read(cx).has_annotation_undo(cx),
+            accepts_shortcut && self.reader.read(cx).has_annotation_redo(cx),
+        );
         menu::refresh_navigation(
             cx,
             accepts_shortcut && self.jumplist.can_back(),
@@ -789,6 +794,20 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::RecolorHighlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::DeleteHighlight>))
+            .on_action(
+                cx.listener(|this, _: &crate::reader::UndoAnnotation, _, cx| {
+                    this.reader.update(cx, |reader, cx| {
+                        reader.traverse_annotation_history(false, cx)
+                    });
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::reader::RedoAnnotation, _, cx| {
+                    this.reader.update(cx, |reader, cx| {
+                        reader.traverse_annotation_history(true, cx)
+                    });
+                }),
+            )
             .on_action(cx.listener(|this, _: &ShowContents, window, cx| {
                 this.show_sidebar(SidebarPanel::Contents, window, cx)
             }))
@@ -863,6 +882,8 @@ impl Render for DocumentWindow {
                         has_selection: reader.selected_text().is_some(),
                         highlight_available: reader.highlight_available(cx),
                         annotation_edit_available: reader.annotation_edit_available(cx),
+                        has_annotation_undo: reader.has_annotation_undo(cx),
+                        has_annotation_redo: reader.has_annotation_redo(cx),
                         save_available: reader.save_available(cx),
                         save_as_available: reader.save_as_available(cx),
                         has_matches: self.has_matches(cx),

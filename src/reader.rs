@@ -882,6 +882,38 @@ impl ReaderView {
             .is_some_and(|session| session.read(cx).is_dirty())
     }
 
+    pub(crate) fn has_annotation_undo(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.read(cx).has_annotation_undo())
+    }
+
+    pub(crate) fn has_annotation_redo(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.read(cx).has_annotation_redo())
+    }
+
+    pub(crate) fn traverse_annotation_history(&mut self, redo: bool, cx: &mut Context<Self>) {
+        if self.marks_open(cx)
+            || self.annotation_choice.is_some()
+            || self.annotation_press.is_some()
+        {
+            return;
+        }
+        if let Some(session) = self.session.clone() {
+            session.update(cx, |session, cx| {
+                if redo {
+                    session.redo_annotation(cx);
+                } else {
+                    session.undo_annotation(cx);
+                }
+            });
+        }
+        // Session observation removes only invalid annotation targets. Text
+        // selection, reading position and focus are never part of edit history.
+    }
+
     pub(crate) fn is_saving(&self, cx: &App) -> bool {
         self.session
             .as_ref()

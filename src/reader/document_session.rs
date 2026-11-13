@@ -4,6 +4,7 @@
 
 #[cfg(test)]
 mod current_save_tests;
+mod external;
 mod history;
 mod save_file;
 #[cfg(test)]
@@ -42,7 +43,7 @@ pub(crate) struct DocumentSession {
     epoch: u64,
     revision: u64,
     annotations: Option<Result<Arc<Vec<Annotation>>, String>>,
-    // Identity/provenance stays relative to this source for the session lifetime.
+    // Identity/provenance stays relative to this source until external reload.
     // Saved bytes remain separate for conflict detection and discard baselines.
     editing_source: Option<Arc<pdf::Document>>,
     original_annotations: Arc<Vec<Annotation>>,
@@ -60,6 +61,12 @@ pub(crate) struct DocumentSession {
     save: Option<Task<()>>,
     save_ticket: u64,
     save_outcome: Option<(u64, Result<(), SaveError>)>,
+    external_work: Option<Task<()>>,
+    external_watch: Option<Task<()>>,
+    external_conflict: bool,
+    external_notice: bool,
+    external_error: Option<String>,
+    external_pages: Vec<(f32, f32)>,
     participants: HashSet<EntityId>,
     _load: Task<()>,
 }
@@ -147,11 +154,18 @@ impl DocumentSession {
             save: None,
             save_ticket: 0,
             save_outcome: None,
+            external_work: None,
+            external_watch: None,
+            external_conflict: false,
+            external_notice: false,
+            external_error: None,
+            external_pages: Vec::new(),
             participants: HashSet::new(),
             _load: cx.spawn(async move |this, cx| {
                 let result = work.await;
                 let _ = this.update(cx, |this, cx| {
                     this.result = Some(result);
+                    this.watch_external(cx);
                     cx.notify();
                 });
             }),
@@ -539,6 +553,9 @@ impl DocumentSession {
                     this.saved_annotations = saved_snapshot;
                     this.update_dirty();
                     this.saved_serial = serial;
+                    this.external_conflict = false;
+                    this.external_notice = false;
+                    this.external_error = None;
                     if this.revision != revision {
                         // Save As changes relative-link resolution for every
                         // participant, including newer in-flight preview work.

@@ -110,6 +110,12 @@ impl DocumentWindow {
         });
         let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
             this.refresh_navigation_menu(window, cx);
+            if window.is_window_active()
+                && let Some(session) = this.reader.read(cx).session()
+            {
+                session.update(cx, |session, cx| session.check_external(true, false, cx));
+                this.offer_external_change(window, cx);
+            }
         });
         let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
         chrome::sync_window_identity(reader.read(cx), window, cx);
@@ -151,6 +157,7 @@ impl DocumentWindow {
         let reader_observation = cx.observe_in(&reader, window, |this, reader, window, cx| {
             chrome::sync_window_identity(reader.read(cx), window, cx);
             this.refresh_navigation_menu(window, cx);
+            this.offer_external_change(window, cx);
             cx.notify();
         });
         let settings = settings_ui::state(cx);
@@ -685,6 +692,14 @@ impl DocumentWindow {
             return;
         }
         if matches!(event, DocumentEvent::Replaced { .. }) {
+            if self.save_prompt_open || self.pending_leave.is_some() {
+                // A reload in another participant invalidates decisions and
+                // native-picker replies made against the previous baseline.
+                if self.save_picker.is_none() {
+                    window.close_dialog(cx);
+                }
+                self.cancel_pending_leave(cx);
+            }
             self.jumplist.clear();
             self.initial_link_page = None;
             self.refresh_navigation_menu(window, cx);

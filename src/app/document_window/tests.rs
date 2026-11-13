@@ -1,6 +1,7 @@
 use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 
+mod annotation_history;
 mod annotations;
 mod chrome;
 mod contents;

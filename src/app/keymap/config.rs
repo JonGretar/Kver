@@ -165,6 +165,8 @@ commands! {
         "show-contents" => ShowContents, "show-find" => ShowFind,
         "show-annotations" => ShowAnnotations,
         "highlight" => Highlight,
+        "undo-annotation" => crate::reader::UndoAnnotation,
+        "redo-annotation" => crate::reader::RedoAnnotation,
         "delete-highlight" => DeleteHighlight,
         "recolor-highlight-yellow" => crate::reader::RecolorHighlight(crate::pdf::annotations::HighlightColor::Yellow),
         "recolor-highlight-green" => crate::reader::RecolorHighlight(crate::pdf::annotations::HighlightColor::Green),

@@ -151,6 +151,23 @@ use the same semantic Actions and shared session mutation methods. Sidebar
 navigation does not arm a page edit target. Five named color presets and the
 last-used highlight color belong to the document session, not persistent settings.
 
+The session records successful annotation mutations as subtype-neutral before/after
+edits, retaining identity, metadata, and catalog position rather than window state.
+`UndoAnnotation` and `RedoAnnotation` use GPUI Actions from either participant,
+the native Edit menu, or the palette. Reader/Annotations shortcuts leave text-input
+undo to the focused input. Restoring a deleted annotation does not reselect it or
+move focus, navigation, or text selection in any window. A new mutation after undo
+clears redo; duplicate creation and same-color recoloring leave history unchanged.
+Save and Save As preserve both history stacks. Discard resets them.
+
+Async revisions remain monotonic even when undo returns to earlier content.
+Dirty state is cached from catalog equality with the saved snapshot, not revision
+inequality or the history cursor. This also makes recoloring back or creating then
+deleting an annotation clean. A successful write changes that saved snapshot to
+exactly what it committed, even if subsequent undo/redo has already changed the
+current catalog. Edit history retains only the affected annotations, not a full
+catalog for every step.
+
 `src/pdf/writer.rs` uses exactly pinned `lopdf` 0.47.0 alongside Hayro, rather than
 replacing the rendering backend. The retained writer experiment supplies concrete
 incremental-preservation and PDFKit/Preview interchange evidence for that version.

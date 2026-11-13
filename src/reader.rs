@@ -959,7 +959,12 @@ impl ReaderView {
             })
     }
 
-    fn highlight_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn markup_selection(
+        &mut self,
+        kind: pdf::annotations::MarkupKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(page) = self.selection.page() else {
             return;
         };
@@ -977,7 +982,7 @@ impl ReaderView {
             cx.notify();
             return;
         };
-        let existing = session.read(cx).existing_highlights(page, &quads);
+        let existing = session.read(cx).existing_markup(kind, page, &quads);
         if existing.len() > 1 {
             // Duplicate imported markup is still ambiguous. Do not let
             // idempotent creation silently arm an arbitrary deletion target.
@@ -986,7 +991,9 @@ impl ReaderView {
             self.open_annotation_choice(existing, window, cx);
             return;
         }
-        match session.update(cx, |session, cx| session.create_highlight(page, quads, cx)) {
+        match session.update(cx, |session, cx| {
+            session.create_markup(kind, page, quads, cx)
+        }) {
             Ok(id) => {
                 self.selected_annotation = Some(id);
                 let catalog = session.read(cx).annotations().and_then(Result::ok);
@@ -999,7 +1006,7 @@ impl ReaderView {
                         .annotation_bounds(annotation)
                         .map(|bounds| (id, page, bounds));
                 }
-                self.status = "Highlight selected".into();
+                self.status = format!("{} selected", kind.label());
             }
             Err(error) => self.status = error,
         }
@@ -1743,9 +1750,18 @@ impl Render for ReaderView {
                 this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
-            .on_action(
-                cx.listener(|this, _: &Highlight, window, cx| this.highlight_selection(window, cx)),
-            )
+            .on_action(cx.listener(|this, _: &Highlight, window, cx| {
+                this.markup_selection(pdf::annotations::MarkupKind::Highlight, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &Underline, window, cx| {
+                this.markup_selection(pdf::annotations::MarkupKind::Underline, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &StrikeOut, window, cx| {
+                this.markup_selection(pdf::annotations::MarkupKind::StrikeOut, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &Squiggly, window, cx| {
+                this.markup_selection(pdf::annotations::MarkupKind::Squiggly, window, cx)
+            }))
             .on_action(cx.listener(|this, action: &RecolorHighlight, _, cx| {
                 this.edit_selected_highlight(Some(action.0), cx);
             }))
@@ -1953,6 +1969,21 @@ impl Render for ReaderView {
                                 .disabled(!enabled),
                         )
                         .item(
+                            PopupMenuItem::new("Underline")
+                                .action(Box::new(Underline))
+                                .disabled(!enabled),
+                        )
+                        .item(
+                            PopupMenuItem::new("Strikethrough")
+                                .action(Box::new(StrikeOut))
+                                .disabled(!enabled),
+                        )
+                        .item(
+                            PopupMenuItem::new("Squiggly underline")
+                                .action(Box::new(Squiggly))
+                                .disabled(!enabled),
+                        )
+                        .item(
                             PopupMenuItem::new("Copy")
                                 .action(Box::new(Copy))
                                 .disabled(!has_selection),
@@ -1966,7 +1997,7 @@ impl Render for ReaderView {
                             );
                         }
                         menu = menu.separator().item(
-                            PopupMenuItem::new("Delete highlight")
+                            PopupMenuItem::new("Delete annotation")
                                 .action(Box::new(DeleteHighlight)),
                         );
                     }

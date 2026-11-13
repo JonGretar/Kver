@@ -16,9 +16,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Select highlights directly on the page, choose explicitly when they overlap, and recolor or delete them across shared windows. Five named colors are available; imported geometry, authorship, and comments remain intact.
 - Undo and redo annotation creation, recoloring, and deletion from either window, even after saving. Returning to the saved annotation state clears “Unsaved changes” without moving your reading position or text selection.
 - Recolor or delete any supported text markup from the Annotations list, including entries without recoverable text. Stored authors and imported colors stay unchanged until explicitly edited.
+- Underline, strike through, or add squiggly underlines to selected text from the context menu, Edit menu, or command palette. All four markup types support page editing, shared undo/redo, and editable PDF saving. Line markup starts red, and each type remembers its own last-used color during the session.
 
 ### Changed
 
+- Red replaces Purple among the five markup color presets. Existing custom purple shortcuts and imported colors remain unchanged.
 - Search settings and resize their sidebar in the new GPUI Kit settings layout. Appearance and keyboard preset can still be reset individually; other settings and their saved values are unchanged.
 - Opening the same PDF in multiple windows keeps them on one loaded version, with independent reading positions, zoom, reading modes, and text selections.
 

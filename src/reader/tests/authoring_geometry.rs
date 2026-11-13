@@ -5,7 +5,14 @@ use crate::app::document_window::SaveAs;
 
 fn save(cx: &mut TestAppContext, handle: AnyWindowHandle, output: &Path) {
     cx.update_window(handle, |_, window, cx| {
-        window.press("cmd-shift-h", cx);
+        for action in [
+            Box::new(Highlight) as Box<dyn gpui_kit::Action>,
+            Box::new(Underline),
+            Box::new(StrikeOut),
+            Box::new(Squiggly),
+        ] {
+            window.dispatch_action(action, cx);
+        }
         window.dispatch_action(Box::new(SaveAs), cx);
     })
     .unwrap();
@@ -52,11 +59,15 @@ fn cropped_rotated_production_selections_reopen_at_the_same_document_quads(
         save(cx, window, &output);
         let reopened = pdf::Document::open(&output).unwrap();
         let annotations = reopened.page_annotations(0, 77).unwrap();
-        assert_eq!(annotations.len(), 1, "rotation {rotation}");
-        for (saved, selected) in annotations[0].quads().iter().zip(&selected) {
-            for (saved, selected) in saved.points().into_iter().zip(selected) {
-                assert!((saved.x - selected.x).abs() < 0.001);
-                assert!((saved.y - selected.y).abs() < 0.001);
+        assert_eq!(annotations.len(), 4, "rotation {rotation}");
+        for (annotation, kind) in annotations.iter().zip(pdf::annotations::MarkupKind::ALL) {
+            assert_eq!(annotation.kind(), kind);
+            assert_eq!(annotation.quads().len(), selected.len());
+            for (saved, selected) in annotation.quads().iter().zip(&selected) {
+                for (saved, selected) in saved.points().into_iter().zip(selected) {
+                    assert!((saved.x - selected.x).abs() < 0.001);
+                    assert!((saved.y - selected.y).abs() < 0.001);
+                }
             }
         }
         reader.read_with(cx, |reader, cx| {
@@ -147,12 +158,15 @@ fn wrapped_column_selection_saves_distinct_regions_after_zoom_and_scrolling(
     save(cx, window, &output);
     let reopened = pdf::Document::open(&output).unwrap();
     let annotations = reopened.page_annotations(7, 77).unwrap();
-    assert_eq!(annotations.len(), 1);
-    assert_eq!(annotations[0].quads().len(), quads.len());
-    for (saved, selected) in annotations[0].quads().iter().zip(quads) {
-        for (saved, selected) in saved.points().into_iter().zip(selected) {
-            assert!((saved.x - selected.x).abs() < 0.001);
-            assert!((saved.y - selected.y).abs() < 0.001);
+    assert_eq!(annotations.len(), 4);
+    for (annotation, kind) in annotations.iter().zip(pdf::annotations::MarkupKind::ALL) {
+        assert_eq!(annotation.kind(), kind);
+        assert_eq!(annotation.quads().len(), quads.len());
+        for (saved, selected) in annotation.quads().iter().zip(&quads) {
+            for (saved, selected) in saved.points().into_iter().zip(selected) {
+                assert!((saved.x - selected.x).abs() < 0.001);
+                assert!((saved.y - selected.y).abs() < 0.001);
+            }
         }
     }
 }

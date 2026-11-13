@@ -93,13 +93,22 @@ by the current keyboard configuration:
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `copy` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
-| Text markup | `highlight`, `show-annotations` |
+| Text markup | `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
 
 The mark commands in this list open the corresponding mark chooser. The Vim
 letter-specific mark sequences are supplied by the Vim preset; the TOML
 command names do not accept a mark letter argument.
 
 With text selected in the reader, Command-Shift-H (Ctrl-Shift-H outside macOS)
-applies Highlight once and retains the selection. Command-S (Ctrl-S) saves changes
+applies Highlight once and retains the selection. Underline, Strikethrough, and
+Squiggly underline are available in the selection context menu, Edit menu, and
+command palette; assign custom shortcuts with the command names above.
+All types share annotation undo/redo and the last-used color per type for the
+current document session. Despite their historical names, `delete-highlight` and
+`recolor-highlight-*` operate on the selected page annotation of any supported type.
+The legacy `recolor-highlight-purple` command remains accepted with its original
+purple color; the five UI presets now offer Red instead of Purple.
+
+Command-S (Ctrl-S) saves changes
 to the current PDF. Command-Shift-S (Ctrl-Shift-S) opens Save As and suggests an
 `-annotated.pdf` filename. Both presets share these shortcuts.

@@ -95,9 +95,7 @@ pub fn resolve_config(
         let defaults = resolve(platform, preset).expect("embedded keyboard defaults are valid");
         for command in super::super::menu::ACCELERATOR_COMMANDS {
             let action = command_action(command).expect("native menu command is registered");
-            let Some(default) = menu_binding_for(&defaults, action.as_ref()) else {
-                continue;
-            };
+            let default = menu_binding_for(&defaults, action.as_ref());
             let Some(current) = menu_binding_for(&resolved, action.as_ref()) else {
                 continue;
             };
@@ -108,7 +106,9 @@ pub fn resolve_config(
                 let modifiers = current.sequence[0].modifiers;
                 !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.function
             };
-            if current_is_typing_key && current.sequence != default.sequence {
+            if current_is_typing_key
+                && default.is_none_or(|default| current.sequence != default.sequence)
+            {
                 let remedy = if current.entry.context == Context::Global {
                     "use a modified shortcut or restrict this entry to reader"
                 } else {
@@ -165,6 +165,9 @@ commands! {
         "show-contents" => ShowContents, "show-find" => ShowFind,
         "show-annotations" => ShowAnnotations,
         "highlight" => Highlight,
+        "underline" => crate::reader::Underline,
+        "strikethrough" => crate::reader::StrikeOut,
+        "squiggly-underline" => crate::reader::Squiggly,
         "undo-annotation" => crate::reader::UndoAnnotation,
         "redo-annotation" => crate::reader::RedoAnnotation,
         "delete-highlight" => DeleteHighlight,
@@ -173,6 +176,7 @@ commands! {
         "recolor-highlight-blue" => crate::reader::RecolorHighlight(crate::pdf::annotations::HighlightColor::Blue),
         "recolor-highlight-pink" => crate::reader::RecolorHighlight(crate::pdf::annotations::HighlightColor::Pink),
         "recolor-highlight-purple" => crate::reader::RecolorHighlight(crate::pdf::annotations::HighlightColor::Purple),
+        "recolor-highlight-red" => crate::reader::RecolorHighlight(crate::pdf::annotations::HighlightColor::Red),
         "save-as" => SaveAs,
         "save" => Save,
         "toggle-sidebar" => ToggleSidebar, "activate-outline" => ActivateOutline,

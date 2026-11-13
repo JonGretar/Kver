@@ -99,7 +99,25 @@ impl CommandPalette {
             ),
             reader_command("Highlight", Highlight, available.highlight_available, cx),
             reader_command(
-                "Delete highlight",
+                "Underline",
+                crate::reader::Underline,
+                available.highlight_available,
+                cx,
+            ),
+            reader_command(
+                "Strikethrough",
+                crate::reader::StrikeOut,
+                available.highlight_available,
+                cx,
+            ),
+            reader_command(
+                "Squiggly underline",
+                crate::reader::Squiggly,
+                available.highlight_available,
+                cx,
+            ),
+            reader_command(
+                "Delete annotation",
                 crate::reader::DeleteHighlight,
                 available.annotation_edit_available,
                 cx,
@@ -159,12 +177,12 @@ impl CommandPalette {
         for color in crate::pdf::annotations::HighlightColor::ALL {
             items.push(
                 reader_command(
-                    "Recolor highlight",
+                    "Recolor annotation",
                     crate::reader::RecolorHighlight(color),
                     available.annotation_edit_available,
                     cx,
                 )
-                .label(format!("Recolor highlight {}", color.label())),
+                .label(format!("Recolor annotation {}", color.label())),
             );
         }
         [

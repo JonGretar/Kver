@@ -1,6 +1,178 @@
 //! Production pointer/action/file-picker workflow, with real persisted PDFs.
 use super::*;
 use crate::app::document_window::SaveAs;
+use crate::pdf::annotations::{Annotation, HighlightColor, MarkupKind};
+
+fn markup_catalog(reader: &Entity<ReaderView>, cx: &TestAppContext) -> Vec<Annotation> {
+    reader.read_with(cx, |reader, cx| {
+        reader
+            .session()
+            .unwrap()
+            .read(cx)
+            .annotations()
+            .unwrap()
+            .unwrap()
+            .as_ref()
+            .clone()
+    })
+}
+
+fn markup_action(cx: &mut TestAppContext, handle: AnyWindowHandle, kind: MarkupKind) {
+    cx.update_window(handle, |_, window, cx| {
+        let action: Box<dyn gpui_kit::Action> = match kind {
+            MarkupKind::Highlight => Box::new(Highlight),
+            MarkupKind::Underline => Box::new(Underline),
+            MarkupKind::StrikeOut => Box::new(StrikeOut),
+            MarkupKind::Squiggly => Box::new(Squiggly),
+        };
+        window.dispatch_action(action, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn four_types_share_selection_history_colors_and_saved_editable_pdf(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestEventExt as _;
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("four-types.pdf");
+    std::fs::copy("examples/selection-sample.pdf", &source).unwrap();
+    let (first, reader) = recent_test_window(cx, Some(source.clone()));
+    let (second, other) = recent_test_window(cx, Some(source.clone()));
+    cx.run_until_parked();
+    select_title(cx, first, &reader, &source);
+    // All four real context-menu items dispatch semantic Actions and retain text.
+    for kind in MarkupKind::ALL {
+        cx.update_window(first, |_, window, cx| window.right_click("page", cx))
+            .unwrap();
+        cx.run_until_parked();
+        cx.update_window(first, |_, window, cx| {
+            let at = window
+                .within("popup-menu")
+                .find_by_label(kind.label())
+                .bounds()
+                .center();
+            window.pointer_down(at, gpui_kit::MouseButton::Left, cx);
+            window.pointer_up(at, gpui_kit::MouseButton::Left, cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let created = markup_catalog(&reader, cx);
+        let target = created.iter().find(|a| a.kind() == kind).unwrap();
+        assert_eq!(
+            target.color(),
+            if kind == MarkupKind::Highlight {
+                HighlightColor::Yellow.color()
+            } else {
+                HighlightColor::Red.color()
+            }
+        );
+        assert_eq!(
+            target.opacity(),
+            if kind == MarkupKind::Highlight {
+                0.45
+            } else {
+                1.
+            }
+        );
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.selected_text().as_deref(), Some("Alpha"))
+        });
+        other.read_with(cx, |reader, _| assert!(reader.selected_text().is_none()));
+    }
+    let first_regions = markup_catalog(&reader, cx);
+    assert_eq!(first_regions.len(), 4);
+    // Different types with identical quads coexist; same-type creation is unchanged.
+    for kind in MarkupKind::ALL {
+        markup_action(cx, first, kind);
+        assert_eq!(markup_catalog(&other, cx), first_regions);
+    }
+    // Colors are independent per type, shared by both windows, not by selection.
+    let colors = [
+        HighlightColor::Pink,
+        HighlightColor::Green,
+        HighlightColor::Blue,
+        HighlightColor::Red,
+    ];
+    for (kind, color) in MarkupKind::ALL.into_iter().zip(colors) {
+        markup_action(cx, first, kind);
+        cx.update_window(first, |_, window, cx| {
+            window.dispatch_action(Box::new(RecolorHighlight(color)), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+    let recolored = markup_catalog(&reader, cx);
+    // Partial overlaps are independently authored, in another window.
+    select_glyphs(cx, second, &other, &source, 2..=7);
+    for (kind, color) in MarkupKind::ALL.into_iter().zip(colors) {
+        markup_action(cx, second, kind);
+        let catalog = markup_catalog(&reader, cx);
+        assert_eq!(catalog.iter().filter(|a| a.kind() == kind).count(), 2);
+        assert_eq!(
+            catalog.iter().rfind(|a| a.kind() == kind).unwrap().color(),
+            color.color()
+        );
+    }
+    let all = markup_catalog(&reader, cx);
+    assert_eq!(all.len(), 8);
+    // Undo/redo is the same cross-window history for every type.
+    for _ in 0..4 {
+        cx.update_window(first, |_, window, cx| {
+            window.dispatch_action(Box::new(UndoAnnotation), cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+    assert_eq!(markup_catalog(&other, cx), recolored);
+    for _ in 0..4 {
+        cx.update_window(second, |_, window, cx| {
+            window.dispatch_action(Box::new(RedoAnnotation), cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+    assert_eq!(markup_catalog(&reader, cx), all);
+    cx.update_window(first, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::app::document_window::Save), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let reopened = pdf::Document::open(&source)
+        .unwrap()
+        .page_annotations(0, 900)
+        .unwrap();
+    assert_eq!(reopened.len(), 8);
+    for (saved, authored) in reopened.iter().zip(&all) {
+        assert_eq!(saved.kind(), authored.kind());
+        assert_eq!(saved.color(), authored.color());
+        assert_eq!(saved.quads().len(), authored.quads().len());
+        for (saved, authored) in saved.quads().iter().zip(authored.quads()) {
+            for (saved, authored) in saved.points().into_iter().zip(authored.points()) {
+                assert!((saved.x - authored.x).abs() < 0.001);
+                assert!((saved.y - authored.y).abs() < 0.001);
+            }
+        }
+    }
+    for handle in [first, second] {
+        cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(crate::app::windows::CloseWindow), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+    drop(reader);
+    drop(other);
+    let (handle, reader) = recent_test_window(cx, Some(source));
+    cx.run_until_parked();
+    draw(cx, handle);
+    assert_eq!(markup_catalog(&reader, cx).len(), 8);
+    reader.read_with(cx, |reader, cx| assert!(!reader.is_dirty(cx)));
+}
 
 pub(super) fn draw(cx: &mut TestAppContext, window: AnyWindowHandle) {
     cx.update_window(window, |_, window, cx| window.render_frame(cx))

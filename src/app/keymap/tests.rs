@@ -130,6 +130,30 @@ fn config_errors_point_to_the_entry_and_remedy() {
 }
 
 #[test]
+fn markup_commands_preserve_legacy_colors_and_require_safe_mac_accelerators() {
+    for command in ["underline", "strikethrough", "squiggly-underline"] {
+        let config = format!(
+            "[[keyboard.bindings]]\nkeys = 'cmd-shift-u'\ncontext = 'reader'\ncommand = '{command}'\n"
+        );
+        assert!(resolve_config(&config, Platform::Mac, Preset::Standard).is_ok());
+        let bare = config.replace("cmd-shift-u", "u");
+        assert!(
+            resolve_config(&bare, Platform::Mac, Preset::Standard)
+                .err()
+                .unwrap()
+                .contains("typing-key macOS menu accelerator")
+        );
+        assert!(resolve_config(&bare, Platform::Linux, Preset::Standard).is_ok());
+    }
+    for command in ["recolor-highlight-red", "recolor-highlight-purple"] {
+        let config = format!(
+            "[[keyboard.bindings]]\nkeys = 'ctrl-alt-r'\ncontext = 'reader'\ncommand = '{command}'\n"
+        );
+        assert!(resolve_config(&config, Platform::Mac, Preset::Standard).is_ok());
+    }
+}
+
+#[test]
 fn mac_menu_rejects_promoting_bare_reader_keys_after_rebind() {
     for (preset, changed, bare) in [
         (Preset::Standard, "cmd-alt-right", "right"),

@@ -2,7 +2,7 @@
 //! transactions. All entry points run on a background worker.
 //!
 //! Imported dictionaries are copied without geometry/metadata normalization.
-//! Only explicitly edited highlights are patched; unsupported entries stay intact.
+//! Only explicitly edited text markup is patched; unsupported entries stay intact.
 
 use lopdf::{
     Document, IncrementalDocument, Object, ObjectId, Stream,
@@ -190,9 +190,6 @@ fn write_highlights(
             }
         }
         for annotation in annotations {
-            if annotation.kind() != MarkupKind::Highlight {
-                return Err("Only selected-text highlights can be created in this version.".into());
-            }
             // Epoch/serial is UI identity, not a durable globally unique name.
             // A later application process can reuse that pair after reopening.
             let id = annotation.id();
@@ -245,7 +242,7 @@ fn markup(
         return Err("Cannot write annotation without quadrilaterals.".into());
     }
     let AnnotationColor::Rgb(color) = annotation.color() else {
-        return Err("New highlights require an RGB color.".into());
+        return Err("New markup requires an RGB color.".into());
     };
     if !color
         .into_iter()
@@ -415,6 +412,132 @@ mod tests {
             AnnotationColor::Rgb([1., 0.85, 0.]),
         )
         .with_opacity(0.45)
+    }
+
+    /// Opt-in independent renderer check; outputs are also disposable native
+    /// reader specimens. Never clean malformed arrays to make this check pass.
+    #[test]
+    #[ignore = "requires Poppler pdftoppm; writes target/markup-interchange specimens"]
+    fn all_created_types_render_independently_in_cropped_rotated_regions() {
+        use super::super::annotations::HighlightColor;
+        let directory = std::path::Path::new("target/markup-interchange");
+        std::fs::create_dir_all(directory).unwrap();
+        for rotation in [0, 90, 180, 270] {
+            for kind in MarkupKind::ALL {
+                let mut source = Document::load("examples/selection-sample.pdf").unwrap();
+                let page = source.get_pages()[&1];
+                let page_dict = source.get_dictionary_mut(page).unwrap();
+                page_dict.set("CropBox", numbers([20., 30., 590., 780.]));
+                page_dict.set("Rotate", rotation);
+                let mut baseline = Vec::new();
+                source.save_to(&mut baseline).unwrap();
+                let region = annotation();
+                let authored = Annotation::new(
+                    region.id(),
+                    0,
+                    kind,
+                    region.quads().to_vec(),
+                    HighlightColor::Red.color(),
+                )
+                .with_opacity(if kind == MarkupKind::Highlight {
+                    0.45
+                } else {
+                    1.
+                })
+                .with_metadata(Some("Kver interchange".into()), None, None);
+                let output =
+                    reconcile_highlights(&baseline, &[], std::slice::from_ref(&authored)).unwrap();
+                let stem = directory.join(format!("{kind:?}-{rotation}"));
+                let path = stem.with_extension("pdf");
+                std::fs::write(&path, output).unwrap();
+                // Hayro is an independent parser from lopdf, and this reopens
+                // the saved bytes rather than reading the in-memory catalog.
+                let reopened = super::super::open_pdf(std::fs::read(&path).unwrap()).unwrap();
+                let readback =
+                    super::super::annotation_read::page_annotations(&reopened, 0, 99).unwrap();
+                assert_eq!(readback.len(), 1);
+                assert_eq!(readback[0].kind(), kind);
+                assert_eq!(readback[0].quads(), authored.quads());
+                assert_eq!(readback[0].author(), authored.author());
+                let transform = super::super::page_geometry(&path, 0).unwrap().transform;
+                let result = std::process::Command::new("pdftoppm")
+                    .args(["-f", "1", "-l", "1", "-r", "72", "-cropbox", "-singlefile"])
+                    .arg(&path)
+                    .arg(&stem)
+                    .output()
+                    .expect("install Poppler pdftoppm");
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let ppm = std::fs::read(stem.with_extension("ppm")).unwrap();
+                let mut parts = ppm.splitn(4, |&byte| byte == b'\n');
+                assert_eq!(parts.next().unwrap(), b"P6");
+                let dimensions = std::str::from_utf8(parts.next().unwrap())
+                    .unwrap()
+                    .split_whitespace()
+                    .map(|n| n.parse::<usize>().unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(parts.next().unwrap(), b"255");
+                let pixels = parts.next().unwrap();
+                let [width, height] = [dimensions[0], dimensions[1]];
+                assert_eq!(pixels.len(), width * height * 3);
+                // Every disjoint region must actually paint. Outside all quads
+                // must not acquire a fill connecting the two text fragments.
+                let regions = authored
+                    .quads()
+                    .iter()
+                    .map(|quad| {
+                        let points = quad.points().map(|p| transform.document_to_page(p));
+                        [
+                            points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+                            points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+                            points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+                            points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                let mut counts = vec![0; regions.len()];
+                for (ix, rgb) in pixels.as_chunks::<3>().0.iter().enumerate() {
+                    if rgb[0] > 150
+                        && rgb[0] > rgb[1].saturating_add(50)
+                        && rgb[0] > rgb[2].saturating_add(50)
+                    {
+                        let (x, y) = ((ix % width) as f64 + 0.5, (ix / width) as f64 + 0.5);
+                        let region = regions.iter().position(|b| {
+                            x >= b[0] - 1. && y >= b[1] - 1. && x <= b[2] + 1. && y <= b[3] + 1.
+                        });
+                        let region = region.expect("appearance painted outside selected regions");
+                        counts[region] += 1;
+                        if kind != MarkupKind::Highlight {
+                            let document = transform.page_to_document(Point { x, y }).unwrap();
+                            let points = authored.quads()[region].points();
+                            let up = (document.y - points[2].y) / (points[0].y - points[2].y);
+                            let band = if kind == MarkupKind::StrikeOut {
+                                0.4..0.6
+                            } else {
+                                0.03..0.29
+                            };
+                            assert!(
+                                band.contains(&up),
+                                "{kind:?}/{rotation}: line at wrong text height {up}"
+                            );
+                        }
+                    }
+                }
+                assert!(
+                    counts.iter().all(|&count| count > 20),
+                    "{kind:?}/{rotation}: {counts:?}"
+                );
+                if kind != MarkupKind::Highlight {
+                    assert!(
+                        counts.iter().all(|&count| count < 500),
+                        "line appearance became a fill: {counts:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -3,6 +3,151 @@ use super::*;
 use crate::pdf::annotations::{Annotation, HighlightColor};
 use gpui_kit::test::{TestEventExt, TestQueryExt};
 
+#[gpui_kit::test]
+fn mixed_type_overlap_requires_an_explicit_target_and_preserves_text_dragging(
+    cx: &mut TestAppContext,
+) {
+    use crate::pdf::annotations::MarkupKind;
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let path = PathBuf::from("examples/selection-sample.pdf");
+    let (handle, reader) = recent_test_window(cx, Some(path.clone()));
+    cx.run_until_parked();
+    select_title(cx, handle, &reader, &path);
+    // Palette routing must work for every new creation Action too.
+    for label in [
+        "Highlight",
+        "Underline",
+        "Strikethrough",
+        "Squiggly underline",
+    ] {
+        cx.update_window(handle, |_, window, cx| window.press("cmd-shift-p", cx))
+            .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.input(label, cx);
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+    let annotations = catalog(&reader, cx);
+    assert_eq!(annotations.len(), 4);
+    click_annotation(cx, handle, &reader, &annotations[0]);
+    reader.read_with(cx, |reader, _| {
+        assert!(reader.selected_annotation.is_none());
+        assert!(reader.annotation_choice.is_some());
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.input("Squiggly", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    reader.read_with(cx, |reader, cx| {
+        assert_eq!(
+            reader.selected_page_annotation(cx).unwrap().kind(),
+            MarkupKind::Squiggly
+        );
+    });
+    cx.update_window(handle, |_, window, cx| window.click("delete-highlight", cx))
+        .unwrap();
+    cx.run_until_parked();
+    let remaining = catalog(&reader, cx);
+    assert_eq!(remaining.len(), 3);
+    assert!(remaining.iter().all(|a| a.kind() != MarkupKind::Squiggly));
+    select_title(cx, handle, &reader, &path);
+    reader.read_with(cx, |reader, _| {
+        assert_eq!(reader.selected_text().as_deref(), Some("Alpha"));
+        assert!(reader.selected_annotation.is_none());
+        assert!(reader.annotation_choice.is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppContext) {
+    use crate::pdf::annotations::MarkupKind;
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    for (kind, subtype) in
+        MarkupKind::ALL
+            .into_iter()
+            .zip(["Highlight", "Underline", "StrikeOut", "Squiggly"])
+    {
+        let source = directory.path().join(format!("{subtype}.pdf"));
+        let mut fixture = lopdf::Document::load("examples/annotations-clean.pdf").unwrap();
+        fixture
+            .get_dictionary_mut((7, 0))
+            .unwrap()
+            .set("Subtype", lopdf::Object::Name(subtype.as_bytes().to_vec()));
+        fixture.save(&source).unwrap();
+        let (handle, reader) = recent_test_window(cx, Some(source.clone()));
+        cx.run_until_parked();
+        let imported = catalog(&reader, cx)
+            .into_iter()
+            .find(|a| a.name() == Some("imported-highlight"))
+            .unwrap();
+        assert_eq!(imported.kind(), kind);
+        click_annotation(cx, handle, &reader, &imported);
+        reader.read_with(cx, |reader, cx| {
+            assert!(reader.annotation_edit_available(cx))
+        });
+        cx.update_window(handle, |_, window, cx| {
+            window.click("recolor-highlight", cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        click_label(cx, handle, "Green");
+        let changed = catalog(&reader, cx)
+            .into_iter()
+            .find(|a| a.id() == imported.id())
+            .unwrap();
+        assert_eq!(changed.color(), HighlightColor::Green.color());
+        assert_eq!(changed.quads(), imported.quads());
+        assert_eq!(changed.author(), imported.author());
+        assert_eq!(changed.comment(), imported.comment());
+        cx.update_window(handle, |_, window, cx| window.click("delete-highlight", cx))
+            .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            assert!(reader.read(cx).focus.is_focused(window));
+        })
+        .unwrap();
+        assert!(catalog(&reader, cx).iter().all(|a| a.id() != imported.id()));
+        cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(UndoAnnotation), cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(catalog(&reader, cx).contains(&changed));
+        cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(crate::app::document_window::Save), cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let saved = pdf::Document::open(&source)
+            .unwrap()
+            .page_annotations(0, 800)
+            .unwrap();
+        let saved = saved.iter().find(|a| a.name() == imported.name()).unwrap();
+        assert_eq!(saved.kind(), kind);
+        assert_eq!(saved.quads(), imported.quads());
+        assert_eq!(saved.color(), HighlightColor::Green.color());
+        assert_eq!(saved.author(), imported.author());
+        assert_eq!(saved.comment(), imported.comment());
+        cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(crate::app::windows::CloseWindow), cx)
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+}
+
 fn catalog(reader: &Entity<ReaderView>, cx: &TestAppContext) -> Vec<Annotation> {
     reader.read_with(cx, |reader, cx| {
         reader
@@ -573,6 +718,65 @@ fn newly_created_highlight_has_visible_color_in_the_production_pdf_preview_befor
 #[gpui_kit::test]
 fn newly_created_highlight_has_visible_color_in_a_clean_pdf_before_save(cx: &mut TestAppContext) {
     assert_new_highlight_color(cx, "examples/annotations-clean.pdf", 6);
+}
+
+#[gpui_kit::test]
+fn new_line_types_have_visible_distinct_appearances_in_the_production_preview_before_save(
+    cx: &mut TestAppContext,
+) {
+    use crate::pdf::annotations::MarkupKind;
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    for (kind, action) in [
+        (
+            MarkupKind::Underline,
+            Box::new(Underline) as Box<dyn gpui_kit::Action>,
+        ),
+        (MarkupKind::StrikeOut, Box::new(StrikeOut)),
+        (MarkupKind::Squiggly, Box::new(Squiggly)),
+    ] {
+        let path = directory.path().join(format!("{kind:?}.pdf"));
+        std::fs::copy("examples/selection-sample.pdf", &path).unwrap();
+        let (handle, reader) = recent_test_window(cx, Some(path.clone()));
+        cx.run_until_parked();
+        select_title(cx, handle, &reader, &path);
+        cx.update_window(handle, |_, window, cx| window.dispatch_action(action, cx))
+            .unwrap();
+        cx.run_until_parked();
+        let document = reader.read_with(cx, |reader, _| reader.document().unwrap());
+        let annotation = &document.page_annotations(0, 901).unwrap()[0];
+        assert_eq!(annotation.kind(), kind);
+        let [left, top, right, bottom] = document.annotation_bounds(annotation).unwrap();
+        let bitmap = document.render_bitmap(0, 2.).unwrap();
+        let mut red = 0;
+        let mut vertical = Vec::new();
+        for y in (top * 2.) as u32..(bottom * 2.).ceil() as u32 {
+            for x in (left * 2.) as u32..(right * 2.).ceil() as u32 {
+                let offset = ((y * bitmap.width + x) * 4) as usize;
+                let b = i16::from(bitmap.bgra[offset]);
+                let g = i16::from(bitmap.bgra[offset + 1]);
+                let r = i16::from(bitmap.bgra[offset + 2]);
+                if r > 150 && r > b + 50 && r > g + 50 {
+                    red += 1;
+                    vertical.push((y as f64 / 2. - top) / (bottom - top));
+                }
+            }
+        }
+        assert!(red > 25, "{kind:?} has no visible red appearance");
+        let band = if kind == MarkupKind::StrikeOut {
+            0.4..0.6
+        } else {
+            0.7..1.
+        };
+        assert!(
+            vertical.iter().all(|y| band.contains(y)),
+            "{kind:?} painted at the wrong text height: {vertical:?}"
+        );
+        assert!(red < 500, "{kind:?} painted a highlight-like fill");
+    }
 }
 
 fn assert_new_highlight_color(cx: &mut TestAppContext, path: &str, expected_count: usize) {

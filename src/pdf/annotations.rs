@@ -32,6 +32,23 @@ pub enum MarkupKind {
 }
 
 impl MarkupKind {
+    pub const ALL: [Self; 4] = [
+        Self::Highlight,
+        Self::Underline,
+        Self::StrikeOut,
+        Self::Squiggly,
+    ];
+
+    #[cfg(feature = "gui")]
+    pub(crate) fn color_slot(self) -> usize {
+        match self {
+            Self::Highlight => 0,
+            Self::Underline => 1,
+            Self::StrikeOut => 2,
+            Self::Squiggly => 3,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Highlight => "Highlight",
@@ -116,17 +133,14 @@ pub enum HighlightColor {
     Green,
     Blue,
     Pink,
+    Red,
+    // Retain the original keymap command's color for existing configurations.
+    // It is no longer offered among the five named UI presets.
     Purple,
 }
 
 impl HighlightColor {
-    pub const ALL: [Self; 5] = [
-        Self::Yellow,
-        Self::Green,
-        Self::Blue,
-        Self::Pink,
-        Self::Purple,
-    ];
+    pub const ALL: [Self; 5] = [Self::Yellow, Self::Green, Self::Blue, Self::Pink, Self::Red];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -134,6 +148,7 @@ impl HighlightColor {
             Self::Green => "Green",
             Self::Blue => "Blue",
             Self::Pink => "Pink",
+            Self::Red => "Red",
             Self::Purple => "Purple",
         }
     }
@@ -144,6 +159,7 @@ impl HighlightColor {
             Self::Green => [0.35, 0.85, 0.4],
             Self::Blue => [0.3, 0.65, 1.],
             Self::Pink => [1., 0.45, 0.65],
+            Self::Red => [1., 0., 0.],
             Self::Purple => [0.7, 0.45, 0.95],
         })
     }

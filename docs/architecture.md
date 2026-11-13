@@ -146,19 +146,24 @@ order, markup kind, color space, opacity, and supported metadata. Imported
 identity serials refer to page/annotation slots only within that epoch; they
 are not durable cross-reader identifiers. Malformed supported annotations are
 readonly, with a valid PDF rectangle used only as a navigation fallback.
-The same catalog contains newly authored highlights. Creation waits for metadata
+The same catalog contains newly authored markup of all four types. Creation waits for metadata
 loading to finish, retains the window's text selection, and captures one quad per
-selected line/column fragment before any viewport projection. Reapplying Highlight
+selected line/column fragment before any viewport projection. Reapplying the same type
 to identical quads selects the existing entry without changing its color or revision.
+Different types on identical text and partial overlaps remain independent.
 Mutations keep the catalog in document/spatial order.
 `src/reader/page_annotations.rs` owns window-local on-page selection and overlap
-choice. A click selects a highlight; crossing pointer slop commits the gesture
+choice. A click selects text markup; crossing pointer slop commits the gesture
 to text selection even if the pointer returns to its origin. Overlapping quads
 require an explicit choice in Kit's document-owned Dialog/Command surface.
-Selected-highlight controls, context menus, the palette, and keyboard deletion
+Selected-annotation controls, context menus, the palette, and keyboard deletion
 use the same semantic Actions and shared session mutation methods. Sidebar
 navigation does not arm a page edit target. Five named color presets and the
-last-used highlight color belong to the document session, not persistent settings.
+last-used color per type belong to the document session, not persistent settings.
+Highlight initially uses yellow at 45% opacity; line markup uses opaque red.
+The five UI presets are Yellow, Green, Blue, Pink, and Red. The older Purple
+keymap command remains accepted with its original color, but is not a UI preset.
+Imported arbitrary colors remain unchanged until explicitly recolored.
 
 The session records successful annotation mutations as subtype-neutral before/after
 edits, retaining identity, metadata, and catalog position rather than window state.
@@ -182,8 +187,12 @@ replacing the rendering backend. The retained writer experiment supplies concret
 incremental-preservation and PDFKit/Preview interchange evidence for that version.
 Production encoding reconciles each complete catalog snapshot against an immutable
 editing source retained for the session lifetime, never a reread of its path.
-Imported IDs retain their source-slot provenance across saves. New highlights use
-standard `/Highlight`, `/QuadPoints`, and normal appearance streams. Recolor copies
+Imported IDs retain their source-slot provenance across saves. New markup uses
+standard `/Highlight`, `/Underline`, `/StrikeOut`, or `/Squiggly` dictionaries,
+`/QuadPoints`, and normal appearance streams. Line appearances use each quad's
+text frame: underline near its bottom, strikethrough at its middle, and squiggly
+as a repeating zigzag. Crop and page rotation apply only at display time.
+Creation and imported recoloring share this appearance encoder. Recolor copies
 only the selected dictionary and replaces its color and appearance, preserving exact
 stored geometry, authorship, comments, and unrelated metadata. Deletion removes only
 the selected page-array entry; it is not secure erasure of historical PDF bytes.

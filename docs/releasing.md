@@ -1,6 +1,7 @@
 # macOS packaging and releases
 
-For installation and local build basics, see the [README](../README.md).
+For installation, see the [README](../README.md#install); for local build
+basics, see the [development guide](development.md).
 This guide is for maintainers. Scripts and the
 [release workflow](../.github/workflows/release.yml) define the automated
 checks; results belong in the release PR, not in this document.

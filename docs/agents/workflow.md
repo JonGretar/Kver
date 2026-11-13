@@ -84,7 +84,8 @@ updating prose, identify its reader, purpose, and authoritative home:
 
 | Information | Home |
 | --- | --- |
-| Product introduction, installation, quick start | `README.md` |
+| Product features, installation, and reader quick start | `README.md` |
+| Developer setup, running from source, builds and tests | `docs/development.md` |
 | Source map, major ownership boundaries, cross-cutting invariants | `docs/architecture.md` |
 | Non-obvious local reason or constraint | Comment beside the enforcing code |
 | Behavioral contract | Code and tests |

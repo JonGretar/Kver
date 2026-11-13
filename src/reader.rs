@@ -8,6 +8,7 @@ mod find;
 mod links;
 mod marks;
 mod navigation;
+mod page_annotations;
 mod rendering;
 mod selection;
 pub use crate::app::document_window::OpenPdf;
@@ -105,6 +106,9 @@ pub struct ReaderView {
     marks_subscriptions: Vec<Subscription>,
     find_highlight: Option<(find_search::FindMatch, u64)>,
     annotation_identification: Option<(usize, [f64; 4])>,
+    selected_annotation: Option<pdf::annotations::AnnotationId>,
+    annotation_press: Option<(usize, gpui::Point<gpui::Pixels>, bool)>,
+    annotation_choice: Option<page_annotations::AnnotationChoice>,
     status: String,
 }
 
@@ -122,7 +126,7 @@ pub(crate) enum DocumentEvent {
         path: PathBuf,
         page: usize,
     },
-    Saved {
+    Updated {
         generation: u64,
     },
 }
@@ -225,6 +229,9 @@ impl ReaderView {
             marks_subscriptions: Vec::new(),
             find_highlight: None,
             annotation_identification: None,
+            selected_annotation: None,
+            annotation_press: None,
+            annotation_choice: None,
             status: "Open a PDF to start reading".into(),
         };
         if reader.path.is_some() {
@@ -246,6 +253,9 @@ impl ReaderView {
         self.marks_subscriptions.clear();
         self.find_highlight = None;
         self.annotation_identification = None;
+        self.selected_annotation = None;
+        self.annotation_press = None;
+        self.annotation_choice = None;
         self.selection.reset();
         self.links.reset();
         self.path = Some(path);
@@ -423,6 +433,9 @@ impl ReaderView {
             return;
         };
         let bounds = document.annotation_bounds(annotation);
+        // The list is navigation-only here. Its outline must not leave an older
+        // on-page target armed for deletion from the keyboard.
+        self.selected_annotation = None;
         self.annotation_identification = bounds.map(|b| (annotation.page(), b));
         let before = self.jump_location();
         let page = annotation.page();
@@ -570,7 +583,15 @@ impl ReaderView {
                 match result {
                     Ok(pages) if !pages.is_empty() => {
                         opened = true;
-                        this.document = document.ok();
+                        // A joining window may already have shared unsaved edits,
+                        // or receive them while page/history loading is in flight.
+                        // Page geometry is unchanged by annotation edits; install
+                        // the latest presentation, not the captured saved PDF.
+                        this.document = this
+                            .session
+                            .as_ref()
+                            .and_then(|session| session.read(cx).presentation())
+                            .or_else(|| document.ok());
                         if let Some(session) = this.session.clone() {
                             session.update(cx, |session, cx| session.ensure_annotations(cx));
                         }
@@ -819,14 +840,15 @@ impl ReaderView {
         let shared = self
             .session
             .as_ref()
-            .and_then(|session| session.read(cx).result())
-            .and_then(Result::ok);
+            .and_then(|session| session.read(cx).presentation());
         if let (Some(current), Some(shared)) = (&self.document, shared)
             && !Arc::ptr_eq(current, &shared)
         {
-            let path = shared.path().to_path_buf();
-            self.path = Some(path.clone());
-            self.record_path = Some(path);
+            let path = self.session.as_ref().unwrap().read(cx).path().to_path_buf();
+            if current.path() != path {
+                self.path = Some(path.clone());
+                self.record_path = Some(path);
+            }
             self.document = Some(shared);
             self.links.reset();
             self.rasters.invalidate();
@@ -836,13 +858,20 @@ impl ReaderView {
             } else {
                 format!("Page {} of {}", self.page_index + 1, self.pages.len())
             };
-            cx.emit(DocumentEvent::Saved {
+            cx.emit(DocumentEvent::Updated {
                 generation: self.document_generation,
             });
         }
-        if !self.is_dirty(cx) && self.status.starts_with("Highlight selected") {
+        if self.selected_annotation.is_some() && self.selected_page_annotation(cx).is_none() {
+            self.selected_annotation = None;
             self.annotation_identification = None;
-            self.status = format!("Page {} of {}", self.page_index + 1, self.pages.len());
+        }
+        if let Some(error) = self
+            .session
+            .as_ref()
+            .and_then(|s| s.read(cx).preview_error())
+        {
+            self.status = error.to_owned();
         }
         cx.notify();
     }
@@ -887,7 +916,7 @@ impl ReaderView {
             })
     }
 
-    fn highlight_selection(&mut self, cx: &mut Context<Self>) {
+    fn highlight_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(page) = self.selection.page() else {
             return;
         };
@@ -905,8 +934,18 @@ impl ReaderView {
             cx.notify();
             return;
         };
+        let existing = session.read(cx).existing_highlights(page, &quads);
+        if existing.len() > 1 {
+            // Duplicate imported markup is still ambiguous. Do not let
+            // idempotent creation silently arm an arbitrary deletion target.
+            self.selected_annotation = None;
+            self.annotation_identification = None;
+            self.open_annotation_choice(existing, window, cx);
+            return;
+        }
         match session.update(cx, |session, cx| session.create_highlight(page, quads, cx)) {
             Ok(id) => {
+                self.selected_annotation = Some(id);
                 let catalog = session.read(cx).annotations().and_then(Result::ok);
                 if let Some(annotation) = catalog
                     .as_ref()
@@ -1064,12 +1103,20 @@ impl ReaderView {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) {
+        self.annotation_identification = None;
+        self.annotation_press = Some((page, position, false));
         self.selection
             .begin(page, self.pointer_document(page, position));
         cx.notify();
     }
 
     fn extend_selection(&mut self, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        if let Some((_, start, dragged)) = &mut self.annotation_press {
+            // Physical pointer slop, not product spacing. Once crossed, returning
+            // to the origin must not turn a text drag back into an annotation click.
+            *dragged |=
+                (position.x - start.x).abs() > px(3.) || (position.y - start.y).abs() > px(3.);
+        }
         if let Some(page) = self.selection.dragging_page()
             && let Some(at) = self.pointer_document(page, position)
             && self.selection.extend(at)
@@ -1535,63 +1582,6 @@ impl Render for ReaderView {
                         ),
                 );
             }
-            if let Some(session) = &self.session
-                && let Some(transform) = self
-                    .document
-                    .as_ref()
-                    .and_then(|document| document.page_transform(index))
-            {
-                for annotation in session
-                    .read(cx)
-                    .unsaved_annotations()
-                    .filter(|annotation| annotation.page() == index)
-                {
-                    let quads: Vec<_> = annotation
-                        .quads()
-                        .iter()
-                        .map(|quad| quad.points().map(|point| transform.document_to_page(point)))
-                        .collect();
-                    let color = annotation.color().rgb().unwrap_or([1., 0.85, 0.]);
-                    let opacity = annotation.opacity();
-                    let scale = self.scale;
-                    page = page.child(
-                        gpui::canvas(
-                            |_, _, _| (),
-                            move |bounds, _, window, _| {
-                                for [ul, ur, ll, lr] in &quads {
-                                    let projected = |point: &Point| {
-                                        bounds.origin
-                                            + gpui::point(
-                                                px(point.x as f32 * scale),
-                                                px(point.y as f32 * scale),
-                                            )
-                                    };
-                                    let mut path = gpui::PathBuilder::fill();
-                                    path.move_to(projected(ul));
-                                    path.line_to(projected(ur));
-                                    path.line_to(projected(lr));
-                                    path.line_to(projected(ll));
-                                    path.close();
-                                    if let Ok(path) = path.build() {
-                                        // Annotation color is PDF data, not chrome.
-                                        window.paint_path(
-                                            path,
-                                            gpui::Rgba {
-                                                r: color[0],
-                                                g: color[1],
-                                                b: color[2],
-                                                a: opacity,
-                                            },
-                                        );
-                                    }
-                                }
-                            },
-                        )
-                        .absolute()
-                        .inset_0(),
-                    );
-                }
-            }
             for highlight in self.selection.highlights(index, self.pages[index]) {
                 page = page.child(
                     div()
@@ -1693,7 +1683,9 @@ impl Render for ReaderView {
             .tab_group()
             .track_focus(&self.focus)
             .when(
-                !self.marks_open(cx) && self.focus.is_focused(window),
+                !self.marks_open(cx)
+                    && self.annotation_choice.is_none()
+                    && self.focus.is_focused(window),
                 |reader| reader.key_context(crate::key_context::READER),
             )
             .on_action(cx.listener(|this, action: &SetLocalMark, _, cx| {
@@ -1708,10 +1700,22 @@ impl Render for ReaderView {
                 this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
-            .on_action(cx.listener(|this, _: &Highlight, _, cx| this.highlight_selection(cx)))
+            .on_action(
+                cx.listener(|this, _: &Highlight, window, cx| this.highlight_selection(window, cx)),
+            )
+            .on_action(cx.listener(|this, action: &RecolorHighlight, _, cx| {
+                this.edit_selected_highlight(Some(action.0), cx);
+            }))
+            .on_action(cx.listener(|this, _: &DeleteHighlight, _, cx| {
+                this.edit_selected_highlight(None, cx);
+            }))
             .on_mouse_up(
                 gpui::MouseButton::Left,
-                cx.listener(|this, _, _, _| this.selection.finish()),
+                cx.listener(|this, _, _, cx| this.finish_pointer_gesture(cx)),
+            )
+            .on_mouse_up_out(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.finish_pointer_gesture(cx)),
             )
             .on_action(cx.listener(|this, _: &NextPage, _, cx| {
                 if !this.pages.is_empty() {
@@ -1789,6 +1793,9 @@ impl Render for ReaderView {
             .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .when(self.selected_page_annotation(cx).is_some(), |reader| {
+                reader.child(self.render_annotation_controls(cx))
+            })
             .child(
                 div()
                     .id("page")
@@ -1812,9 +1819,10 @@ impl Render for ReaderView {
                     )
                     .on_mouse_up(
                         gpui::MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                        cx.listener(|this, event: &gpui::MouseUpEvent, window, cx| {
                             this.extend_selection(event.position, cx);
                             this.selection.finish();
+                            this.finish_annotation_click(event.position, window, cx);
                         }),
                     )
                     .on_scroll(cx.listener(|this, _, _, cx| {
@@ -1893,19 +1901,36 @@ impl Render for ReaderView {
             .context_menu({
                 let enabled = self.highlight_available(cx);
                 let has_selection = self.selected_text().is_some();
+                let editable = self.annotation_edit_available(cx);
                 move |menu, _, _| {
-                    menu.item(
-                        PopupMenuItem::new("Highlight")
-                            .action(Box::new(Highlight))
-                            .disabled(!enabled),
-                    )
-                    .item(
-                        PopupMenuItem::new("Copy")
-                            .action(Box::new(Copy))
-                            .disabled(!has_selection),
-                    )
+                    let mut menu = menu
+                        .item(
+                            PopupMenuItem::new("Highlight")
+                                .action(Box::new(Highlight))
+                                .disabled(!enabled),
+                        )
+                        .item(
+                            PopupMenuItem::new("Copy")
+                                .action(Box::new(Copy))
+                                .disabled(!has_selection),
+                        );
+                    if editable {
+                        menu = menu.separator();
+                        for color in pdf::annotations::HighlightColor::ALL {
+                            menu = menu.item(
+                                PopupMenuItem::new(format!("Recolor {}", color.label()))
+                                    .action(Box::new(RecolorHighlight(color))),
+                            );
+                        }
+                        menu = menu.separator().item(
+                            PopupMenuItem::new("Delete highlight")
+                                .action(Box::new(DeleteHighlight)),
+                        );
+                    }
+                    menu
                 }
             })
+            .child(self.render_annotation_choice(cx))
     }
 }
 

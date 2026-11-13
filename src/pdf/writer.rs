@@ -1,8 +1,8 @@
 //! Standard annotation encoding, separate from Hayro rendering and filesystem
 //! transactions. All entry points run on a background worker.
 //!
-//! Only newly authored highlights are appended. Existing dictionaries, including
-//! unsupported annotations, are never interpreted as instructions to rewrite.
+//! Imported dictionaries are copied without geometry/metadata normalization.
+//! Only explicitly edited highlights are patched; unsupported entries stay intact.
 
 use lopdf::{
     Document, IncrementalDocument, Object, ObjectId, Stream,
@@ -79,9 +79,41 @@ fn contains_signature(object: &Object, depth: usize) -> bool {
 /// Encode a coherent snapshot against the exact loaded bytes, never the current
 /// contents of the source path. The caller supplies only additions since that
 /// baseline; successful Save As establishes a new baseline for the next call.
+#[cfg(test)]
 pub(super) fn append_highlights(
     baseline: &[u8],
     additions: &[Annotation],
+) -> Result<Vec<u8>, String> {
+    write_highlights(baseline, additions, &[])
+}
+
+/// Imported identities refer to slots in this exact immutable editing source.
+/// A missing current entry means deletion; unchanged entries are never rewritten.
+pub(super) fn reconcile_highlights(
+    baseline: &[u8],
+    original: &[Annotation],
+    current: &[Annotation],
+) -> Result<Vec<u8>, String> {
+    let additions: Vec<_> = current
+        .iter()
+        .filter(|annotation| annotation.id().serial() & (1 << 63) != 0)
+        .cloned()
+        .collect();
+    let by_id: std::collections::HashMap<_, _> = current.iter().map(|a| (a.id(), a)).collect();
+    let changes: Vec<_> = original
+        .iter()
+        .filter_map(|before| {
+            let after = by_id.get(&before.id()).copied();
+            (after != Some(before)).then_some((before, after))
+        })
+        .collect();
+    write_highlights(baseline, &additions, &changes)
+}
+
+fn write_highlights(
+    baseline: &[u8],
+    additions: &[Annotation],
+    changes: &[(&Annotation, Option<&Annotation>)],
 ) -> Result<Vec<u8>, String> {
     let previous = editable_document(baseline)?;
     let pages: Vec<_> = previous.get_pages().into_values().collect();
@@ -91,7 +123,11 @@ pub(super) fn append_highlights(
             .iter()
             .filter(|annotation| annotation.page() == page_ix)
             .collect();
-        if annotations.is_empty() {
+        let edits: Vec<_> = changes
+            .iter()
+            .filter(|(before, _)| before.page() == page_ix)
+            .collect();
+        if annotations.is_empty() && edits.is_empty() {
             continue;
         }
         let previous = incremental.get_prev_documents();
@@ -117,6 +153,42 @@ pub(super) fn append_highlights(
                 ))
             })
             .collect();
+        // Apply in reverse slot order so deleting an entry never shifts another
+        // target. Clone dictionaries instead of changing potentially shared objects.
+        let mut edits = edits;
+        edits.sort_by_key(|(before, _)| std::cmp::Reverse(before.id().serial()));
+        for (before, after) in edits {
+            if before.is_readonly() || before.kind() != MarkupKind::Highlight {
+                return Err("This annotation cannot be edited.".into());
+            }
+            let slot = (before.id().serial() & 0xffff_ffff) as usize;
+            let entry = entries
+                .get(slot)
+                .ok_or("Annotation reference is obsolete.")?;
+            if let Some(after) = after {
+                let mut dictionary = incremental
+                    .get_prev_documents()
+                    .dereference(entry)
+                    .map_err(error)?
+                    .1
+                    .as_dict()
+                    .map_err(error)?
+                    .clone();
+                let generated = highlight(&mut incremental.new_document, page, after, "")?;
+                let appearance = incremental
+                    .new_document
+                    .get_dictionary(generated)
+                    .map_err(error)?
+                    .clone();
+                // Keep exact stored QuadPoints, Rect, author, comment, flags,
+                // private keys and all unrelated metadata from the imported PDF.
+                dictionary.set("C", appearance.get(b"C").map_err(error)?.clone());
+                dictionary.set("AP", appearance.get(b"AP").map_err(error)?.clone());
+                entries[slot] = Object::Reference(incremental.new_document.add_object(dictionary));
+            } else {
+                entries.remove(slot);
+            }
+        }
         for annotation in annotations {
             // Epoch/serial is UI identity, not a durable globally unique name.
             // A later application process can reuse that pair after reopening.
@@ -193,12 +265,12 @@ fn highlight(
     }) {
         return Err("Cannot write invalid annotation geometry.".into());
     }
-    let bounds = [
+    let bounds = annotation.fallback_rect().unwrap_or([
         points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
         points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
         points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
         points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
-    ];
+    ]);
     // Absolute document coordinates in both Rect and BBox avoid applying page
     // crop or rotation twice. Draw each quad, not the annotation's union Rect.
     let graphics = document.add_object(dictionary! {
@@ -211,8 +283,8 @@ fn highlight(
         Operation::new("rg", color.into_iter().map(Object::Real).collect()),
     ];
     for quad in annotation.quads() {
-        let [ul, ur, ll, lr] = quad.points();
-        for (operator, point) in [("m", ul), ("l", ur), ("l", lr), ("l", ll)] {
+        for (ix, point) in quad.perimeter().into_iter().enumerate() {
+            let operator = if ix == 0 { "m" } else { "l" };
             operations.push(Operation::new(
                 operator,
                 vec![Object::Real(point.x as f32), Object::Real(point.y as f32)],
@@ -496,5 +568,153 @@ mod tests {
                 .iter()
                 .all(|annotation| annotation.name().is_some())
         );
+    }
+
+    #[test]
+    fn recolor_and_delete_preserve_exact_imported_geometry_metadata_and_unrelated_objects() {
+        use super::super::annotations::HighlightColor;
+        let directory = tempfile::tempdir().unwrap();
+        for rotation in [0, 90, 180, 270] {
+            let mut source = Document::load("examples/annotations.pdf").unwrap();
+            let page = (3, 0);
+            let page_dict = source.get_dictionary_mut(page).unwrap();
+            page_dict.set("Rotate", rotation);
+            page_dict.set("CropBox", numbers([20., 30., 380., 570.]));
+            let imported = source.get_dictionary_mut((7, 0)).unwrap();
+            // Two skewed, disjoint quads, one in perimeter order and one in Z
+            // order. Rect deliberately exceeds the geometry: AP must not stretch.
+            imported.set(
+                "QuadPoints",
+                numbers([
+                    40.125, 496.25, 110.5, 499.75, 109.25, 480.125, 39.5, 476.75, 125.75, 500.5,
+                    190.125, 497.25, 124.5, 480.75, 189.25, 477.125,
+                ]),
+            );
+            imported.set("Rect", numbers([35., 470., 200., 505.]));
+            imported.set("C", numbers([0.2, 0.3, 0.4, 0.1]));
+            imported.set("CA", Object::Real(0.37));
+            imported.set(
+                "PrivateMetadata",
+                dictionary! {
+                    "Nested" => vec![Object::string_literal("preserve me"), Object::Integer(42)],
+                },
+            );
+            let mut baseline = Vec::new();
+            source.save_to(&mut baseline).unwrap();
+            let parsed = super::super::open_pdf(baseline.clone()).unwrap();
+            let original = super::super::annotation_read::page_annotations(&parsed, 0, 77).unwrap();
+            let target = original
+                .iter()
+                .find(|a| a.name() == Some("imported-highlight"))
+                .unwrap();
+            let current: Vec<_> = original
+                .iter()
+                .map(|a| {
+                    if a.id() == target.id() {
+                        a.clone().with_color(HighlightColor::Blue.color())
+                    } else {
+                        a.clone()
+                    }
+                })
+                .collect();
+            let output = reconcile_highlights(&baseline, &original, &current).unwrap();
+            let path = directory.path().join(format!("recolored-{rotation}.pdf"));
+            std::fs::write(&path, &output).unwrap();
+            let saved = Document::load(&path).unwrap();
+            let before_entries = source
+                .get_dictionary(page)
+                .unwrap()
+                .get(b"Annots")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            let after_entries = saved
+                .get_dictionary(page)
+                .unwrap()
+                .get(b"Annots")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert_eq!(after_entries.len(), before_entries.len());
+            for (slot, (before, after)) in before_entries.iter().zip(after_entries).enumerate() {
+                if slot != 3 {
+                    assert_eq!(before, after);
+                    assert_eq!(
+                        source.dereference(before).unwrap().1,
+                        saved.dereference(after).unwrap().1
+                    );
+                } else {
+                    let before = source.dereference(before).unwrap().1.as_dict().unwrap();
+                    let after = saved.dereference(after).unwrap().1.as_dict().unwrap();
+                    for (key, value) in before
+                        .iter()
+                        .filter(|(key, _)| key.as_slice() != b"C" && key.as_slice() != b"AP")
+                    {
+                        assert_eq!(
+                            after.get(key).unwrap(),
+                            value,
+                            "key {key:?}, rotation {rotation}"
+                        );
+                    }
+                    let normal = after
+                        .get(b"AP")
+                        .unwrap()
+                        .as_dict()
+                        .unwrap()
+                        .get(b"N")
+                        .unwrap();
+                    let appearance = saved.dereference(normal).unwrap().1.as_stream().unwrap();
+                    assert_eq!(
+                        appearance.dict.get(b"BBox").unwrap(),
+                        before.get(b"Rect").unwrap()
+                    );
+                    let operations = Content::decode(&appearance.content).unwrap().operations;
+                    assert_eq!(operations.iter().filter(|op| op.operator == "f").count(), 2);
+                }
+            }
+            assert_eq!(source.get_page_content(page), saved.get_page_content(page));
+            // Read back with the independent Hayro adapter, not lopdf.
+            let reopened = super::super::open_pdf(std::fs::read(path).unwrap()).unwrap();
+            let readback =
+                super::super::annotation_read::page_annotations(&reopened, 0, 78).unwrap();
+            let readback = readback.iter().find(|a| a.name() == target.name()).unwrap();
+            assert_eq!(readback.quads(), target.quads());
+            assert_eq!(readback.author(), target.author());
+            assert_eq!(readback.comment(), target.comment());
+            assert_eq!(readback.opacity(), target.opacity());
+            assert_eq!(readback.color(), HighlightColor::Blue.color());
+
+            let current: Vec<_> = current
+                .into_iter()
+                .filter(|a| a.id() != target.id())
+                .collect();
+            let deleted = reconcile_highlights(&baseline, &original, &current).unwrap();
+            let path = directory.path().join(format!("deleted-{rotation}.pdf"));
+            std::fs::write(&path, deleted).unwrap();
+            let deleted = Document::load(path).unwrap();
+            let entries = deleted
+                .get_dictionary(page)
+                .unwrap()
+                .get(b"Annots")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            let mut expected = before_entries.clone();
+            expected.remove(3);
+            assert_eq!(entries, &expected, "only selected Annots slot is removed");
+            assert_eq!(
+                source.get_page_content(page),
+                deleted.get_page_content(page)
+            );
+            for (&id, object) in &source.objects {
+                if id != page {
+                    assert_eq!(
+                        deleted.get_object(id).unwrap(),
+                        object,
+                        "unrelated object {id:?}"
+                    );
+                }
+            }
+        }
     }
 }

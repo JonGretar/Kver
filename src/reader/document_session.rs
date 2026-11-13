@@ -22,7 +22,7 @@ use gpui_kit::{App, AppContext as _, Context, Entity, EntityId, Global, Task, We
 
 use crate::pdf::{
     self,
-    annotations::{Annotation, AnnotationColor, AnnotationId, MarkupKind, Quad},
+    annotations::{Annotation, AnnotationId, HighlightColor, MarkupKind, Quad},
 };
 
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -41,6 +41,15 @@ pub(crate) struct DocumentSession {
     epoch: u64,
     revision: u64,
     annotations: Option<Result<Arc<Vec<Annotation>>, String>>,
+    // Identity/provenance stays relative to this source for the session lifetime.
+    // Saved bytes remain separate for conflict detection and discard baselines.
+    editing_source: Option<Arc<pdf::Document>>,
+    original_annotations: Arc<Vec<Annotation>>,
+    saved_annotations: Arc<Vec<Annotation>>,
+    preview: Option<Arc<pdf::Document>>,
+    preview_work: Option<Task<()>>,
+    preview_error: Option<String>,
+    highlight_color: HighlightColor,
     annotation_load: Option<Task<()>>,
     editing_rejection: Option<String>,
     next_serial: u64,
@@ -115,6 +124,13 @@ impl DocumentSession {
             epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             revision: 0,
             annotations: None,
+            editing_source: None,
+            original_annotations: Arc::new(Vec::new()),
+            saved_annotations: Arc::new(Vec::new()),
+            preview: None,
+            preview_work: None,
+            preview_error: None,
+            highlight_color: HighlightColor::default(),
             annotation_load: None,
             editing_rejection: None,
             next_serial: 1,
@@ -136,6 +152,16 @@ impl DocumentSession {
 
     pub(super) fn result(&self) -> Option<Result<Arc<pdf::Document>, String>> {
         self.result.clone()
+    }
+
+    pub(super) fn presentation(&self) -> Option<Arc<pdf::Document>> {
+        self.preview
+            .clone()
+            .or_else(|| self.result().and_then(Result::ok))
+    }
+
+    pub(super) fn preview_error(&self) -> Option<&str> {
+        self.preview_error.as_deref()
     }
 
     pub(super) fn path(&self) -> &std::path::Path {
@@ -174,19 +200,31 @@ impl DocumentSession {
         if self.is_saving() || !self.is_dirty() {
             return;
         }
-        if let Some(Ok(annotations)) = &mut self.annotations {
-            Arc::make_mut(annotations).retain(|annotation| {
-                annotation.id().serial() & (1 << 63) == 0
-                    || (annotation.id().serial() & !(1 << 63)) <= self.saved_serial
-            });
-        }
+        self.annotations = Some(Ok(self.saved_annotations.clone()));
         self.revision += 1;
         self.saved_revision = self.revision;
+        self.refresh_preview(cx);
         cx.notify();
     }
 
     pub(crate) fn editing_rejection(&self) -> Option<&str> {
         self.editing_rejection.as_deref()
+    }
+
+    pub(crate) fn existing_highlights(&self, page: usize, quads: &[Quad]) -> Vec<Annotation> {
+        let Some(Ok(annotations)) = &self.annotations else {
+            return Vec::new();
+        };
+        let start = annotations.partition_point(|a| a.page() < page);
+        let end = annotations.partition_point(|a| a.page() <= page);
+        annotations[start..end]
+            .iter()
+            .filter(|annotation| {
+                annotation.kind() == MarkupKind::Highlight
+                    && identical_region(annotation.quads(), quads)
+            })
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn create_highlight(
@@ -208,6 +246,11 @@ impl DocumentSession {
         if document.page_transform(page).is_none() {
             return Err("Cannot highlight a missing PDF page.".into());
         }
+        match self.existing_highlights(page, &quads).as_slice() {
+            [existing] => return Ok(existing.id()),
+            [] => {}
+            _ => return Err("Choose one of the existing highlights before editing it.".into()),
+        }
         let Some(Ok(annotations)) = &mut self.annotations else {
             return Err(
                 "Document annotations are not ready. Try again when loading finishes.".into(),
@@ -215,12 +258,6 @@ impl DocumentSession {
         };
         let page_start = annotations.partition_point(|annotation| annotation.page() < page);
         let page_end = annotations.partition_point(|annotation| annotation.page() <= page);
-        if let Some(existing) = annotations[page_start..page_end].iter().find(|annotation| {
-            annotation.kind() == MarkupKind::Highlight
-                && identical_region(annotation.quads(), &quads)
-        }) {
-            return Ok(existing.id());
-        }
         let id = AnnotationId::new(self.epoch, (1 << 63) | self.next_serial);
         self.next_serial += 1;
         // Capture identity once, after duplicate detection. Later settings
@@ -233,7 +270,7 @@ impl DocumentSession {
             page,
             MarkupKind::Highlight,
             quads,
-            AnnotationColor::Rgb([1., 0.85, 0.]),
+            self.highlight_color.color(),
         )
         .with_opacity(0.45)
         .with_metadata(author, None, None);
@@ -257,8 +294,83 @@ impl DocumentSession {
         Arc::make_mut(annotations).insert(insertion, annotation);
         self.revision += 1;
         crate::app::quit_guard::invalidate_approval();
+        self.refresh_preview(cx);
         cx.notify();
         Ok(id)
+    }
+
+    pub(crate) fn edit_highlight(
+        &mut self,
+        id: AnnotationId,
+        color: Option<HighlightColor>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if let Some(reason) = &self.editing_rejection {
+            return Err(reason.clone());
+        }
+        let Some(Ok(annotations)) = &mut self.annotations else {
+            return Err("Document annotations are not ready.".into());
+        };
+        let ix = annotations
+            .iter()
+            .position(|a| a.id() == id)
+            .ok_or("This annotation is no longer available.")?;
+        let annotation = &annotations[ix];
+        if id.epoch() != self.epoch
+            || annotation.is_readonly()
+            || annotation.kind() != MarkupKind::Highlight
+        {
+            return Err("This annotation cannot be edited.".into());
+        }
+        if let Some(color) = color {
+            self.highlight_color = color;
+            if annotation.color() == color.color() {
+                return Ok(());
+            }
+            let changed = annotation.clone().with_color(color.color());
+            Arc::make_mut(annotations)[ix] = changed;
+        } else {
+            Arc::make_mut(annotations).remove(ix);
+        }
+        self.revision += 1;
+        crate::app::quit_guard::invalidate_approval();
+        self.refresh_preview(cx);
+        cx.notify();
+        Ok(())
+    }
+
+    /// Render the actual edited PDF, not an overlay over obsolete embedded APs.
+    /// No disk writes or rasterization occur here. Rapid edits supersede old work.
+    fn refresh_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(source) = self.editing_source.clone() else {
+            return;
+        };
+        let Some(Ok(current)) = self.annotations.clone() else {
+            return;
+        };
+        let original = self.original_annotations.clone();
+        let revision = self.revision;
+        let epoch = self.epoch;
+        let path = self.path.clone();
+        self.preview_error = None;
+        let work = cx.background_executor().spawn(async move {
+            let bytes = source.with_annotation_edits(&original, &current)?;
+            pdf::Document::from_bytes(path, bytes).map(Arc::new)
+        });
+        self.preview_work = Some(cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.epoch != epoch || this.revision != revision {
+                    return;
+                }
+                match result {
+                    Ok(document) => this.preview = Some(document),
+                    Err(error) => this.preview_error = Some(error),
+                }
+                this.preview_work = None;
+                cx.notify();
+            });
+        }));
     }
 
     pub(crate) fn is_saving(&self) -> bool {
@@ -273,9 +385,9 @@ impl DocumentSession {
         self.save.as_ref().map(|_| self.save_ticket)
     }
 
-    /// Only additions not included in the current immutable rendering baseline
-    /// need an application overlay. Saved/imported appearances are painted once
-    /// by Hayro instead.
+    /// Diagnostic: additions newer than the saved snapshot. The PDF preview
+    /// renders their real appearance; these are never also painted as overlays.
+    #[cfg(test)]
     pub(crate) fn unsaved_annotations(&self) -> impl Iterator<Item = &Annotation> {
         self.annotations
             .as_ref()
@@ -341,7 +453,16 @@ impl DocumentSession {
         {
             return Err("This destination is open in another Kver session. Close it or choose another filename.".into());
         }
-        let snapshot: Vec<_> = self.unsaved_annotations().cloned().collect();
+        let snapshot = self
+            .annotations()
+            .and_then(Result::ok)
+            .ok_or("Document annotations are not ready.")?;
+        let saved_snapshot = snapshot.clone();
+        let original = self.original_annotations.clone();
+        let editing_source = self
+            .editing_source
+            .clone()
+            .ok_or("Document is not ready.")?;
         let revision = self.revision;
         let serial = self.next_serial - 1;
         let source = self.path.clone();
@@ -373,7 +494,7 @@ impl DocumentSession {
                         .ok_or("The loaded file version is unavailable. Use Save As.")?,
                 )?),
             };
-            let bytes = document.with_highlights(&snapshot)?;
+            let bytes = editing_source.with_annotation_edits(&original, &snapshot)?;
             // Validate/parse the exact intended output before committing it.
             let saved = pdf::Document::from_bytes(path, bytes)?;
             let metadata = destination.commit(saved.bytes())?;
@@ -393,9 +514,19 @@ impl DocumentSession {
                     registry.remove(&this.path);
                     registry.insert(destination.clone(), owner.clone());
                     this.path = destination;
+                    if this.revision == revision {
+                        this.preview = Some(document.clone());
+                        this.preview_work = None;
+                    }
                     this.result = Some(Ok(document));
+                    this.saved_annotations = saved_snapshot;
                     this.saved_revision = revision;
                     this.saved_serial = serial;
+                    if this.revision != revision {
+                        // Save As changes relative-link resolution for every
+                        // participant, including newer in-flight preview work.
+                        this.refresh_preview(cx);
+                    }
                 }
                 cx.global_mut::<Sessions>()
                     .saving
@@ -419,6 +550,7 @@ impl DocumentSession {
             return;
         };
         let epoch = self.epoch;
+        self.editing_source = Some(document.clone());
         let work = cx.background_executor().spawn(async move {
             let rejection = document.editing_rejection();
             let mut annotations = Vec::new();
@@ -435,6 +567,10 @@ impl DocumentSession {
             let _ = this.update(cx, |this, cx| {
                 if this.epoch != epoch {
                     return;
+                }
+                if let Ok(annotations) = &result {
+                    this.original_annotations = annotations.clone();
+                    this.saved_annotations = annotations.clone();
                 }
                 this.annotations = Some(result);
                 this.editing_rejection = rejection;
@@ -484,6 +620,7 @@ fn identical_region(left: &[Quad], right: &[Quad]) -> bool {
 mod tests {
     use super::*;
     use crate::coordinates::Point;
+    use crate::pdf::annotations::AnnotationColor;
     use gpui_kit::TestAppContext;
 
     fn quad(left: f64, top: f64, right: f64, bottom: f64) -> Quad {
@@ -556,6 +693,72 @@ mod tests {
             assert!(
                 session.is_dirty(),
                 "closing another participant must retain edits"
+            );
+        });
+    }
+
+    #[gpui_kit::test]
+    fn discard_restores_recolored_and_deleted_annotations_and_rejects_foreign_epoch(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("first.pdf");
+        let other = directory.path().join("other.pdf");
+        for path in [&source, &other] {
+            std::fs::copy("examples/annotations.pdf", path).unwrap();
+        }
+        let (first, other) = cx.update(|cx| {
+            (
+                DocumentSession::join(source, cx),
+                DocumentSession::join(other, cx),
+            )
+        });
+        cx.run_until_parked();
+        for session in [&first, &other] {
+            session.update(cx, |session, cx| session.ensure_annotations(cx));
+        }
+        cx.run_until_parked();
+        let original = first.read_with(cx, |session, _| session.annotations().unwrap().unwrap());
+        let target = original
+            .iter()
+            .find(|a| a.name() == Some("imported-highlight"))
+            .unwrap()
+            .id();
+        first.update(cx, |session, cx| {
+            session
+                .edit_highlight(target, Some(HighlightColor::Green), cx)
+                .unwrap();
+            session.edit_highlight(target, None, cx).unwrap();
+            assert!(session.is_dirty());
+            session.discard(cx);
+            assert!(!session.is_dirty());
+            assert_eq!(session.annotations().unwrap().unwrap(), original);
+        });
+        other.update(cx, |session, cx| {
+            assert!(session.edit_highlight(target, None, cx).is_err());
+            assert!(!session.is_dirty());
+            let id = session
+                .annotations()
+                .unwrap()
+                .unwrap()
+                .iter()
+                .find(|a| a.is_readonly())
+                .unwrap()
+                .id();
+            assert!(
+                session
+                    .edit_highlight(id, Some(HighlightColor::Blue), cx)
+                    .is_err()
+            );
+            assert!(!session.is_dirty());
+        });
+        cx.run_until_parked();
+        first.read_with(cx, |session, _| {
+            let preview = session.presentation().unwrap();
+            let readback = preview.page_annotations(0, session.epoch()).unwrap();
+            assert_eq!(
+                readback.iter().find(|a| a.id() == target).unwrap().color(),
+                original.iter().find(|a| a.id() == target).unwrap().color()
             );
         });
     }

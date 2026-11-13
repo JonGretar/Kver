@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the imported-text-markup regression specimen, without a PDF writer."""
+"""Generate imported markup specimens; --clean omits deliberately invalid entries."""
 from pathlib import Path
 import sys
 
@@ -57,6 +57,14 @@ for y, paint in [
     ))
 
 many = "--many" in sys.argv
+clean = "--clean" in sys.argv
+if clean and many:
+    raise SystemExit("Choose either --clean or --many.")
+if clean:
+    objects[2] = objects[2].replace(
+        "/Annots [10 0 R 8 0 R 9 0 R 7 0 R null 11 0 R 12 0 R 13 0 R]",
+        "/Annots [10 0 R 8 0 R 9 0 R 7 0 R 11 0 R]",
+    )
 if many:
     objects[2] = objects[2].replace(
         "/Annots [10 0 R 8 0 R 9 0 R 7 0 R null 11 0 R 12 0 R 13 0 R]",
@@ -73,4 +81,7 @@ data.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
 for offset in offsets[1:]:
     data.extend(f"{offset:010} 00000 n \n".encode())
 data.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
-Path(__file__).with_name("annotations-many.pdf" if many else "annotations.pdf").write_bytes(data)
+filename = "annotations-clean.pdf" if clean else (
+    "annotations-many.pdf" if many else "annotations.pdf"
+)
+Path(__file__).with_name(filename).write_bytes(data)

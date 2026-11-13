@@ -96,11 +96,12 @@ impl Document {
         writer::editing_rejection(self.bytes())
     }
 
-    pub(crate) fn with_highlights(
+    pub(crate) fn with_annotation_edits(
         &self,
-        additions: &[annotations::Annotation],
+        original: &[annotations::Annotation],
+        current: &[annotations::Annotation],
     ) -> Result<Vec<u8>, String> {
-        writer::append_highlights(self.bytes(), additions)
+        writer::reconcile_highlights(self.bytes(), original, current)
     }
 
     pub(crate) fn pages(&self) -> Vec<(f32, f32)> {

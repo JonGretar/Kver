@@ -42,6 +42,7 @@ pub(crate) struct CommandAvailability {
     pub(crate) mode_override: Option<ReadingMode>,
     pub(crate) has_selection: bool,
     pub(crate) highlight_available: bool,
+    pub(crate) annotation_edit_available: bool,
     pub(crate) save_available: bool,
     pub(crate) save_as_available: bool,
     pub(crate) has_matches: bool,
@@ -78,11 +79,17 @@ impl CommandPalette {
     /// layer. No extra container changes sizing, hit testing, or action ancestry.
     pub(crate) fn render(&self, available: CommandAvailability, cx: &App) -> [AnyElement; 2] {
         let has_document = available.page_count > 0;
-        let items = vec![
+        let mut items = vec![
             command("Open PDF…", OpenPdf, true),
             command("Save", Save, available.save_available),
             command("Save As…", SaveAs, available.save_as_available),
             reader_command("Highlight", Highlight, available.highlight_available, cx),
+            reader_command(
+                "Delete highlight",
+                crate::reader::DeleteHighlight,
+                available.annotation_edit_available,
+                cx,
+            ),
             command("Open Recent…", ShowRecent, true),
             command("Open marks…", ShowMarks, has_document),
             command("Set local mark…", ShowSetMark, has_document),
@@ -135,6 +142,17 @@ impl CommandPalette {
             reader_command("Fit Page", FitPage, has_document, cx),
             reader_command("Copy", Copy, available.has_selection, cx),
         ];
+        for color in crate::pdf::annotations::HighlightColor::ALL {
+            items.push(
+                reader_command(
+                    "Recolor highlight",
+                    crate::reader::RecolorHighlight(color),
+                    available.annotation_edit_available,
+                    cx,
+                )
+                .label(format!("Recolor highlight {}", color.label())),
+            );
+        }
         [
             div()
                 .absolute()

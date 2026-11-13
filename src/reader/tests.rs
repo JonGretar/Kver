@@ -17,6 +17,7 @@ mod links;
 mod loading;
 mod marks;
 mod navigation;
+mod page_annotations;
 mod positions;
 mod reading_mode;
 mod rendering;

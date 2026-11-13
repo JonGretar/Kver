@@ -142,17 +142,38 @@ loading to finish, retains the window's text selection, and captures one quad pe
 selected line/column fragment before any viewport projection. Reapplying Highlight
 to identical quads selects the existing entry without changing its color or revision.
 Mutations keep the catalog in document/spatial order.
+`src/reader/page_annotations.rs` owns window-local on-page selection and overlap
+choice. A click selects a highlight; crossing pointer slop commits the gesture
+to text selection even if the pointer returns to its origin. Overlapping quads
+require an explicit choice in Kit's document-owned Dialog/Command surface.
+Selected-highlight controls, context menus, the palette, and keyboard deletion
+use the same semantic Actions and shared session mutation methods. Sidebar
+navigation does not arm a page edit target. Five named color presets and the
+last-used highlight color belong to the document session, not persistent settings.
 
 `src/pdf/writer.rs` uses exactly pinned `lopdf` 0.47.0 alongside Hayro, rather than
 replacing the rendering backend. The retained writer experiment supplies concrete
 incremental-preservation and PDFKit/Preview interchange evidence for that version.
-Production encoding uses the immutable baseline's original bytes, not a reread of
-its source path, and appends only highlights added since the saved snapshot.
-Standard `/Highlight`, `/QuadPoints`, and normal appearance streams preserve
-editability without changing page content or rewriting existing annotation and
-metadata dictionaries. Hayro paints embedded appearances; only additions not yet
-in its baseline have application overlays. Ordinary filesystem readonly sources
-remain editable in memory; signed/encrypted documents are not editable.
+Production encoding reconciles each complete catalog snapshot against an immutable
+editing source retained for the session lifetime, never a reread of its path.
+Imported IDs retain their source-slot provenance across saves. New highlights use
+standard `/Highlight`, `/QuadPoints`, and normal appearance streams. Recolor copies
+only the selected dictionary and replaces its color and appearance, preserving exact
+stored geometry, authorship, comments, and unrelated metadata. Deletion removes only
+the selected page-array entry; it is not secure erasure of historical PDF bytes.
+Hayro renders a revision-checked PDF preview rebuilt off-thread after edits, so
+obsolete imported appearances are replaced rather than covered by a second overlay.
+Only visible pages are rasterized. The latest successfully saved PDF/file version
+remains separate for transactional conflict checks, and its catalog snapshot
+supports discard. Ordinary filesystem readonly sources remain editable in memory;
+signed/encrypted documents are not editable.
+Hayro's annotation iterator currently stops at invalid array entries, hiding later
+appearances without removing their PDF data. [Bug #142](https://github.com/JonGretar/Kver/issues/142)
+tracks [upstream #1575](https://github.com/LaurenzV/hayro/issues/1575).
+`examples/annotations-clean.pdf` is the interaction specimen; the original
+`examples/annotations.pdf` deliberately retains malformed entries for preservation
+and renderer regression coverage. Generate the clean variant with
+`python3 examples/generate-annotations.py --clean`.
 
 Save and Save As share one session-owned, serialized write pipeline. Save uses
 the file identity, modification time, permissions, and original bytes captured

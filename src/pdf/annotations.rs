@@ -79,6 +79,74 @@ impl Quad {
     pub fn points(self) -> [Point; 4] {
         self.points
     }
+    /// Perimeter order for painting/containment only, never persisted geometry.
+    pub fn perimeter(self) -> [Point; 4] {
+        let mut corners = self.points;
+        let centre = Point {
+            x: corners.iter().map(|p| p.x).sum::<f64>() / 4.,
+            y: corners.iter().map(|p| p.y).sum::<f64>() / 4.,
+        };
+        corners.sort_by(|a, b| {
+            (a.y - centre.y)
+                .atan2(a.x - centre.x)
+                .total_cmp(&(b.y - centre.y).atan2(b.x - centre.x))
+        });
+        corners
+    }
+    pub fn contains(self, point: Point) -> bool {
+        let corners = self.perimeter();
+        let mut positive = false;
+        let mut negative = false;
+        for i in 0..4 {
+            let a = corners[i];
+            let b = corners[(i + 1) % 4];
+            let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+            positive |= cross > 1e-6;
+            negative |= cross < -1e-6;
+        }
+        !(positive && negative)
+    }
+}
+
+/// The five named choices are session preferences, not an imported color normalizer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HighlightColor {
+    #[default]
+    Yellow,
+    Green,
+    Blue,
+    Pink,
+    Purple,
+}
+
+impl HighlightColor {
+    pub const ALL: [Self; 5] = [
+        Self::Yellow,
+        Self::Green,
+        Self::Blue,
+        Self::Pink,
+        Self::Purple,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Yellow => "Yellow",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+            Self::Pink => "Pink",
+            Self::Purple => "Purple",
+        }
+    }
+
+    pub fn color(self) -> AnnotationColor {
+        AnnotationColor::Rgb(match self {
+            Self::Yellow => [1., 0.85, 0.],
+            Self::Green => [0.35, 0.85, 0.4],
+            Self::Blue => [0.3, 0.65, 1.],
+            Self::Pink => [1., 0.45, 0.65],
+            Self::Purple => [0.7, 0.45, 0.95],
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -105,7 +173,7 @@ impl AnnotationColor {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Annotation {
     id: AnnotationId,
     page: usize,
@@ -156,6 +224,10 @@ impl Annotation {
     }
     pub fn color(&self) -> AnnotationColor {
         self.color
+    }
+    pub fn with_color(mut self, color: AnnotationColor) -> Self {
+        self.color = color;
+        self
     }
     pub fn opacity(&self) -> f32 {
         self.opacity

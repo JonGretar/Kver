@@ -115,6 +115,15 @@ progressively. Document generations and catalog revisions reject late replies.
 Copy uses only text underneath valid quads, never attached comments. Missing
 text and malformed entries remain visible; usable geometry still navigates.
 The reader adds an identification outline rather than another markup fill.
+Each list entry exposes Color and Delete through the same session
+mutation as on-page editing, including all four imported markup kinds and
+entries without excerpts. Row commands target their annotation without first
+selecting it or navigating the reader. List edit intents carry document generation,
+catalog revision, and annotation identity so an open color menu cannot edit a replacement
+document. Deletion focuses the persistent list before removing a row-owned
+control; catalog updates also repair local list focus after another window deletes
+a focused row. Identification outlines carry annotation identity and clear when
+the catalog no longer contains it.
 `src/reader/navigation.rs` owns shared layout and navigation-coordinate rules.
 `src/reader/rendering.rs` owns raster request selection, reply validation, and
 visible bitmap retention. The reader coordinates navigation commands,

@@ -3,12 +3,15 @@
 use std::{collections::HashMap, sync::Arc};
 
 use gpui_kit::{
-    App, ClipboardItem, Context, Entity, EventEmitter, IntoElement, Subscription, Task, Window,
+    App, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, IntoElement, Subscription,
+    Task, WeakEntity, Window,
+    assets::IconName,
     base::TestSupportExt as _,
     component::{
         ActiveTheme, Disableable as _, IndexPath, Sizable as _,
         button::{Button, ButtonVariants as _},
         list::{List, ListDelegate, ListEvent, ListItem, ListState},
+        menu::{DropdownMenu as _, PopupMenuItem},
     },
     div,
     prelude::*,
@@ -16,13 +19,21 @@ use gpui_kit::{
 
 use crate::pdf::{
     self,
-    annotations::{Annotation, AnnotationId},
+    annotations::{Annotation, AnnotationId, HighlightColor},
 };
 
 pub(crate) struct AnnotationNavigation {
     pub(crate) generation: u64,
     pub(crate) revision: u64,
     pub(crate) annotation: Annotation,
+}
+
+#[derive(Clone)]
+pub(crate) struct AnnotationEdit {
+    pub(crate) generation: u64,
+    pub(crate) revision: u64,
+    pub(crate) id: AnnotationId,
+    pub(crate) color: Option<HighlightColor>,
 }
 
 #[derive(Clone)]
@@ -33,9 +44,17 @@ enum Excerpt {
 }
 
 struct AnnotationRows {
+    owner: WeakEntity<AnnotationsPanel>,
     entries: Arc<Vec<Annotation>>,
     excerpts: HashMap<AnnotationId, Excerpt>,
     selected: Option<AnnotationId>,
+    row_focus: HashMap<AnnotationId, RowFocus>,
+}
+
+struct RowFocus {
+    row: FocusHandle,
+    color: FocusHandle,
+    delete: FocusHandle,
 }
 
 impl ListDelegate for AnnotationRows {
@@ -97,43 +116,128 @@ impl ListDelegate for AnnotationRows {
             annotation.id().epoch(),
             annotation.id().serial()
         );
+        let owner = self.owner.upgrade()?;
+        let panel = owner.read(cx);
+        let editable = panel.editable && !annotation.is_readonly();
+        let request = AnnotationEdit {
+            generation: panel.generation,
+            revision: panel.revision?,
+            id: annotation.id(),
+            color: None,
+        };
+        let current_color = annotation.color();
+        let focus = self
+            .row_focus
+            .entry(annotation.id())
+            .or_insert_with(|| RowFocus {
+                row: cx.focus_handle(),
+                color: cx.focus_handle(),
+                delete: cx.focus_handle(),
+            });
+        let color_owner = self.owner.clone();
+        let color_request = request.clone();
+        let delete_owner = self.owner.clone();
+        let actions = div()
+            .id("annotation-actions")
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap_1()
+            // Nested commands must not also activate/navigate the row.
+            .on_click(|_, _, cx| cx.stop_propagation())
+            // List's Enter action must not move focus before
+            // the button's native key-up activation.
+            .key_context(crate::key_context::ANNOTATION_ROW_ACTIONS)
+            .child(
+                Button::new("recolor-annotation")
+                    .track_focus(&focus.color)
+                    .icon(IconName::Palette)
+                    .accessibility_label("Change annotation color")
+                    .tooltip("Change color…")
+                    .ghost()
+                    .xsmall()
+                    .disabled(!editable)
+                    .dropdown_menu(move |menu, _, _| {
+                        let mut menu = menu;
+                        for color in HighlightColor::ALL {
+                            let owner = color_owner.clone();
+                            let mut request = color_request.clone();
+                            request.color = Some(color);
+                            menu = menu.item(
+                                PopupMenuItem::new(color.label())
+                                    .checked(current_color == color.color())
+                                    .on_click(move |_, window, cx| {
+                                        let _ = owner.update(cx, |this, cx| {
+                                            this.edit(request.clone(), window, cx)
+                                        });
+                                    }),
+                            );
+                        }
+                        menu
+                    }),
+            )
+            .child(
+                Button::new("delete-annotation")
+                    .track_focus(&focus.delete)
+                    .icon(IconName::Trash)
+                    .accessibility_label("Delete annotation")
+                    .tooltip("Delete annotation")
+                    .ghost()
+                    .xsmall()
+                    .disabled(!editable)
+                    .on_click(move |_, window, cx| {
+                        let _ = delete_owner
+                            .update(cx, |this, cx| this.edit(request.clone(), window, cx));
+                    }),
+            );
         Some(
-            ListItem::new(id).accessibility_label(label).h_16().child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .w_full()
-                    .gap_1()
-                    .child(div().text_sm().truncate().child(text))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .when_some(annotation.color().rgb(), |row, rgb| {
-                                // This swatch is PDF data, not an application palette.
-                                row.child(div().size_2().flex_shrink_0().bg(gpui_kit::Rgba {
-                                    r: rgb[0],
-                                    g: rgb[1],
-                                    b: rgb[2],
-                                    a: 1.,
-                                }))
-                            })
-                            .child(div().truncate().child(metadata)),
-                    )
-                    .when_some(author, |row, author| {
-                        row.child(
+            ListItem::new(id)
+                .accessibility_label(label)
+                .track_focus(&focus.row)
+                .h_16()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .w_full()
+                        .gap_1()
+                        .child(
                             div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(div().flex_1().min_w_0().text_sm().truncate().child(text))
+                                .child(actions),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .truncate()
-                                .child(format!("By {author}")),
+                                .when_some(annotation.color().rgb(), |row, rgb| {
+                                    // This swatch is PDF data, not an application palette.
+                                    row.child(div().size_2().flex_shrink_0().bg(gpui_kit::Rgba {
+                                        r: rgb[0],
+                                        g: rgb[1],
+                                        b: rgb[2],
+                                        a: 1.,
+                                    }))
+                                })
+                                .child(div().truncate().child(metadata)),
                         )
-                    }),
-            ),
+                        .when_some(author, |row, author| {
+                            row.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .truncate()
+                                    .child(format!("By {author}")),
+                            )
+                        }),
+                ),
         )
     }
 }
@@ -141,6 +245,8 @@ impl ListDelegate for AnnotationRows {
 pub(crate) struct AnnotationsPanel {
     generation: u64,
     revision: Option<u64>,
+    editable: bool,
+    focus: FocusHandle,
     document: Option<Arc<pdf::Document>>,
     list: Entity<ListState<AnnotationRows>>,
     catalog: Option<Result<(), String>>,
@@ -149,15 +255,19 @@ pub(crate) struct AnnotationsPanel {
 }
 
 impl EventEmitter<AnnotationNavigation> for AnnotationsPanel {}
+impl EventEmitter<AnnotationEdit> for AnnotationsPanel {}
 
 impl AnnotationsPanel {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let owner = cx.weak_entity();
         let list = cx.new(|cx| {
             ListState::new(
                 AnnotationRows {
+                    owner,
                     entries: Arc::new(vec![]),
                     excerpts: HashMap::new(),
                     selected: None,
+                    row_focus: HashMap::new(),
                 },
                 window,
                 cx,
@@ -173,6 +283,8 @@ impl AnnotationsPanel {
         Self {
             generation: 0,
             revision: None,
+            editable: false,
+            focus: cx.focus_handle(),
             document: None,
             list,
             catalog: None,
@@ -197,13 +309,18 @@ impl AnnotationsPanel {
         self.generation = generation;
         self.document = document;
         self.revision = None;
+        self.editable = false;
         self.catalog = None;
         self.extraction = None;
+        if self.focus.contains_focused(window, cx) {
+            self.focus(window, cx);
+        }
         self.list.update(cx, |list, cx| {
             let rows = list.delegate_mut();
             rows.entries = Arc::new(vec![]);
             rows.excerpts.clear();
             rows.selected = None;
+            rows.row_focus.clear();
             list.set_selected_index(None, window, cx);
             cx.notify();
         });
@@ -213,10 +330,12 @@ impl AnnotationsPanel {
     pub(crate) fn set_catalog(
         &mut self,
         revision: u64,
+        editable: bool,
         catalog: Option<Result<Arc<Vec<Annotation>>, String>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.editable = editable;
         let Some(catalog) = catalog else { return };
         if self.revision == Some(revision) {
             return;
@@ -225,8 +344,25 @@ impl AnnotationsPanel {
         self.extraction = None;
         self.catalog = Some(catalog.as_ref().map(|_| ()).map_err(Clone::clone));
         let entries = catalog.unwrap_or_default();
+        let removed_focused_row =
+            self.list
+                .read(cx)
+                .delegate()
+                .row_focus
+                .iter()
+                .any(|(id, focus)| {
+                    focus.row.contains_focused(window, cx) && !entries.iter().any(|a| a.id() == *id)
+                });
+        if removed_focused_row {
+            // Also repair focus when another window removes a focused row button,
+            // even if the row was never selected.
+            // The List remains mounted and focusable even when it becomes empty.
+            self.focus(window, cx);
+        }
+        let ids: std::collections::HashSet<_> = entries.iter().map(Annotation::id).collect();
         self.list.update(cx, |list, cx| {
             let rows = list.delegate_mut();
+            rows.row_focus.retain(|id, _| ids.contains(id));
             if !entries.iter().any(|a| Some(a.id()) == rows.selected) {
                 rows.selected = None;
             }
@@ -341,6 +477,27 @@ impl AnnotationsPanel {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
+
+    fn edit(&self, request: AnnotationEdit, window: &mut Window, cx: &mut Context<Self>) {
+        // A menu may outlive its catalog/document. Never retarget a late command.
+        if !self.editable
+            || request.generation != self.generation
+            || Some(request.revision) != self.revision
+            || !self
+                .list
+                .read(cx)
+                .delegate()
+                .entries
+                .iter()
+                .any(|a| a.id() == request.id && !a.is_readonly())
+        {
+            return;
+        }
+        if request.color.is_none() {
+            self.focus(window, cx);
+        }
+        cx.emit(request);
+    }
 }
 
 impl Render for AnnotationsPanel {
@@ -359,6 +516,7 @@ impl Render for AnnotationsPanel {
         div()
             .id("annotations-panel")
             .test_support()
+            .track_focus(&self.focus)
             .key_context(crate::key_context::ANNOTATIONS)
             .on_action(cx.listener(|this, _: &super::Copy, _, cx| this.copy(cx)))
             .flex()

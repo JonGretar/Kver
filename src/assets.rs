@@ -18,6 +18,7 @@ icon_assets!(
         Moon,
         SunMoon,
         Pencil,
+        Palette,
         Trash
     ]
 );
@@ -66,6 +67,7 @@ mod tests {
             "icons/sun-moon.svg",
             "icons/arrow-down.svg",
             "icons/pencil.svg",
+            "icons/palette.svg",
             "icons/trash.svg",
         ] {
             assert!(ReaderAssets.load(path).unwrap().is_some(), "{path}");

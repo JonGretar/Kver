@@ -17,7 +17,7 @@ pub use crate::app::document_window::sidebar::{
     ShowAnnotations, ShowContents, ShowFind, ToggleSidebar,
 };
 pub use crate::reading_history::ShowRecent;
-pub(crate) use annotations::AnnotationsPanel;
+pub(crate) use annotations::{AnnotationEdit, AnnotationNavigation, AnnotationsPanel};
 pub use commands::*;
 pub use contents::ActivateOutline;
 pub(crate) use contents::ContentsPanel;
@@ -105,7 +105,7 @@ pub struct ReaderView {
     marks: Option<Entity<LocalMarks>>,
     marks_subscriptions: Vec<Subscription>,
     find_highlight: Option<(find_search::FindMatch, u64)>,
-    annotation_identification: Option<(usize, [f64; 4])>,
+    annotation_identification: Option<(pdf::annotations::AnnotationId, usize, [f64; 4])>,
     selected_annotation: Option<pdf::annotations::AnnotationId>,
     annotation_press: Option<(usize, gpui::Point<gpui::Pixels>, bool)>,
     annotation_choice: Option<page_annotations::AnnotationChoice>,
@@ -436,7 +436,7 @@ impl ReaderView {
         // The list is navigation-only here. Its outline must not leave an older
         // on-page target armed for deletion from the keyboard.
         self.selected_annotation = None;
-        self.annotation_identification = bounds.map(|b| (annotation.page(), b));
+        self.annotation_identification = bounds.map(|b| (annotation.id(), annotation.page(), b));
         let before = self.jump_location();
         let page = annotation.page();
         self.position_touched = true;
@@ -866,6 +866,17 @@ impl ReaderView {
             self.selected_annotation = None;
             self.annotation_identification = None;
         }
+        if let Some((id, _, _)) = self.annotation_identification
+            && self.session.as_ref().is_none_or(|session| {
+                session
+                    .read(cx)
+                    .annotations()
+                    .and_then(Result::ok)
+                    .is_none_or(|entries| !entries.iter().any(|a| a.id() == id))
+            })
+        {
+            self.annotation_identification = None;
+        }
         if let Some(error) = self
             .session
             .as_ref()
@@ -986,7 +997,7 @@ impl ReaderView {
                 {
                     self.annotation_identification = document
                         .annotation_bounds(annotation)
-                        .map(|bounds| (page, bounds));
+                        .map(|bounds| (id, page, bounds));
                 }
                 self.status = "Highlight selected".into();
             }
@@ -1625,9 +1636,9 @@ impl Render for ReaderView {
                         .bg(gpui::rgba(0x278acb70)),
                 );
             }
-            if let Some((_, [left, top, right, bottom])) = self
+            if let Some((_, _, [left, top, right, bottom])) = self
                 .annotation_identification
-                .filter(|(page, _)| *page == index)
+                .filter(|(_, page, _)| *page == index)
             {
                 // PDF geometry in logical points; no extra markup fill is
                 // painted over the annotation's embedded appearance.

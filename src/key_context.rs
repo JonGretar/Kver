@@ -3,5 +3,6 @@ pub const READER: &str = "Reader";
 pub const SIDEBAR: &str = "Sidebar";
 pub const CONTENTS: &str = "Contents";
 pub const ANNOTATIONS: &str = "Annotations";
+pub(crate) const ANNOTATION_ROW_ACTIONS: &str = "AnnotationRowActions";
 pub const SETTINGS: &str = "Settings";
 pub const ABOUT: &str = "About";

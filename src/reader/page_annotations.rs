@@ -45,7 +45,7 @@ impl ReaderView {
             self.document
                 .as_ref()?
                 .annotation_bounds(&annotation)
-                .map(|bounds| (annotation.page(), bounds))
+                .map(|bounds| (annotation.id(), annotation.page(), bounds))
         });
         self.status = "Highlight selected".into();
         cx.notify();
@@ -130,13 +130,39 @@ impl ReaderView {
         let Some(session) = self.session.clone() else {
             return;
         };
-        match session.update(cx, |session, cx| session.edit_highlight(id, color, cx)) {
+        match session.update(cx, |session, cx| session.edit_annotation(id, color, cx)) {
             Ok(()) if color.is_none() => {
                 self.selected_annotation = None;
                 self.annotation_identification = None;
                 self.status = "Highlight deleted".into();
             }
             Ok(()) => self.status = "Highlight recolored".into(),
+            Err(error) => self.status = error,
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn edit_annotation_from_list(
+        &mut self,
+        edit: &super::AnnotationEdit,
+        cx: &mut Context<Self>,
+    ) {
+        if edit.generation != self.document_generation {
+            return;
+        }
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+        if session.read(cx).revision() != edit.revision {
+            return;
+        }
+        match session.update(cx, |session, cx| {
+            session.edit_annotation(edit.id, edit.color, cx)
+        }) {
+            Ok(()) if edit.color.is_none() => {
+                self.status = "Annotation deleted".into();
+            }
+            Ok(()) => self.status = "Annotation recolored".into(),
             Err(error) => self.status = error,
         }
         cx.notify();

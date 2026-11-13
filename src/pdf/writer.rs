@@ -158,7 +158,7 @@ fn write_highlights(
         let mut edits = edits;
         edits.sort_by_key(|(before, _)| std::cmp::Reverse(before.id().serial()));
         for (before, after) in edits {
-            if before.is_readonly() || before.kind() != MarkupKind::Highlight {
+            if before.is_readonly() {
                 return Err("This annotation cannot be edited.".into());
             }
             let slot = (before.id().serial() & 0xffff_ffff) as usize;
@@ -174,7 +174,7 @@ fn write_highlights(
                     .as_dict()
                     .map_err(error)?
                     .clone();
-                let generated = highlight(&mut incremental.new_document, page, after, "")?;
+                let generated = markup(&mut incremental.new_document, page, after, "")?;
                 let appearance = incremental
                     .new_document
                     .get_dictionary(generated)
@@ -190,6 +190,9 @@ fn write_highlights(
             }
         }
         for annotation in annotations {
+            if annotation.kind() != MarkupKind::Highlight {
+                return Err("Only selected-text highlights can be created in this version.".into());
+            }
             // Epoch/serial is UI identity, not a durable globally unique name.
             // A later application process can reuse that pair after reopening.
             let id = annotation.id();
@@ -200,7 +203,7 @@ fn write_highlights(
                 name = format!("{base}-{suffix}");
                 suffix += 1;
             }
-            let id = highlight(&mut incremental.new_document, page, annotation, &name)?;
+            let id = markup(&mut incremental.new_document, page, annotation, &name)?;
             entries.push(Object::Reference(id));
         }
         page_dict.set("Annots", entries);
@@ -232,14 +235,14 @@ fn numbers(values: impl IntoIterator<Item = f64>) -> Object {
     )
 }
 
-fn highlight(
+fn markup(
     document: &mut Document,
     page: ObjectId,
     annotation: &Annotation,
     name: &str,
 ) -> Result<ObjectId, String> {
-    if annotation.kind() != MarkupKind::Highlight || annotation.quads().is_empty() {
-        return Err("Only selected-text highlights can be created in this version.".into());
+    if annotation.quads().is_empty() {
+        return Err("Cannot write annotation without quadrilaterals.".into());
     }
     let AnnotationColor::Rgb(color) = annotation.color() else {
         return Err("New highlights require an RGB color.".into());
@@ -275,23 +278,28 @@ fn highlight(
     // crop or rotation twice. Draw each quad, not the annotation's union Rect.
     let graphics = document.add_object(dictionary! {
         "Type" => "ExtGState", "BM" => "Multiply",
-        "ca" => annotation.opacity(),
+        "ca" => annotation.opacity(), "CA" => annotation.opacity(),
     });
     let mut operations = vec![
         Operation::new("q", vec![]),
         Operation::new("gs", vec!["GS".into()]),
         Operation::new("rg", color.into_iter().map(Object::Real).collect()),
+        Operation::new("RG", color.into_iter().map(Object::Real).collect()),
     ];
     for quad in annotation.quads() {
-        for (ix, point) in quad.perimeter().into_iter().enumerate() {
-            let operator = if ix == 0 { "m" } else { "l" };
-            operations.push(Operation::new(
-                operator,
-                vec![Object::Real(point.x as f32), Object::Real(point.y as f32)],
-            ));
+        if annotation.kind() == MarkupKind::Highlight {
+            for (ix, point) in quad.perimeter().into_iter().enumerate() {
+                let operator = if ix == 0 { "m" } else { "l" };
+                operations.push(Operation::new(
+                    operator,
+                    vec![Object::Real(point.x as f32), Object::Real(point.y as f32)],
+                ));
+            }
+            operations.push(Operation::new("h", vec![]));
+            operations.push(Operation::new("f", vec![]));
+        } else {
+            line_markup(&mut operations, *quad, annotation.kind());
         }
-        operations.push(Operation::new("h", vec![]));
-        operations.push(Operation::new("f", vec![]));
     }
     operations.push(Operation::new("Q", vec![]));
     let appearance = document.add_object(Stream::new(
@@ -302,8 +310,14 @@ fn highlight(
         },
         Content { operations }.encode().map_err(error)?,
     ));
+    let subtype = match annotation.kind() {
+        MarkupKind::Highlight => "Highlight",
+        MarkupKind::Underline => "Underline",
+        MarkupKind::StrikeOut => "StrikeOut",
+        MarkupKind::Squiggly => "Squiggly",
+    };
     let mut dict = dictionary! {
-        "Type" => "Annot", "Subtype" => "Highlight", "P" => page,
+        "Type" => "Annot", "Subtype" => subtype, "P" => page,
         "Rect" => numbers(bounds),
         "QuadPoints" => numbers(points.iter().flat_map(|point| [point.x, point.y])),
         "C" => Object::Array(color.into_iter().map(Object::Real).collect()),
@@ -319,6 +333,56 @@ fn highlight(
         dict.set("T", Object::string_literal(encoded));
     }
     Ok(document.add_object(dict))
+}
+
+/// Paint in the quad's text frame, not page axes: rotation/crop are applied by
+/// the page. The first edge defines text direction in both PDF and Z ordering.
+fn line_markup(operations: &mut Vec<Operation>, quad: super::annotations::Quad, kind: MarkupKind) {
+    let [top_left, top_right, a, b] = quad.points();
+    let dx = top_right.x - top_left.x;
+    let dy = top_right.y - top_left.y;
+    let projection =
+        |p: crate::coordinates::Point| (p.x - top_left.x) * dx + (p.y - top_left.y) * dy;
+    let (bottom_left, bottom_right) = if projection(a) < projection(b) {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let height = (top_left.x - bottom_left.x).hypot(top_left.y - bottom_left.y);
+    let width = dx.hypot(dy);
+    operations.push(Operation::new(
+        "w",
+        vec![Object::Real((height / 16.) as f32)],
+    ));
+    let segments = if kind == MarkupKind::Squiggly {
+        ((width / (height * 0.15)).ceil() as usize).clamp(2, 4096)
+    } else {
+        1
+    };
+    for ix in 0..=segments {
+        let t = ix as f64 / segments as f64;
+        let up = match kind {
+            MarkupKind::StrikeOut => 0.5,
+            MarkupKind::Squiggly if ix % 2 == 1 => 0.2,
+            _ => 0.12,
+        };
+        let bottom = crate::coordinates::Point {
+            x: bottom_left.x + (bottom_right.x - bottom_left.x) * t,
+            y: bottom_left.y + (bottom_right.y - bottom_left.y) * t,
+        };
+        let top = crate::coordinates::Point {
+            x: top_left.x + dx * t,
+            y: top_left.y + dy * t,
+        };
+        operations.push(Operation::new(
+            if ix == 0 { "m" } else { "l" },
+            vec![
+                Object::Real((bottom.x + (top.x - bottom.x) * up) as f32),
+                Object::Real((bottom.y + (top.y - bottom.y) * up) as f32),
+            ],
+        ));
+    }
+    operations.push(Operation::new("S", vec![]));
 }
 
 #[cfg(test)]
@@ -574,13 +638,16 @@ mod tests {
     fn recolor_and_delete_preserve_exact_imported_geometry_metadata_and_unrelated_objects() {
         use super::super::annotations::HighlightColor;
         let directory = tempfile::tempdir().unwrap();
-        for rotation in [0, 90, 180, 270] {
+        for (rotation, subtype) in [0, 90, 180, 270].into_iter().flat_map(|rotation| {
+            ["Highlight", "Underline", "StrikeOut", "Squiggly"].map(|subtype| (rotation, subtype))
+        }) {
             let mut source = Document::load("examples/annotations.pdf").unwrap();
             let page = (3, 0);
             let page_dict = source.get_dictionary_mut(page).unwrap();
             page_dict.set("Rotate", rotation);
             page_dict.set("CropBox", numbers([20., 30., 380., 570.]));
             let imported = source.get_dictionary_mut((7, 0)).unwrap();
+            imported.set("Subtype", Object::Name(subtype.as_bytes().to_vec()));
             // Two skewed, disjoint quads, one in perimeter order and one in Z
             // order. Rect deliberately exceeds the geometry: AP must not stretch.
             imported.set(
@@ -618,7 +685,9 @@ mod tests {
                 })
                 .collect();
             let output = reconcile_highlights(&baseline, &original, &current).unwrap();
-            let path = directory.path().join(format!("recolored-{rotation}.pdf"));
+            let path = directory
+                .path()
+                .join(format!("recolored-{subtype}-{rotation}.pdf"));
             std::fs::write(&path, &output).unwrap();
             let saved = Document::load(&path).unwrap();
             let before_entries = source
@@ -669,7 +738,11 @@ mod tests {
                         before.get(b"Rect").unwrap()
                     );
                     let operations = Content::decode(&appearance.content).unwrap().operations;
-                    assert_eq!(operations.iter().filter(|op| op.operator == "f").count(), 2);
+                    let paint = if subtype == "Highlight" { "f" } else { "S" };
+                    assert_eq!(
+                        operations.iter().filter(|op| op.operator == paint).count(),
+                        2
+                    );
                 }
             }
             assert_eq!(source.get_page_content(page), saved.get_page_content(page));
@@ -683,13 +756,16 @@ mod tests {
             assert_eq!(readback.comment(), target.comment());
             assert_eq!(readback.opacity(), target.opacity());
             assert_eq!(readback.color(), HighlightColor::Blue.color());
+            assert_eq!(readback.kind(), target.kind());
 
             let current: Vec<_> = current
                 .into_iter()
                 .filter(|a| a.id() != target.id())
                 .collect();
             let deleted = reconcile_highlights(&baseline, &original, &current).unwrap();
-            let path = directory.path().join(format!("deleted-{rotation}.pdf"));
+            let path = directory
+                .path()
+                .join(format!("deleted-{subtype}-{rotation}.pdf"));
             std::fs::write(&path, deleted).unwrap();
             let deleted = Document::load(path).unwrap();
             let entries = deleted

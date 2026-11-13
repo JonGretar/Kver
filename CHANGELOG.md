@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- See “Unsaved changes” beside the PDF filename in every window sharing its edits. The indication stays visible while saving and clears only when no unsaved edits remain.
 - Browse existing highlights, underlines, strikethroughs, and squiggly underlines in the Annotations sidebar. Jump to marked passages and copy their text; annotations without recoverable text remain listed.
 - Highlight selected text and save editable annotations in the current PDF, or deliberately create a copy with Save As. Windows of the same PDF share highlights and unsaved state; close, replacement, and quit offer Save, Discard, or Cancel. Readonly originals can be saved elsewhere, and externally changed PDFs are not silently overwritten.
 - Set an optional author for new annotations in Settings or TOML. Existing authors remain unchanged, and the Annotations list shows stored authors when present.

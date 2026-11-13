@@ -7,32 +7,59 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
+Add a little emphasis to your reading: Kver can now save text markup directly
+in your PDFs, ready to reopen here or in another reader.
+
 ### Added
 
-- Set up appearance, keyboard shortcuts, annotation author, and reading view in a first-launch welcome window.
-- Optionally remove missing PDFs from Open Recent in Persistence settings, without erasing saved marks or reading positions. Automatic cleanup is off by default.
-- See “Unsaved changes” beside the PDF filename in every window sharing its edits. The indication stays visible while saving and clears only when no unsaved edits remain.
-- Browse existing highlights, underlines, strikethroughs, and squiggly underlines in the Annotations sidebar. Jump to marked passages and copy their text; annotations without recoverable text remain listed.
-- Highlight selected text and save editable annotations in the current PDF, or deliberately create a copy with Save As. Windows of the same PDF share highlights and unsaved state; close, replacement, and quit offer Save, Discard, or Cancel. Readonly originals can be saved elsewhere, and externally changed PDFs are not silently overwritten.
-- Set an optional author for new annotations in Settings or TOML. Existing authors remain unchanged, and the Annotations list shows stored authors when present.
-- Select highlights directly on the page, choose explicitly when they overlap, and recolor or delete them across shared windows. Five named colors are available; imported geometry, authorship, and comments remain intact.
-- Undo and redo annotation creation, recoloring, and deletion from either window, even after saving. Returning to the saved annotation state clears “Unsaved changes” without moving your reading position or text selection.
-- Recolor or delete any supported text markup from the Annotations list, including entries without recoverable text. Stored authors and imported colors stay unchanged until explicitly edited.
-- Underline, strike through, or add squiggly underlines to selected text from the context menu, Edit menu, or command palette. All four markup types support page editing, shared undo/redo, and editable PDF saving. Line markup starts red, and each type remembers its own last-used color during the session.
-- Reload external PDF changes across shared windows while keeping each reading position where possible. Unsaved conflicts offer Save As elsewhere or discard-and-reload; cancellation and reload failures keep Kver's edits.
+- **Text markup:** highlight, underline, strike through, or add squiggly
+  underlines to selected text. Choose from five colors, with a remembered color
+  for each markup type.
+- **An Annotations sidebar:** browse marked passages, jump to them, copy their
+  text, and recolor or delete markup. Existing annotations from other readers
+  are included, and overlapping annotations can be chosen individually.
+- **Save and Save As:** save editable annotations in the PDF or make a separate
+  copy. “Unsaved changes” beside the filename and Save / Discard / Cancel
+  prompts help protect your work. Read-only originals can be saved elsewhere.
+- **Shared editing and undo:** windows showing the same PDF share edits and
+  undo/redo, even after saving, without moving each other's reading position.
+- **External-change protection:** clean PDFs reload when another app changes
+  them. If you have unsaved edits, choose between saving your version elsewhere
+  and discarding it to reload; Kver does not silently overwrite the other file.
+- **Optional annotation authorship:** set a name for new markup in Settings.
+  Existing authors stay unchanged and appear in the Annotations list.
+- **A first-launch welcome window:** choose appearance, keyboard preset,
+  annotation author, and reading view before you start.
+- **Optional Open Recent cleanup:** remove missing PDFs from the list without
+  erasing saved marks or reading positions. Automatic cleanup is off by default.
 
 ### Changed
 
-- Apply any text-markup type from a compact split toolbar button, with a separate creation-color picker. Annotations show styled text previews and compact page/author details; narrow sidebar tabs use icons, and annotation commands are grouped in the Edit menu.
-- Use dedicated Standard annotation shortcuts or Vim's `a` sequences to apply markup, including repeating the last type. Vim also adds `g a` for Annotations and `u`, Ctrl-R, and `x` for annotation undo, redo, and deletion; list deletion acts on the selected entry.
-- Vim now uses `J/K` for PDF page turns, `n/N` for Find matches, `g c` for Contents, and Ctrl-F/B and Ctrl-D/U for screen and half-screen scrolling. Modified Find/sidebar shortcuts belong to Standard; Space and Shift-Space remain half-screen aliases.
-- Red replaces Purple among the five markup color presets. Existing custom purple shortcuts and imported colors remain unchanged.
-- Search settings and resize their sidebar in the new GPUI Kit settings layout. Appearance and keyboard preset can still be reset individually; other settings and their saved values are unchanged.
-- Opening the same PDF in multiple windows keeps them on one loaded version, with independent reading positions, zoom, reading modes, and text selections.
+- A compact markup toolbar remembers your last type and offers a separate color
+  picker. The sidebar shows styled text previews, and annotation commands are
+  grouped under **Edit → Annotation**.
+- **Vim shortcuts have changed:** use `J` / `K` for page turns and `n` / `N`
+  for Find matches. `g c` opens Contents and `g a` opens Annotations.
+  `Ctrl-F` / `Ctrl-B` scroll a screen; `Ctrl-D` / `Ctrl-U` scroll half a screen.
+  Space / Shift-Space remain half-screen aliases.
+- Vim's `a a` repeats the last markup type; `a h`, `a u`, `a s`, and `a w`
+  apply the four types. Use `u`, `Ctrl-R`, and `x` to undo, redo, and delete
+  annotations. Standard has its own modified shortcuts; see **Settings →
+  Keyboard** for the active bindings.
+- Settings now has search and a resizable sidebar.
 
 ### Fixed
 
-- Select and copy ordinary multi-column text in reading order, finishing each column before continuing to the next, without highlighting across column gutters.
+- Selection and copying now follow ordinary multi-column text in reading order,
+  finishing one column before the next instead of spanning the gutter.
+
+### Known issues
+
+- Some PDFs with malformed annotation entries may hide later annotations in
+  Kver, even though their saved data is intact. This rendering limitation is
+  tracked in [#142](https://github.com/JonGretar/Kver/issues/142).
 
 ## [0.4.0] - 2026-11-09
 

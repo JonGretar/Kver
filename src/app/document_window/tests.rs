@@ -12,6 +12,7 @@ mod recent_history;
 mod recent_picker;
 mod saving;
 mod sidebar;
+mod unsaved;
 
 fn setup(cx: &mut TestAppContext) {
     cx.update(|cx| {

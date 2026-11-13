@@ -112,6 +112,7 @@ impl DocumentWindow {
             this.refresh_navigation_menu(window, cx);
         });
         let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
+        chrome::sync_window_identity(reader.read(cx), window, cx);
         let owner = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             let _ = owner.update(cx, |this: &mut Self, cx| {
@@ -148,7 +149,7 @@ impl DocumentWindow {
                 }
             });
         let reader_observation = cx.observe_in(&reader, window, |this, reader, window, cx| {
-            window.set_window_edited(reader.read(cx).is_dirty(cx));
+            chrome::sync_window_identity(reader.read(cx), window, cx);
             this.refresh_navigation_menu(window, cx);
             cx.notify();
         });
@@ -721,7 +722,7 @@ impl Render for DocumentWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = settings_ui::state(cx);
         let reader = self.reader.read(cx);
-        let title = chrome::title_bar(reader.path(), window);
+        let title = chrome::title_bar(reader.path(), reader.is_dirty(cx), window, cx);
         let marks = reader.marks_overlay();
         let toolbar = settings.read(cx).show_toolbar().then(|| {
             let sidebar_rems = self

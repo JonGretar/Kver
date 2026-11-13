@@ -1,5 +1,5 @@
 use super::*;
-use gpui_kit::{AppContext as _, Focusable as _, TestAppContext, test::TestWindowExt};
+use gpui_kit::{Focusable as _, TestAppContext, test::TestWindowExt};
 
 #[test]
 fn finder_file_urls_preserve_special_characters() {
@@ -12,6 +12,50 @@ fn finder_file_urls_preserve_special_characters() {
 fn ignore_non_file_and_invalid_urls() {
     assert_eq!(local_path("https://example.com/book.pdf"), None);
     assert_eq!(local_path("not a URL"), None);
+}
+
+#[gpui_kit::test]
+fn onboarding_choices_apply_to_the_initial_pdf(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let paths = AppPaths::for_locations(root.path().join("config.toml"), root.path().join("data"));
+    assert!(crate::settings::create_if_missing(paths.config()).unwrap());
+    let (welcome, finished) = cx.update(|cx| {
+        initialize_ui(cx);
+        onboarding::open(paths.config().to_path_buf(), cx).unwrap()
+    });
+    assert_eq!(cx.update(|cx| cx.windows()), vec![welcome]);
+    cx.update_window(welcome, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("onboarding-reading-view").click(1usize, cx);
+        window.within("onboarding-keyboard").click(1usize, cx);
+        window.click("onboarding-start", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(finished.try_recv().is_ok());
+    let document = cx.update(|cx| {
+        // The native quit bridge requires the process main thread. Exercise
+        // the production services/reader handoff here without installing it.
+        initialize_services(cx, Some(paths));
+        windows::open(cx, Some("examples/readme-sample.pdf".into())).unwrap()
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(cx.windows().len(), 1);
+        let reader = document.read(cx).reader().read(cx);
+        assert_eq!(
+            reader.path(),
+            Some(std::path::Path::new("examples/readme-sample.pdf"))
+        );
+        assert_eq!(
+            reader.reading_mode(),
+            crate::reader::ReadingMode::SinglePage
+        );
+        assert_eq!(
+            settings_ui::state(cx).read(cx).keyboard_preset(),
+            keymap::Preset::Vim
+        );
+    });
 }
 
 #[gpui_kit::test]

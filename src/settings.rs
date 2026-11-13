@@ -592,14 +592,58 @@ pub fn load(path: &Path) -> Result<AppSettings, String> {
     AppSettings::from_document(&read_document(path)?)
 }
 
+/// Claim first launch without truncating an existing file, including an empty one.
+pub(crate) fn create_if_missing(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "Cannot inspect settings at {}: {error}",
+                path.display()
+            ));
+        }
+    }
+    let parent = path
+        .parent()
+        .ok_or("Settings path has no parent directory")?;
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "Cannot create settings directory {}: {error}",
+            parent.display()
+        )
+    })?;
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(format!(
+            "Cannot create settings at {}: {error}",
+            path.display()
+        )),
+    }
+}
+
 /// Re-read before writing so unrelated hand-edited TOML remains intact.
 /// Refuse invalid input rather than replacing a file the user needs to repair.
 pub fn save(path: &Path, change: SettingsChange) -> Result<AppSettings, String> {
+    save_changes(path, [change])
+}
+
+pub(crate) fn save_changes(
+    path: &Path,
+    changes: impl IntoIterator<Item = SettingsChange>,
+) -> Result<AppSettings, String> {
     let original = read_content(path)?;
     let mut document = parse_document(path, original.as_deref())?;
     AppSettings::from_document(&document)?;
     migrate_chapters(&mut document);
-    change.apply(&mut document);
+    for change in changes {
+        change.apply(&mut document);
+    }
     let updated = AppSettings::from_document(&document)?;
     let parent = path
         .parent()
@@ -664,6 +708,51 @@ mod tests {
         assert!(super::load(&path).is_err());
         assert!(super::save(&path, SettingsChange::RemoveMissingRecentFiles(true)).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+    }
+
+    #[test]
+    fn first_launch_creates_empty_config_once_and_never_truncates_existing_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("nested/config.toml");
+        assert!(create_if_missing(&path).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        assert!(!create_if_missing(&path).unwrap());
+        for content in ["# Existing preferences\n", "[broken"] {
+            fs::write(&path, content).unwrap();
+            assert!(!create_if_missing(&path).unwrap());
+            assert_eq!(fs::read_to_string(&path).unwrap(), content);
+        }
+        let blocked = root.path().join("not-a-directory");
+        fs::write(&blocked, "").unwrap();
+        assert!(create_if_missing(&blocked.join("config.toml")).is_err());
+    }
+
+    #[test]
+    fn onboarding_saves_one_batch_preserving_unrelated_settings_and_comments() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(&path, "# Keep this\n[reader]\ninitial_zoom = 'fit_width'\n").unwrap();
+        let saved = save_changes(
+            &path,
+            [
+                SettingsChange::Appearance(Appearance::Dark),
+                SettingsChange::KeyboardPreset(Preset::Vim),
+                SettingsChange::AnnotationAuthor("Jón".into()),
+                SettingsChange::ReadingView(ReadingView::Page),
+            ],
+        )
+        .unwrap();
+        assert_eq!(saved, super::load(&path).unwrap());
+        assert_eq!(saved.initial_zoom(), InitialZoom::FitWidth);
+        assert_eq!(saved.appearance(), Appearance::Dark);
+        assert_eq!(saved.keyboard_preset(), Preset::Vim);
+        assert_eq!(saved.annotation_author(), "Jón");
+        assert_eq!(saved.reading_view(), ReadingView::Page);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .starts_with("# Keep this\n")
+        );
     }
 
     #[test]

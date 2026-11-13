@@ -7,6 +7,112 @@ fn store() -> (tempfile::TempDir, RecentStore) {
 }
 
 #[test]
+fn missing_recent_cleanup_preserves_saved_data_and_reopen_restores_membership() {
+    let (root, store) = store();
+    let path = root.path().join("missing.pdf");
+    store.record(&path).unwrap();
+    let position = ReadingPosition { page: 2, y: 48.5 };
+    store.save_position(&path, position).unwrap();
+    store
+        .set_reading_mode(&path, Some(ReadingView::Page))
+        .unwrap();
+    let marks = BTreeMap::from([(
+        'a',
+        LocalMark {
+            position,
+            label: Some("Chapter".into()),
+        },
+    )]);
+    store.replace_marks(&path, &marks).unwrap();
+    assert_eq!(store.search("").unwrap().len(), 1);
+    assert!(
+        store
+            .search_excluding_with_cleanup("", None, true)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.contains(&path).unwrap());
+    assert_eq!(store.position(&path).unwrap(), Some(position));
+    assert_eq!(store.reading_mode(&path).unwrap(), Some(ReadingView::Page));
+    assert_eq!(store.marks(&path).unwrap(), marks);
+
+    // Cleanup persists across restart and disabling the preference.
+    fs::write(&path, b"%PDF").unwrap();
+    let restarted = RecentStore::new(&AppPaths::for_locations(
+        root.path().join("config.toml"),
+        root.path().join("local"),
+    ));
+    assert!(restarted.search("").unwrap().is_empty());
+    restarted.record(&path).unwrap();
+    assert_eq!(
+        restarted.search("").unwrap(),
+        vec![RecentFile { path: path.clone() }]
+    );
+    assert_eq!(restarted.marks(&path).unwrap(), marks);
+    restarted.remove(&path).unwrap();
+    assert!(!restarted.contains(&path).unwrap());
+    assert!(restarted.marks(&path).unwrap().is_empty());
+}
+
+#[test]
+fn cleanup_fills_results_past_missing_files_and_keeps_excluded_and_inaccessible_paths() {
+    let (root, store) = store();
+    let existing = root.path().join("existing.pdf");
+    fs::write(&existing, b"%PDF").unwrap();
+    store.record(&existing).unwrap();
+    for n in 0..105 {
+        store
+            .record(&root.path().join(format!("missing-{n}.pdf")))
+            .unwrap();
+    }
+    assert_eq!(
+        store.search_excluding_with_cleanup("", None, true).unwrap(),
+        vec![RecentFile { path: existing }],
+    );
+    let excluded = root.path().join("active.pdf");
+    let inaccessible = root.path().join("permission-denied.pdf");
+    store.record(&inaccessible).unwrap();
+    store.record(&excluded).unwrap();
+    let files = store
+        .search_checked("", Some(&excluded), |_| {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        })
+        .unwrap();
+    assert!(files.iter().any(|file| file.path == inaccessible));
+    assert_eq!(store.search("").unwrap().len(), 3);
+}
+
+#[test]
+fn recent_membership_migrates_existing_documents_without_losing_positions() {
+    let (root, store) = store();
+    fs::create_dir_all(root.path().join("local")).unwrap();
+    let connection = Connection::open(&store.database).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE documents (path TEXT PRIMARY KEY NOT NULL, last_opened INTEGER NOT NULL);
+         INSERT INTO documents VALUES ('/old.pdf', 1);
+         PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(store.search("").unwrap()[0].path, Path::new("/old.pdf"));
+    let position = ReadingPosition { page: 1, y: 20.0 };
+    store
+        .save_position(Path::new("/old.pdf"), position)
+        .unwrap();
+    assert!(
+        store
+            .search_excluding_with_cleanup("", None, true)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store.position(Path::new("/old.pdf")).unwrap(),
+        Some(position)
+    );
+}
+
+#[test]
 fn order_search_all_records_and_reopen() {
     let (_root, store) = store();
     for n in 0..140 {

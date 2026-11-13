@@ -14,8 +14,9 @@ use crate::settings::{AppPaths, ReadingView};
 
 // Version 2 holds reading modes; version 3 added positions in an independent
 // branch. Version 4 reconciles databases created by either branch alone;
-// version 5 adds document-local letter marks.
-const SCHEMA_VERSION: i64 = 5;
+// version 5 adds document-local letter marks; version 6 separates recent-list
+// membership from the document identity that owns saved reading data.
+const SCHEMA_VERSION: i64 = 6;
 pub(super) const RESULT_LIMIT: i64 = 100;
 
 /// Page-local distance in PDF points from the top of the displayed page.
@@ -159,6 +160,16 @@ impl RecentStore {
                 )
                 .map_err(|e| format!("Cannot migrate local marks: {e}"))?;
         }
+        if version < 6 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                     ALTER TABLE documents ADD COLUMN recent INTEGER NOT NULL DEFAULT 1;
+                     PRAGMA user_version = 6;
+                     COMMIT;",
+                )
+                .map_err(|e| format!("Cannot migrate recent files: {e}"))?;
+        }
         Ok(connection)
     }
 
@@ -180,7 +191,7 @@ impl RecentStore {
             .execute(
                 "INSERT INTO documents(path, last_opened)
              VALUES (?1, (SELECT COALESCE(MAX(last_opened), 0) + 1 FROM documents))
-             ON CONFLICT(path) DO UPDATE SET last_opened = excluded.last_opened",
+             ON CONFLICT(path) DO UPDATE SET last_opened = excluded.last_opened, recent = 1",
                 [path],
             )
             .map_err(|e| e.to_string())?;
@@ -199,10 +210,36 @@ impl RecentStore {
         query: &str,
         excluded: Option<&Path>,
     ) -> Result<Vec<RecentFile>, String> {
+        self.search_excluding_with_cleanup(query, excluded, false)
+    }
+
+    /// Missing files lose only recent-list membership, never their saved data.
+    /// Run on the history worker: filesystem probes can block on offline mounts.
+    pub fn search_excluding_with_cleanup(
+        &self,
+        query: &str,
+        excluded: Option<&Path>,
+        remove_missing: bool,
+    ) -> Result<Vec<RecentFile>, String> {
+        self.search_checked(query, excluded, |path| {
+            if remove_missing {
+                path.try_exists()
+            } else {
+                Ok(true)
+            }
+        })
+    }
+
+    fn search_checked(
+        &self,
+        query: &str,
+        excluded: Option<&Path>,
+        exists: impl Fn(&Path) -> std::io::Result<bool>,
+    ) -> Result<Vec<RecentFile>, String> {
         if !self.database_exists()? {
             return Ok(Vec::new());
         }
-        let connection = self.connect()?;
+        let mut connection = self.connect()?;
         let excluded = excluded
             .map(|path| {
                 path.to_str()
@@ -219,18 +256,52 @@ impl RecentStore {
         let mut statement = connection
             .prepare(
                 "SELECT path FROM documents
-                 WHERE path LIKE ?1 ESCAPE '\\' AND (?2 IS NULL OR path <> ?2)
-             ORDER BY last_opened DESC, path ASC LIMIT ?3",
+                 WHERE recent = 1 AND path LIKE ?1 ESCAPE '\\' AND (?2 IS NULL OR path <> ?2)
+             ORDER BY last_opened DESC, path ASC",
             )
             .map_err(|e| e.to_string())?;
-        statement
-            .query_map(params![pattern, excluded, RESULT_LIMIT], |row| {
-                Ok(RecentFile {
-                    path: PathBuf::from(row.get::<_, String>(0)?),
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
+        let rows = statement
+            .query_map(params![pattern, excluded], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut files = Vec::new();
+        let mut missing = Vec::new();
+        for row in rows {
+            let path = row.map_err(|e| e.to_string())?;
+            if matches!(exists(Path::new(&path)), Ok(false)) {
+                missing.push(path);
+            } else {
+                files.push(RecentFile { path: path.into() });
+                if files.len() == RESULT_LIMIT as usize {
+                    break;
+                }
+            }
+        }
+        drop(statement);
+        // Do not mutate the table while stepping its SELECT. Apply the result
+        // limit after probing so missing newer files cannot hide older ones.
+        if !missing.is_empty() {
+            let transaction = connection.transaction().map_err(|e| e.to_string())?;
+            for path in missing {
+                transaction
+                    .execute("UPDATE documents SET recent = 0 WHERE path = ?1", [path])
+                    .map_err(|e| e.to_string())?;
+            }
+            transaction.commit().map_err(|e| e.to_string())?;
+        }
+        Ok(files)
+    }
+
+    #[cfg(feature = "gui")]
+    pub(super) fn hide_recent(&self, path: &Path) -> Result<(), String> {
+        if !self.database_exists()? {
+            return Ok(());
+        }
+        let path = path
+            .to_str()
+            .ok_or("Cannot store a non-UTF-8 document path")?;
+        self.connect()?
+            .execute("UPDATE documents SET recent = 0 WHERE path = ?1", [path])
+            .map(|_| ())
             .map_err(|e| e.to_string())
     }
 

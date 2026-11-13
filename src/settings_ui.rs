@@ -74,6 +74,10 @@ impl SettingsState {
         self.settings.remember_reading_history()
     }
 
+    pub fn remove_missing_recent_files(&self) -> bool {
+        self.settings.remove_missing_recent_files()
+    }
+
     pub fn reopen_at_last_position(&self) -> bool {
         self.settings.reopen_at_last_position()
     }
@@ -124,6 +128,9 @@ impl SettingsState {
             }
             SettingsChange::RememberReadingHistory(remember) => {
                 current.with_remember_reading_history(remember)
+            }
+            SettingsChange::RemoveMissingRecentFiles(remove) => {
+                current.with_remove_missing_recent_files(remove)
             }
             SettingsChange::ReopenAtLastPosition(reopen) => {
                 current.with_reopen_at_last_position(reopen)
@@ -197,6 +204,11 @@ impl SettingsState {
         if self.settings.appearance() != updated.appearance() {
             updated.appearance().apply(cx);
         }
+        let cleanup_changed =
+            self.settings.remove_missing_recent_files() != updated.remove_missing_recent_files();
+        if cleanup_changed && let Some(history) = recent::history(cx) {
+            history.set_remove_missing_recent_files(updated.remove_missing_recent_files())?;
+        }
         if self.recording_requested != updated.remember_reading_history()
             && let Some(history) = recent::history(cx)
         {
@@ -213,6 +225,9 @@ impl SettingsState {
             .detach();
         }
         self.settings = updated;
+        if cleanup_changed {
+            recent::notify_changed(cx);
+        }
         cx.notify();
         Ok(())
     }
@@ -1362,6 +1377,91 @@ mod tests {
             })
             .unwrap();
         });
+    }
+
+    #[gpui_kit::test]
+    fn missing_recent_cleanup_switch_persists_and_tracks_valid_file_edits(cx: &mut TestAppContext) {
+        fn search(cx: &mut TestAppContext) -> Vec<crate::recent::RecentFile> {
+            let result = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let output = result.clone();
+            cx.update(|cx| {
+                let work = recent::history(cx)
+                    .unwrap()
+                    .search_excluding(String::new(), None);
+                cx.spawn(async move |_| *output.lock().unwrap() = Some(work.await.unwrap()))
+                    .detach();
+            });
+            cx.run_until_parked();
+            result.lock().unwrap().take().unwrap()
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            AppPaths::for_locations(root.path().join("config.toml"), root.path().join("data"));
+        let missing = root.path().join("missing.pdf");
+        RecentStore::new(&paths).record(&missing).unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            recent::install(cx, Some(paths.clone()));
+            install_with_paths(cx, Some(paths.clone()));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        assert_eq!(search(cx).len(), 1);
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                frame.within("settings-sidebar").click("0-2", cx);
+                assert_eq!(
+                    frame.find("remove-missing-recent-files").checked(),
+                    Some(false)
+                );
+                frame.click("remove-missing-recent-files", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            settings::load(paths.config())
+                .unwrap()
+                .remove_missing_recent_files()
+        );
+        assert!(search(cx).is_empty());
+        std::fs::write(
+            paths.config(),
+            "[persistence]\nremove_missing_recent_files = 'yes'\n",
+        )
+        .unwrap();
+        poll(cx);
+        cx.update(|cx| assert!(state(cx).read(cx).remove_missing_recent_files()));
+        std::fs::write(
+            paths.config(),
+            "[persistence]\nremove_missing_recent_files = false\n",
+        )
+        .unwrap();
+        poll(cx);
+        cx.update(|cx| drop(recent::history(cx).unwrap().record(missing.clone())));
+        assert_eq!(search(cx).len(), 1);
+        cx.update(|cx| {
+            cx.update_window(window, |_, frame, cx| {
+                frame.render_frame(cx);
+                assert_eq!(
+                    frame.find("remove-missing-recent-files").checked(),
+                    Some(false)
+                );
+                // The clicked switch retains keyboard focus across file edits.
+                frame.press("space", cx);
+            })
+            .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            settings::load(paths.config())
+                .unwrap()
+                .remove_missing_recent_files()
+        );
+        assert!(search(cx).is_empty());
     }
 
     #[gpui_kit::test]

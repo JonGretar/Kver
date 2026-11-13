@@ -1,7 +1,7 @@
 use super::*;
 use gpui_kit::px;
 
-fn select_text(
+pub(super) fn select_text(
     cx: &mut TestAppContext,
     handle: AnyWindowHandle,
     document: &Entity<DocumentWindow>,
@@ -30,7 +30,11 @@ fn select_text(
     cx.run_until_parked();
 }
 
-fn highlight(cx: &mut TestAppContext, handle: AnyWindowHandle, document: &Entity<DocumentWindow>) {
+pub(super) fn highlight(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    document: &Entity<DocumentWindow>,
+) {
     select_text(cx, handle, document);
     cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
         .unwrap();

@@ -28,6 +28,7 @@ fn filename_stays_centered_without_overlapping_titlebar_controls(cx: &mut TestAp
                     let title = window.find("document-name");
                     let open = window.find("open-pdf");
                     assert!(window.try_find("reader-brand").is_none());
+                    assert!(window.try_find("document-unsaved").is_none());
                     assert_eq!(title.label(), Some(expected.as_str()));
                     assert!((title.bounds().center().x - px(width / 2.)).abs() <= px(0.5));
                     assert!(title.bounds().size.width > px(0.));
@@ -57,6 +58,7 @@ fn page_count_and_zoom_keep_their_anchors_as_page_numbers_grow(cx: &mut TestAppC
             window.render_frame(cx);
             let status = window.find("reader-status");
             let zoom = window.find("reader-zoom");
+            assert!(window.try_find("document-unsaved").is_none());
             assert_eq!(
                 status.label(),
                 Some(format!("Page {} of 100", page + 1).as_str())

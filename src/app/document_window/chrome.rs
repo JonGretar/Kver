@@ -287,8 +287,6 @@ pub(super) fn status_bar(reader: &ReaderView, cx: &App) -> StatusBar {
                 reader.page_index() + 1,
                 if reader.is_saving(cx) {
                     " · Saving…"
-                } else if reader.is_dirty(cx) {
-                    " · Unsaved changes"
                 } else {
                     ""
                 }
@@ -370,7 +368,23 @@ fn reader_button(
         .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
 }
 
-pub(super) fn title_bar(path: Option<&Path>, window: &Window) -> impl IntoElement + use<> {
+pub(super) fn sync_window_identity(reader: &ReaderView, window: &mut Window, cx: &App) {
+    // Keep OS window lists and native edited chrome in step with the custom
+    // filename. In particular, Save As switches identity for every participant.
+    let title = reader
+        .path()
+        .map(document_name)
+        .unwrap_or_else(|| "Kver".into());
+    window.set_window_title(&title);
+    window.set_window_edited(reader.is_dirty(cx));
+}
+
+pub(super) fn title_bar(
+    path: Option<&Path>,
+    unsaved: bool,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement + use<> {
     let filename = path.map(document_name).map(SharedString::from);
     let title = filename
         .clone()
@@ -384,7 +398,7 @@ pub(super) fn title_bar(path: Option<&Path>, window: &Window) -> impl IntoElemen
     };
     let rem = window.rem_size();
     let width = window.viewport_size().width;
-    let compact_open = !cfg!(target_os = "macos") && width < rem * 40.;
+    let compact_open = width < rem * 40.;
     // Leave room for all three Kit window controls on platforms that draw them.
     let window_controls = if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
         px(0.)
@@ -408,12 +422,13 @@ pub(super) fn title_bar(path: Option<&Path>, window: &Window) -> impl IntoElemen
                 .h(TITLE_BAR_HEIGHT)
                 .flex()
                 .items_center()
+                .justify_center()
+                .gap_2()
                 .child(
                     div()
                         .id("document-name")
                         .test_support()
                         .aria_label(title.clone())
-                        .w_full()
                         .min_w_0()
                         .truncate()
                         .text_center()
@@ -424,7 +439,20 @@ pub(super) fn title_bar(path: Option<&Path>, window: &Window) -> impl IntoElemen
                             })
                         })
                         .child(title),
-                ),
+                )
+                .when(unsaved, |title| {
+                    title.child(
+                        div()
+                            .id("document-unsaved")
+                            .role(gpui_kit::Role::Status)
+                            .test_support()
+                            .aria_label("Unsaved changes")
+                            .flex_shrink_0()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("— Unsaved changes"),
+                    )
+                }),
         )
         .child(
             Button::new("open-pdf")

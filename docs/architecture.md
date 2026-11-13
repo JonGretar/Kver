@@ -138,9 +138,9 @@ The application registry holds only weak session handles. A reader holds its
 participation until replacement or closure; background requests and sidebar
 snapshots retain the immutable baseline, not membership. Closing one window
 does not invalidate another. After the final participant detaches, the next
-open loads a fresh baseline. Detecting external changes and reloading an
-existing session are separate, not-yet-implemented capabilities.
-Session epochs distinguish annotation identities across independent open lifetimes.
+open loads a fresh baseline.
+Session epochs distinguish annotation identities across independent open lifetimes
+and successful external reloads.
 Backend-neutral `pdf::annotations` types preserve PDF document-space quad point
 order, markup kind, color space, opacity, and supported metadata. Imported
 identity serials refer to page/annotation slots only within that epoch; they
@@ -186,7 +186,7 @@ catalog for every step.
 replacing the rendering backend. The retained writer experiment supplies concrete
 incremental-preservation and PDFKit/Preview interchange evidence for that version.
 Production encoding reconciles each complete catalog snapshot against an immutable
-editing source retained for the session lifetime, never a reread of its path.
+editing source retained until external reload, never a reread of its path.
 Imported IDs retain their source-slot provenance across saves. New markup uses
 standard `/Highlight`, `/Underline`, `/StrikeOut`, or `/Squiggly` dictionaries,
 `/QuadPoints`, and normal appearance streams. Line appearances use each quad's
@@ -214,7 +214,7 @@ Save and Save As share one session-owned, serialized write pipeline. Save uses
 the file identity, modification time, permissions, and original bytes captured
 with the loaded/saved baseline, not a fresh overwrite confirmation. It refuses
 external rewrites and replacement files through the commit path. Conflicts retain
-the edits and offer Save As of Kver's version; external reload remains separate.
+the edits and offer Save As of Kver's version or discard-and-reload.
 Readonly originals route to Save As without changing their permissions.
 A successful Save keeps the session path; Save As moves every participant to
 the destination. Both install the parsed output and its file version as the baseline.
@@ -223,6 +223,26 @@ The captured revision becomes saved; edits made while writing remain dirty.
 Cancellation and recoverable failures leave the source, session path, and edits
 unchanged. Windows own native file prompts, overwrite confirmation, and unsaved
 work decisions. Closing one participant leaves changes with the others.
+
+`reader/document_session/external.rs` owns external-change detection and reload.
+One session task probes file identity, size, and modification time every two seconds;
+window activation also verifies bytes to catch writers that retain timestamps.
+These checks improve freshness, not write safety: the save transaction still
+verifies the exact file version through commit. A dirty conflict is offered once
+in an active participant rather than opening competing dialogs in every window.
+Cancel retains Kver's version; Save can reopen the conflict decision.
+
+Reload parses a replacement off-thread and installs it only if the captured
+baseline and edit revision remain current and no write is running. Failures keep
+the previous usable PDF and edits. A successful reload allocates a fresh annotation
+epoch, advances the catalog revision, replaces the editing source, and clears
+undo/redo. It never matches names, object numbers, or attached comments across
+external versions. Session color preferences survive. Each reader advances its
+document generation, invalidates selection, annotation targets, rasters, links,
+and tool replies, and restores its own viewport anchor, zoom, and reading mode.
+Missing pages and offsets clamp to the replacement's bounds. Window jumplists
+reset because their locations refer to the previous generation. Ordinary Save
+does not use this invalidation path and retains annotation identity and history.
 
 On macOS, `app/quit_guard/macos.rs` intercepts Cocoa termination before GPUI's
 non-cancellable shutdown notification. The same window/session decisions handle

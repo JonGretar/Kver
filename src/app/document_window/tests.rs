@@ -5,6 +5,7 @@ mod annotation_history;
 mod annotations;
 mod chrome;
 mod contents;
+mod external;
 mod find;
 mod jumplist;
 mod links;

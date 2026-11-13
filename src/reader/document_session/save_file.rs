@@ -103,12 +103,7 @@ impl Destination {
         let Some(expected) = &self.expected else {
             return Ok(());
         };
-        let changed = || {
-            SaveError::Conflict(
-                "The PDF changed outside Kver. Save As a separate copy to keep both versions."
-                    .into(),
-            )
-        };
+        let changed = || SaveError::Conflict("Your unsaved edits are still in Kver.".into());
         let metadata = fs::symlink_metadata(&self.path).map_err(|_| changed())?;
         if !metadata.is_file()
             || !same_content_version(&metadata, &expected.metadata)
@@ -258,7 +253,7 @@ fn same_version(left: &Metadata, right: &Metadata) -> bool {
     same_content_version(left, right) && left.permissions() == right.permissions()
 }
 
-fn same_content_version(left: &Metadata, right: &Metadata) -> bool {
+pub(super) fn same_content_version(left: &Metadata, right: &Metadata) -> bool {
     same_file(left, right)
         && left.len() == right.len()
         && left.modified().ok() == right.modified().ok()

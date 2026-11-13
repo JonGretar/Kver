@@ -17,6 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Undo and redo annotation creation, recoloring, and deletion from either window, even after saving. Returning to the saved annotation state clears “Unsaved changes” without moving your reading position or text selection.
 - Recolor or delete any supported text markup from the Annotations list, including entries without recoverable text. Stored authors and imported colors stay unchanged until explicitly edited.
 - Underline, strike through, or add squiggly underlines to selected text from the context menu, Edit menu, or command palette. All four markup types support page editing, shared undo/redo, and editable PDF saving. Line markup starts red, and each type remembers its own last-used color during the session.
+- Reload external PDF changes across shared windows while keeping each reading position where possible. Unsaved conflicts offer Save As elsewhere or discard-and-reload; cancellation and reload failures keep Kver's edits.
 
 ### Changed
 

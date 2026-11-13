@@ -41,8 +41,13 @@ content without restoring window-local interaction. Dirty state compares content
 with that saved catalog; monotonic revisions separately invalidate obsolete work.
 Windows own file prompts and Save/Discard/Cancel continuations; the session owns
 the changes those decisions affect. In-place Save verifies the captured file version
-through the commit path rather than trusting a preflight alone. External-change
-reload remains a separate capability.
+through the commit path rather than trusting a preflight alone. The session also
+owns external-change probes and transactional baseline replacement on reload.
+Dirty conflicts retain Kver's version until Save As or deliberate discard-and-reload;
+there is no automatic merge. Successful external reload advances the annotation
+epoch and clears edit history, while each reader advances its document generation
+and restores its own viewport anchor. This invalidates obsolete tool and annotation
+references rather than attempting to reattach them across another writer's rebuild.
 
 This favors local ownership over spreading methods on one large entity across
 files, global `views`/`models` directories, or one crate per feature. It adds

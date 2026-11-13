@@ -77,6 +77,7 @@ pub struct ReaderView {
     session: Option<Entity<DocumentSession>>,
     session_wait: Option<Subscription>,
     session_observation: Option<Subscription>,
+    session_epoch: u64,
     document: Option<Arc<pdf::Document>>,
     record_path: Option<PathBuf>,
     position_ready: bool,
@@ -202,6 +203,7 @@ impl ReaderView {
             session: None,
             session_wait: None,
             session_observation: None,
+            session_epoch: 0,
             document: None,
             record_path: None,
             position_ready: false,
@@ -550,6 +552,7 @@ impl ReaderView {
             return;
         };
         let path = session.read(cx).path().to_path_buf();
+        let session_epoch = session.read(cx).epoch();
         self.session_wait = None;
         let OpenRestoration {
             history,
@@ -579,6 +582,21 @@ impl ReaderView {
                 if document_generation != this.document_generation {
                     return;
                 }
+                if this
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.read(cx).epoch() != session_epoch)
+                {
+                    this.finish_session_load(
+                        OpenRestoration {
+                            history,
+                            epoch: history_epoch,
+                            restore_position,
+                        },
+                        cx,
+                    );
+                    return;
+                }
                 let mut opened = false;
                 match result {
                     Ok(pages) if !pages.is_empty() => {
@@ -593,6 +611,7 @@ impl ReaderView {
                             .and_then(|session| session.read(cx).presentation())
                             .or_else(|| document.ok());
                         if let Some(session) = this.session.clone() {
+                            this.session_epoch = session.read(cx).epoch();
                             session.update(cx, |session, cx| session.ensure_annotations(cx));
                         }
                         if let Ok(Some(mode)) = saved_mode {
@@ -837,6 +856,14 @@ impl ReaderView {
     }
 
     fn sync_shared_session(&mut self, cx: &mut Context<Self>) {
+        let epoch = self
+            .session
+            .as_ref()
+            .map(|session| session.read(cx).epoch());
+        if self.document.is_some() && epoch.is_some_and(|epoch| epoch != self.session_epoch) {
+            self.reload_shared_session(cx);
+            return;
+        }
         let shared = self
             .session
             .as_ref()
@@ -884,6 +911,63 @@ impl ReaderView {
         {
             self.status = error.to_owned();
         }
+        if let Some(error) = self
+            .session
+            .as_ref()
+            .and_then(|s| s.read(cx).external_error())
+        {
+            self.status = format!("{error} The previous PDF remains available.");
+        }
+        cx.notify();
+    }
+
+    fn reload_shared_session(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+        let Some(document) = session.read(cx).presentation() else {
+            return;
+        };
+        let mut location = self.jump_location();
+        // Jumplist/history locations favor explicit page turns. Reload instead
+        // anchors the actual viewport, retaining that page-choice hint separately.
+        let position = self.reading_position();
+        let selected_page = self.selected_page;
+        if let Some(location) = &mut location {
+            location.page = position.0;
+            location.y = position.1;
+        }
+        self.session_epoch = session.read(cx).epoch();
+        self.document_generation += 1;
+        self.document = Some(document.clone());
+        self.pages = session.read(cx).reloaded_pages();
+        self.selection.reset();
+        self.links.reset();
+        self.rasters.invalidate();
+        self.find_highlight = None;
+        self.annotation_identification = None;
+        self.selected_annotation = None;
+        self.annotation_press = None;
+        self.annotation_choice = None;
+        self.marks = None;
+        self.marks_subscriptions.clear();
+        self.pending_restore = None;
+        self.position_touched = true;
+        self.position_ready = true;
+        if let Some(mut location) = location {
+            location.generation = self.document_generation;
+            location.page = location.page.min(self.pages.len() - 1);
+            location.x = location.x.min(self.pages[location.page].0);
+            location.y = location.y.min(self.pages[location.page].1);
+            self.restore_jump(&location, cx);
+        }
+        self.selected_page = selected_page.map(|page| page.min(self.pages.len() - 1));
+        self.status = self.ready_status();
+        cx.emit(DocumentEvent::Replaced {
+            generation: self.document_generation,
+        });
+        self.sync_viewport(cx);
+        self.schedule(cx);
         cx.notify();
     }
 

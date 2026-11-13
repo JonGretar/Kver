@@ -25,7 +25,7 @@ pub(super) enum Leave {
 }
 
 impl DocumentWindow {
-    fn cancel_pending_leave(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn cancel_pending_leave(&mut self, cx: &mut Context<Self>) {
         let pending = self.pending_leave.take();
         if matches!(pending, Some(Leave::Quit)) {
             crate::app::quit_guard::cancel_request();
@@ -393,7 +393,7 @@ impl DocumentWindow {
                         Err(SaveError::Readonly(_)) if current => this.save_as(window, cx),
                         Err(SaveError::Conflict(message)) if current => {
                             this.cancel_pending_leave(cx);
-                            this.offer_save_copy(message, window, cx);
+                            this.offer_external_conflict(message, window, cx);
                         }
                         Err(error) => this.save_failed(error.to_string(), window, cx),
                     }
@@ -401,17 +401,25 @@ impl DocumentWindow {
             );
     }
 
-    fn offer_save_copy(&mut self, message: String, window: &mut Window, cx: &mut Context<Self>) {
+    fn offer_external_conflict(
+        &mut self,
+        message: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.save_prompt_open = true;
         let owner = cx.weak_entity();
+        let generation = self.reader.read(cx).document_generation();
         window.open_dialog(cx, move |dialog, _, _| {
             let cancelled = owner.clone();
             let cancel = owner.clone();
             let save = owner.clone();
             let confirmed = owner.clone();
+            let discard = owner.clone();
             dialog
                 .title("PDF changed outside Kver")
                 .child(message.clone())
+                .child("Save As keeps both versions. Discard and reload replaces Kver’s edits with the external PDF in every window.")
                 .close_button(false)
                 .overlay_closable(false)
                 .entrance(DialogEntrance::None)
@@ -420,8 +428,11 @@ impl DocumentWindow {
                     true
                 })
                 .on_ok(move |_, window, cx| {
-                    let _ =
-                        confirmed.update(cx, |this, cx| this.save_copy_from_recovery(window, cx));
+                    let _ = confirmed.update(cx, |this, cx| {
+                        if this.reader.read(cx).document_generation() == generation {
+                            this.save_copy_from_recovery(window, cx);
+                        }
+                    });
                     false
                 })
                 .footer(
@@ -436,12 +447,35 @@ impl DocumentWindow {
                                 }),
                         )
                         .child(
+                            Button::new("save-conflict-reload")
+                                .label("Discard and reload")
+                                .danger()
+                                .on_click(move |_, window, cx| {
+                                    let _ = discard.update(cx, |this, cx| {
+                                        if this.reader.read(cx).document_generation() != generation
+                                        {
+                                            return;
+                                        }
+                                        window.close_dialog(cx);
+                                        this.cancel_pending_leave(cx);
+                                        if let Some(session) = this.reader.read(cx).session() {
+                                            session.update(cx, |session, cx| {
+                                                session.check_external(true, true, cx);
+                                            });
+                                        }
+                                    });
+                                }),
+                        )
+                        .child(
                             Button::new("save-conflict-copy")
                                 .label("Save As…")
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     let _ = save.update(cx, |this, cx| {
-                                        this.save_copy_from_recovery(window, cx)
+                                        if this.reader.read(cx).document_generation() == generation
+                                        {
+                                            this.save_copy_from_recovery(window, cx);
+                                        }
                                     });
                                 }),
                         ),
@@ -453,6 +487,28 @@ impl DocumentWindow {
         window.close_dialog(cx);
         self.save_prompt_open = false;
         self.save_as(window, cx);
+    }
+
+    pub(super) fn offer_external_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !window.is_window_active()
+            || self.save_prompt_open
+            || self.pending_leave.is_some()
+            || self.palette.is_some()
+            || self.recent.is_some()
+            || window.has_active_dialog(cx)
+        {
+            return;
+        }
+        let Some(session) = self.reader.read(cx).session() else {
+            return;
+        };
+        if session.update(cx, |session, _| session.take_external_notice()) {
+            self.offer_external_conflict(
+                "Your unsaved edits are still in Kver.".into(),
+                window,
+                cx,
+            );
+        }
     }
 
     fn save_failed(&mut self, error: String, window: &mut Window, cx: &mut Context<Self>) {

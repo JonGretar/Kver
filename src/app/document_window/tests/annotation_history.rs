@@ -71,11 +71,11 @@ fn annotation_history_is_shared_save_retained_and_content_relative(cx: &mut Test
     let (third, unrelated) = open(cx, Some(independent));
     cx.run_until_parked();
     select_text(cx, first, &document);
-    press(cx, first, "cmd-shift-h");
+    press(cx, first, "secondary-shift-h");
     let created = catalog(&document, cx);
     assert_eq!(created.len(), 1);
     // Identical selection selects the existing annotation without another edit.
-    press(cx, first, "cmd-shift-h");
+    press(cx, first, "secondary-shift-h");
     assert_eq!(catalog(&other, cx), created);
     press(cx, second, "cmd-z");
     assert!(catalog(&document, cx).is_empty());
@@ -182,7 +182,7 @@ fn annotation_history_during_save_uses_the_committed_snapshot_not_the_current_re
     let (second, other) = open(cx, Some(source.clone()));
     cx.run_until_parked();
     select_text(cx, first, &document);
-    press(cx, first, "cmd-shift-h");
+    press(cx, first, "secondary-shift-h");
     let created = catalog(&document, cx);
     let session = document.read_with(cx, |document, cx| {
         document.reader.read(cx).session().unwrap()
@@ -250,7 +250,7 @@ fn annotation_shortcuts_respect_find_input_undo_and_list_focus(cx: &mut TestAppC
     let (handle, document) = open(cx, Some(PathBuf::from("examples/selection-sample.pdf")));
     cx.run_until_parked();
     select_text(cx, handle, &document);
-    press(cx, handle, "cmd-shift-h");
+    press(cx, handle, "secondary-shift-h");
     let created = catalog(&document, cx);
     press(cx, handle, "cmd-f");
     cx.update_window(handle, |_, window, cx| window.input("Alpha", cx))
@@ -383,7 +383,7 @@ fn no_op_mutations_preserve_redo_and_create_delete_returns_to_clean(cx: &mut Tes
     let (handle, document) = open(cx, Some(PathBuf::from("examples/selection-sample.pdf")));
     cx.run_until_parked();
     select_text(cx, handle, &document);
-    press(cx, handle, "cmd-shift-h");
+    press(cx, handle, "secondary-shift-h");
     action(cx, handle, RecolorHighlight(HighlightColor::Green));
     action(cx, handle, UndoAnnotation);
     let before = catalog(&document, cx);
@@ -419,7 +419,7 @@ fn palette_annotation_history_commands_work_from_either_preset(cx: &mut TestAppC
             press(cx, handle, "a");
             press(cx, handle, "h");
         } else {
-            press(cx, handle, "cmd-shift-h");
+            press(cx, handle, "secondary-shift-h");
         }
         let created = catalog(&document, cx);
         for (query, expected) in [("Undo", 0), ("Redo", 1)] {
@@ -452,7 +452,7 @@ fn save_as_and_failed_writes_preserve_annotation_history(cx: &mut TestAppContext
     let (second, other) = open(cx, Some(source.clone()));
     cx.run_until_parked();
     select_text(cx, first, &document);
-    press(cx, first, "cmd-shift-h");
+    press(cx, first, "secondary-shift-h");
     let created = catalog(&document, cx);
     // Cancellation must preserve both history and the original baseline.
     action(cx, first, SaveAs);

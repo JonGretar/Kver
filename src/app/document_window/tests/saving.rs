@@ -36,8 +36,10 @@ pub(super) fn highlight(
     document: &Entity<DocumentWindow>,
 ) {
     select_text(cx, handle, document);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-h", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-h", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     document.read_with(cx, |document, cx| {
         assert!(document.reader.read(cx).is_dirty(cx))
@@ -383,7 +385,7 @@ fn signed_pdf_disables_highlight_without_disabling_selection(cx: &mut TestAppCon
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert_eq!(window.find("highlight-selection").disabled(), Some(true));
-        window.press("cmd-shift-h", cx);
+        window.press("secondary-shift-h", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -434,7 +436,7 @@ fn readable_encrypted_pdf_remains_noneditable_even_with_an_empty_user_password(
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert_eq!(window.find("highlight-selection").disabled(), Some(true));
-        window.press("cmd-shift-h", cx);
+        window.press("secondary-shift-h", cx);
     })
     .unwrap();
     cx.run_until_parked();

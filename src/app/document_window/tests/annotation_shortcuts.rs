@@ -37,9 +37,14 @@ fn both_presets_create_and_repeat_markup_without_leaking_into_inputs(cx: &mut Te
     for (preset, keys, apply, annotations) in [
         (
             Preset::Standard,
-            ["cmd-shift-h", "cmd-shift-u", "cmd-shift-x", "cmd-alt-u"],
-            "cmd-enter",
-            "cmd-shift-a",
+            [
+                "secondary-shift-h",
+                "secondary-shift-u",
+                "secondary-shift-x",
+                "secondary-alt-u",
+            ],
+            "secondary-enter",
+            "secondary-shift-a",
         ),
         (Preset::Vim, ["a h", "a u", "a s", "a w"], "a a", "g a"),
     ] {
@@ -75,7 +80,7 @@ fn both_presets_create_and_repeat_markup_without_leaking_into_inputs(cx: &mut Te
         );
         cx.update_window(handle, |_, window, cx| window.input("aahuux", cx))
             .unwrap();
-        press(cx, handle, "cmd-shift-u");
+        press(cx, handle, "secondary-shift-u");
         assert_eq!(entries(&document, cx).len(), 4);
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
@@ -111,9 +116,9 @@ fn list_shortcuts_delete_the_list_target_and_keep_focus_after_the_final_row(
     for (preset, highlight, underline, show, delete, undo, redo) in [
         (
             Preset::Standard,
-            "cmd-shift-h",
-            "cmd-shift-u",
-            "cmd-shift-a",
+            "secondary-shift-h",
+            "secondary-shift-u",
+            "secondary-shift-a",
             "backspace",
             "cmd-z",
             "cmd-shift-z",

@@ -6,6 +6,7 @@
 //! It has no window, clipboard, PDF path, or independent document identity.
 
 use std::{ops::Range, sync::Arc};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     coordinates::Point,
@@ -16,7 +17,19 @@ use crate::{
 pub(super) struct Selection {
     text: Option<Arc<PageText>>,
     span: Option<Span>,
-    dragging: bool,
+    drag: Option<Drag>,
+}
+
+#[derive(Clone, Copy)]
+enum Granularity {
+    Character,
+    Word,
+    Paragraph,
+}
+
+struct Drag {
+    origin: Span,
+    granularity: Granularity,
 }
 
 /// Page-local PDF points, after crop/rotation and before logical zoom.
@@ -30,13 +43,13 @@ pub(super) struct Highlight {
 }
 
 /// Boundary indices refer to visually ordered document-space glyphs, not pixels.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Anchor {
     line: usize,
     boundary: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Span {
     page: usize,
     start: Anchor,
@@ -52,7 +65,7 @@ impl Selection {
     /// Release the selected page without discarding shared cached text.
     pub(super) fn clear(&mut self) {
         self.span = None;
-        self.dragging = false;
+        self.drag = None;
         self.text = None;
     }
 
@@ -61,7 +74,7 @@ impl Selection {
     }
 
     pub(super) fn dragging_page(&self) -> Option<usize> {
-        self.page().filter(|_| self.dragging)
+        self.page().filter(|_| self.drag.is_some())
     }
 
     pub(super) fn has_selection(&self) -> bool {
@@ -71,35 +84,51 @@ impl Selection {
     }
 
     /// A miss (including unavailable text/geometry) clears the old selection.
-    pub(super) fn begin(&mut self, page: usize, at: Option<Point>, text: Option<Arc<PageText>>) {
+    pub(super) fn begin(
+        &mut self,
+        page: usize,
+        at: Option<Point>,
+        text: Option<Arc<PageText>>,
+        click_count: usize,
+    ) {
+        let granularity = match click_count {
+            0 | 1 => Granularity::Character,
+            2 => Granularity::Word,
+            _ => Granularity::Paragraph,
+        };
         self.text = text;
-        self.span = at
-            .and_then(|at| hit_boundary(self.text.as_ref()?, at))
-            .map(|anchor| Span {
-                page,
-                start: anchor,
-                end: anchor,
-            });
-        self.dragging = self.span.is_some();
+        self.span = at.and_then(|at| unit_span(self.text.as_ref()?, page, at, granularity));
+        self.drag = self.span.map(|origin| Drag {
+            origin,
+            granularity,
+        });
     }
 
     /// Extend only on the starting page. A miss preserves the last valid end.
     /// The caller notifies its view when this returns true.
     pub(super) fn extend(&mut self, at: Point) -> bool {
-        let Some(_) = self.dragging_page() else {
+        let Some(drag) = &self.drag else {
             return false;
         };
-        let Some(anchor) = self.text.as_ref().and_then(|text| hit_boundary(text, at)) else {
+        let Some(target) = self
+            .text
+            .as_ref()
+            .and_then(|text| unit_span(text, drag.origin.page, at, drag.granularity))
+        else {
             return false;
         };
-        if let Some(span) = &mut self.span {
-            span.end = anchor;
-        }
-        true
+        let span = Span {
+            page: drag.origin.page,
+            start: drag.origin.start.min(target.start),
+            end: drag.origin.end.max(target.end),
+        };
+        let changed = self.span != Some(span);
+        self.span = Some(span);
+        changed
     }
 
     pub(super) fn finish(&mut self) {
-        self.dragging = false;
+        self.drag = None;
     }
 
     pub(super) fn selected_text(&self) -> Option<String> {
@@ -234,8 +263,7 @@ fn selected_text(span: Span, text: &PageText) -> Option<String> {
         let first = text.glyphs.get(range.start)?;
         if let Some(last) = previous {
             result.push('\n');
-            let height = last.top - last.bottom;
-            if (last.start.y - first.start.y).abs() > height * 1.7 {
+            if paragraph_gap(last, first) {
                 result.push('\n');
             }
         }
@@ -267,6 +295,93 @@ fn hit_boundary(text: &PageText, at: Point) -> Option<Anchor> {
             .min_by(|(_, a), (_, b)| (a.x - at.x).abs().total_cmp(&(b.x - at.x).abs()))
             .map(|(boundary, _)| Anchor { line, boundary })
     })
+}
+
+fn unit_span(text: &PageText, page: usize, at: Point, granularity: Granularity) -> Option<Span> {
+    let anchor = hit_boundary(text, at)?;
+    let mut span = Span {
+        page,
+        start: anchor,
+        end: anchor,
+    };
+    match granularity {
+        Granularity::Character => {}
+        Granularity::Word => {
+            let line = &text.lines[anchor.line];
+            // Use the glyph under the pointer, not the nearest caret boundary:
+            // the right half of a word's last letter still belongs to that word.
+            let index = line
+                .clone()
+                .find(|&index| {
+                    let glyph = &text.glyphs[index];
+                    at.x >= glyph.start.x && at.x < glyph.end.x
+                })
+                .or_else(|| {
+                    line.clone().min_by(|&a, &b| {
+                        let distance = |index: usize| {
+                            let glyph = &text.glyphs[index];
+                            (glyph.start.x - at.x).max(at.x - glyph.end.x).max(0.0)
+                        };
+                        distance(a).total_cmp(&distance(b))
+                    })
+                })?;
+            let contents: String = text.glyphs[line.clone()]
+                .iter()
+                .map(|glyph| glyph.text.as_str())
+                .collect();
+            let offset: usize = text.glyphs[line.start..index]
+                .iter()
+                .map(|glyph| glyph.text.len())
+                .sum();
+            let (start, word) = contents
+                .split_word_bound_indices()
+                .find(|(start, word)| *start <= offset && offset < start + word.len())?;
+            let end = start + word.len();
+            let mut byte = 0;
+            for (index, glyph) in text.glyphs[line.clone()].iter().enumerate() {
+                let next = byte + glyph.text.len();
+                if byte <= start && start < next {
+                    span.start.boundary = line.start + index;
+                }
+                if byte < end && end <= next {
+                    span.end.boundary = line.start + index + 1;
+                }
+                byte = next;
+            }
+        }
+        Granularity::Paragraph => {
+            while span.start.line > 0 && paragraph_continues(text, span.start.line - 1) {
+                span.start.line -= 1;
+            }
+            while span.end.line + 1 < text.lines.len() && paragraph_continues(text, span.end.line) {
+                span.end.line += 1;
+            }
+            span.start.boundary = text.lines[span.start.line].start;
+            span.end.boundary = text.lines[span.end.line].end;
+        }
+    }
+    Some(span)
+}
+
+fn paragraph_continues(text: &PageText, line: usize) -> bool {
+    let previous = &text.glyphs[text.lines[line].clone()];
+    let next = &text.glyphs[text.lines[line + 1].clone()];
+    let (Some(first), Some(last), Some(next_first), Some(next_last)) =
+        (previous.first(), previous.last(), next.first(), next.last())
+    else {
+        return false;
+    };
+    // PDFs need not carry semantic paragraphs. Match copy's existing 1.7-line
+    // gap heuristic, but never merge a same-baseline fragment or a new column.
+    let descent = first.start.y - next_first.start.y;
+    descent > 3.0
+        && !paragraph_gap(last, next_first)
+        && first.start.x < next_last.end.x
+        && next_first.start.x < last.end.x
+}
+
+fn paragraph_gap(previous: &TextGlyph, next: &TextGlyph) -> bool {
+    (previous.start.y - next.start.y).abs() > (previous.top - previous.bottom) * 1.7
 }
 
 #[cfg(test)]

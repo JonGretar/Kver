@@ -1,6 +1,162 @@
 use super::*;
 use gpui_kit::test::TestEventExt;
 
+fn multi_click_down(
+    window: &mut Window,
+    at: gpui::Point<gpui::Pixels>,
+    count: usize,
+    cx: &mut App,
+) {
+    use gpui_kit::InputEvent as _;
+    for click_count in 1..=count {
+        window.render_frame(cx);
+        window.dispatch_event(
+            gpui::MouseDownEvent {
+                button: gpui::MouseButton::Left,
+                position: at,
+                modifiers: window.modifiers(),
+                click_count,
+                first_mouse: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+        if click_count < count {
+            window.pointer_up(at, gpui::MouseButton::Left, cx);
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn multi_click_selection_drags_copies_and_retains_word_or_paragraph_granularity(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let path = PathBuf::from("examples/selection-sample.pdf");
+    let text = pdf::page_text(&path, 0).unwrap();
+    let (window, reader) = recent_test_window(cx, Some(path));
+    cx.run_until_parked();
+    for mode in [ReadingMode::Continuous, ReadingMode::SinglePage] {
+        reader.update(cx, |reader, cx| {
+            reader.set_reading_mode(mode, cx);
+            reader.zoom_in(cx);
+        });
+        super::authoring::draw(cx, window);
+        let positions = reader.read_with(cx, |reader, _| {
+            let viewport = reader.page_viewport(0).unwrap();
+            let screen = |line: usize, offset: usize| {
+                let glyph = &text.glyphs[text.lines[line].start + offset];
+                let at = viewport.document_to_screen(Point {
+                    x: glyph.start.x + (glyph.end.x - glyph.start.x) * 0.8,
+                    y: glyph.start.y + (glyph.top - glyph.start.y) * 0.4,
+                });
+                point(px(at.x as f32), px(at.y as f32))
+            };
+            [
+                screen(0, 8),
+                screen(0, 14),
+                screen(0, 1),
+                screen(1, 8),
+                screen(2, 8),
+            ]
+        });
+        cx.update_window(window, |_, frame, cx| {
+            multi_click_down(frame, positions[0], 2, cx)
+        })
+        .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(reader.selected_text().as_deref(), Some("café"));
+        });
+        for (at, expected) in [
+            (positions[1], "café world"),
+            (positions[0], "café"),
+            (positions[2], "Alpha café"),
+            (positions[3], "café world\nSecond naïve"),
+        ] {
+            cx.update_window(window, |_, frame, cx| {
+                frame.pointer_move(at, Some(gpui::MouseButton::Left), cx)
+            })
+            .unwrap();
+            reader.read_with(cx, |reader, _| {
+                assert_eq!(reader.selected_text().as_deref(), Some(expected));
+            });
+        }
+        cx.update_window(window, |_, frame, cx| {
+            frame.pointer_up(positions[3], gpui::MouseButton::Left, cx)
+        })
+        .unwrap();
+        cx.simulate_keystrokes(window, "cmd-c");
+        assert_eq!(
+            cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
+            Some("café world\nSecond naïve".into())
+        );
+        cx.update_window(window, |_, frame, cx| {
+            multi_click_down(frame, positions[0], 3, cx)
+        })
+        .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.selected_text().as_deref(),
+                Some("Alpha café world\nSecond naïve line")
+            );
+        });
+        cx.update_window(window, |_, frame, cx| {
+            frame.pointer_move(positions[4], Some(gpui::MouseButton::Left), cx);
+            frame.pointer_up(positions[4], gpui::MouseButton::Left, cx);
+        })
+        .unwrap();
+        reader.read_with(cx, |reader, _| {
+            assert_eq!(
+                reader.selected_text().as_deref(),
+                Some("Alpha café world\nSecond naïve line\n\nThird Þing ends")
+            );
+            assert_eq!(reader.selection.dragging_page(), None);
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn double_clicking_marked_text_keeps_text_selection_instead_of_selecting_annotation(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let path = PathBuf::from("examples/selection-sample.pdf");
+    let (window, reader) = recent_test_window(cx, Some(path.clone()));
+    cx.run_until_parked();
+    super::authoring::select_title(cx, window, &reader, &path);
+    cx.update_window(window, |_, frame, cx| {
+        frame.dispatch_action(Box::new(Highlight), cx)
+    })
+    .unwrap();
+    super::authoring::draw(cx, window);
+    let text = pdf::page_text(&path, 0).unwrap();
+    let at = reader.read_with(cx, |reader, _| {
+        let glyph = &text.glyphs[2];
+        let at = reader.page_viewport(0).unwrap().document_to_screen(Point {
+            x: (glyph.start.x + glyph.end.x) / 2.0,
+            y: glyph.start.y + 2.0,
+        });
+        point(px(at.x as f32), px(at.y as f32))
+    });
+    cx.update_window(window, |_, frame, cx| {
+        multi_click_down(frame, at, 2, cx);
+        frame.pointer_up(at, gpui::MouseButton::Left, cx);
+    })
+    .unwrap();
+    reader.read_with(cx, |reader, _| {
+        assert_eq!(reader.selected_text().as_deref(), Some("Alpha"));
+        assert!(reader.selected_annotation.is_none());
+        assert!(reader.annotation_choice.is_none());
+    });
+}
+
 #[gpui_kit::test]
 fn dragging_from_column_text_onto_a_link_copies_without_following_it(cx: &mut TestAppContext) {
     cx.update(|cx| {

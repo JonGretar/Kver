@@ -35,6 +35,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 toml_edit = "0.22"
 tempfile = "3"
 libc = "0.2"
+unicode-segmentation = "1.13"
 image = { version = "0.25", default-features = false, optional = true }
 rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }

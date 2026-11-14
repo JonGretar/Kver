@@ -4,6 +4,8 @@
 use crate::{coordinates::Point, pdf::PageText};
 use std::sync::Arc;
 
+pub(super) mod furniture;
+
 #[derive(Default)]
 pub(super) struct Ruler {
     pub(super) enabled: bool,
@@ -12,6 +14,7 @@ pub(super) struct Ruler {
     pub(super) traversal: Option<Traversal>,
     pub(super) notice: Option<&'static str>,
     pub(super) browse_task: Option<gpui_kit::Task<()>>,
+    pub(super) evidence: furniture::Evidence,
 }
 
 #[derive(Clone, Copy)]
@@ -98,7 +101,9 @@ impl Ruler {
                 return false;
             };
             next = candidate;
-            if document_rect(&target.text, next).is_some() {
+            if document_rect(&target.text, next).is_some()
+                && !self.evidence.excludes(target.page, next)
+            {
                 target.line = next;
                 return true;
             }
@@ -115,6 +120,21 @@ fn adjacent(page: usize, forward: bool, count: usize) -> Option<usize> {
 }
 
 impl super::ReaderView {
+    pub(super) fn refresh_ruler_evidence(&mut self) {
+        if let Some(page) = self.ruler.text_priority() {
+            let keep = furniture::window(page, self.pages.len());
+            // Visible/selected text can outlive the ruler's evidence window.
+            // Reuse its worker-prepared summary instead of extracting it again.
+            for page in keep.clone() {
+                if let Some(evidence) = self.page_text.evidence(page) {
+                    self.ruler
+                        .evidence
+                        .insert(page, evidence.clone(), keep.clone());
+                }
+            }
+        }
+    }
+
     /// Navigation owns the viewport. Text completion may resolve a target, but
     /// must not refocus the reader or replay a jump after the user moves on.
     pub(super) fn retarget_ruler(
@@ -177,8 +197,17 @@ impl super::ReaderView {
 
     pub(super) fn continue_ruler(&mut self, cx: &mut gpui_kit::Context<Self>) {
         while let Some(mut work) = self.ruler.traversal {
+            self.refresh_ruler_evidence();
             if !self.ruler.enabled {
                 self.ruler.traversal = None;
+                return;
+            }
+            if self
+                .ruler
+                .evidence
+                .missing(work.page, self.pages.len())
+                .is_some()
+            {
                 return;
             }
             let moved = if work.enter {
@@ -192,11 +221,15 @@ impl super::ReaderView {
                     return;
                 };
                 let line = if work.forward {
-                    (0..text.lines.len()).find(|ix| document_rect(&text, *ix).is_some())
+                    (0..text.lines.len()).find(|ix| {
+                        document_rect(&text, *ix).is_some()
+                            && !self.ruler.evidence.excludes(work.page, *ix)
+                    })
                 } else {
-                    (0..text.lines.len())
-                        .rev()
-                        .find(|ix| document_rect(&text, *ix).is_some())
+                    (0..text.lines.len()).rev().find(|ix| {
+                        document_rect(&text, *ix).is_some()
+                            && !self.ruler.evidence.excludes(work.page, *ix)
+                    })
                 };
                 if let Some(line) = line {
                     self.ruler.target = Some(Target {

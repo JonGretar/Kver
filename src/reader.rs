@@ -1599,26 +1599,49 @@ impl ReaderView {
         };
         let (top, _, height) = self.viewport();
         let visible = self.layout().visible_pages(top, height);
+        let priority = self.ruler.text_priority();
+        self.refresh_ruler_evidence();
+        let evidence_page =
+            priority.and_then(|page| self.ruler.evidence.missing(page, self.pages.len()));
         let Some(request) = self.page_text.request(
             visible,
-            self.ruler.text_priority(),
+            evidence_page.or(priority),
             [
                 self.selection.page(),
                 self.ruler.target.as_ref().map(|target| target.page),
+                priority,
             ],
             self.document_generation,
         ) else {
             return;
         };
-        let work = cx
-            .background_executor()
-            .spawn(async move { document.page_text(request.page()) });
+        let size = self.pages[request.page()];
+        let work = cx.background_executor().spawn(async move {
+            let text = document.page_text(request.page());
+            let evidence = text.as_ref().map_or_else(
+                |_| Vec::new(),
+                |text| ruler::furniture::candidates(text, size),
+            );
+            (text, evidence)
+        });
         cx.spawn(async move |this, cx| {
-            let result = work.await;
+            let (result, evidence) = work.await;
             let _ = this.update(cx, |this, cx| {
                 if !this.page_text.finish(request, result) {
                     return;
                 }
+                this.page_text
+                    .set_evidence(request.page(), evidence.clone());
+                let center = this
+                    .ruler
+                    .text_priority()
+                    .or_else(|| this.ruler.target.as_ref().map(|target| target.page))
+                    .unwrap_or(this.page_index);
+                this.ruler.evidence.insert(
+                    request.page(),
+                    evidence,
+                    ruler::furniture::window(center, this.pages.len()),
+                );
                 this.finish_ruler_placement();
                 this.continue_ruler(cx);
                 this.schedule_text(cx);

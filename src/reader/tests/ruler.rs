@@ -6,6 +6,7 @@ use gpui_kit::{
     test::{ClickOptions, TestEventExt},
 };
 
+mod furniture;
 mod interactions;
 mod traversal;
 

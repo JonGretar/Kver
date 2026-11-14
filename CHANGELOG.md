@@ -18,6 +18,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Keep the ruler through search, links, marks, contents, and back/forward
   navigation. Page jumps place it on the first line; selection and annotation
   editing temporarily hide it without losing your place.
+- Automatic ruler movement skips confidently repeated running headers, footers,
+  and page numbers using nearby pages. Option/Alt-click can still place the
+  ruler on skipped text; selection, copying, and search remain unchanged.
 
 ## [0.5.1] - 2026-11-14
 

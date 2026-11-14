@@ -9,6 +9,7 @@ use crate::pdf::PageText;
 #[derive(Default)]
 pub(super) struct PageTexts {
     pages: HashMap<usize, Result<Arc<PageText>, String>>,
+    evidence: HashMap<usize, Vec<super::ruler::furniture::Candidate>>,
     in_flight: Option<TextRequest>,
 }
 
@@ -25,6 +26,20 @@ impl TextRequest {
 }
 
 impl PageTexts {
+    pub(super) fn evidence(&self, page: usize) -> Option<&Vec<super::ruler::furniture::Candidate>> {
+        self.evidence.get(&page)
+    }
+
+    pub(super) fn set_evidence(
+        &mut self,
+        page: usize,
+        evidence: Vec<super::ruler::furniture::Candidate>,
+    ) {
+        if self.pages.contains_key(&page) {
+            self.evidence.insert(page, evidence);
+        }
+    }
+
     pub(super) fn get(&self, page: usize) -> Option<&Arc<PageText>> {
         self.pages.get(&page)?.as_ref().ok()
     }
@@ -37,15 +52,19 @@ impl PageTexts {
         &mut self,
         visible: Range<usize>,
         priority: Option<usize>,
-        active: [Option<usize>; 2],
+        active: impl AsRef<[Option<usize>]>,
         generation: u64,
     ) -> Option<TextRequest> {
         // Prune failures too: browsing a long document must not accumulate an
         // unbounded failure set. Active consumers also retain their Arcs, so
         // eviction never invalidates a line identity or a copy operation.
         self.pages.retain(|page, _| {
-            visible.contains(page) || priority == Some(*page) || active.contains(&Some(*page))
+            visible.contains(page)
+                || priority == Some(*page)
+                || active.as_ref().contains(&Some(*page))
         });
+        self.evidence
+            .retain(|page, _| self.pages.contains_key(page));
         if self.in_flight.is_some() {
             return None;
         }

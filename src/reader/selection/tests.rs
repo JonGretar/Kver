@@ -24,7 +24,7 @@ impl std::ops::DerefMut for Selection {
 
 impl Selection {
     fn begin(&mut self, page: usize, at: Option<Point>) {
-        self.state.begin(page, at, self.pages.get(page).cloned());
+        self.state.begin(page, at, self.pages.get(page).cloned(), 1);
     }
 
     fn reset(&mut self) {
@@ -604,4 +604,146 @@ fn empty_and_failed_pages_do_not_spin_but_replacement_allows_retry() {
     assert_eq!(selection.request_text(0..2, 0), None);
     selection.reset();
     assert_eq!(selection.request_text(1..2, 1).unwrap().page(), 1);
+}
+
+fn begin_clicks(selection: &mut Selection, at: Point, count: usize) {
+    selection
+        .state
+        .begin(0, Some(at), selection.pages.get(0).cloned(), count);
+}
+
+#[test]
+fn word_drag_keeps_original_word_while_growing_shrinking_and_reversing() {
+    let mut selection = Selection::default();
+    load(&mut selection, 0, text(&[("one two three four", 80.0)]));
+    for x in [40.0, 45.0, 69.0] {
+        begin_clicks(&mut selection, Point { x, y: 80.0 }, 2);
+        assert_eq!(selection.selected_text().as_deref(), Some("two"));
+        assert!(selection.has_selection());
+    }
+    for (x, expected) in [
+        (169.0, "two three four"),
+        (115.0, "two three"),
+        (55.0, "two"),
+        (5.0, "one two"),
+        (65.0, "two"),
+    ] {
+        assert!(selection.extend(Point { x, y: 80.0 }));
+        assert_eq!(selection.selected_text().as_deref(), Some(expected));
+    }
+    assert!(!selection.extend(Point { x: 61.0, y: 80.0 }));
+    assert!(!selection.extend(Point { x: 1000.0, y: 80.0 }));
+    selection.finish();
+    assert!(!selection.extend(Point { x: 5.0, y: 80.0 }));
+    assert_eq!(selection.selected_text().as_deref(), Some("two"));
+    assert_eq!(selection.document_quads().len(), 1);
+}
+
+#[test]
+fn word_boundaries_handle_unicode_apostrophes_punctuation_spaces_and_line_breaks() {
+    let mut selection = Selection::default();
+    load(
+        &mut selection,
+        0,
+        text(&[("Hé don't,  hyphen-", 80.0), ("ated end", 65.0)]),
+    );
+    for (x, expected) in [
+        (15.0, "Hé"),
+        (75.0, "don't"),
+        (85.0, ","),
+        (95.0, "  "),
+        (155.0, "hyphen"),
+        (175.0, "-"),
+    ] {
+        begin_clicks(&mut selection, Point { x, y: 80.0 }, 2);
+        assert_eq!(selection.selected_text().as_deref(), Some(expected));
+    }
+    begin_clicks(&mut selection, Point { x: 125.0, y: 80.0 }, 2);
+    assert_eq!(selection.selected_text().as_deref(), Some("hyphen"));
+    selection.extend(Point { x: 15.0, y: 65.0 });
+    assert_eq!(selection.selected_text().as_deref(), Some("hyphen-\nated"));
+    begin_clicks(&mut selection, Point { x: 15.0, y: 65.0 }, 2);
+    assert_eq!(selection.selected_text().as_deref(), Some("ated"));
+}
+
+#[test]
+fn word_selection_preserves_multi_character_glyphs() {
+    let mut page = text(&[("of! x", 80.0)]);
+    page.glyphs[1].text = "ffi".into();
+    let mut selection = Selection::default();
+    load(&mut selection, 0, page);
+    begin_clicks(&mut selection, Point { x: 19.0, y: 80.0 }, 2);
+    assert_eq!(selection.selected_text().as_deref(), Some("offi"));
+}
+
+#[test]
+fn paragraph_drag_selects_wrapped_lines_and_reverses_without_losing_origin() {
+    let mut selection = Selection::default();
+    load(
+        &mut selection,
+        0,
+        text(&[
+            ("first", 160.0),
+            ("wrapped", 145.0),
+            ("second", 110.0),
+            ("paragraph", 95.0),
+            ("third", 60.0),
+        ]),
+    );
+    begin_clicks(&mut selection, Point { x: 25.0, y: 95.0 }, 3);
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("second\nparagraph")
+    );
+    selection.extend(Point { x: 15.0, y: 60.0 });
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("second\nparagraph\n\nthird")
+    );
+    selection.extend(Point { x: 15.0, y: 110.0 });
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("second\nparagraph")
+    );
+    selection.extend(Point { x: 15.0, y: 145.0 });
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("first\nwrapped\n\nsecond\nparagraph")
+    );
+    selection.finish();
+    assert_eq!(selection.highlights(0, (200.0, 200.0)).count(), 4);
+}
+
+#[test]
+fn paragraph_selection_stops_at_columns_and_same_baseline_fragments() {
+    for y in [80.0, 65.0] {
+        let mut page = text(&[("left", 80.0), ("right", y)]);
+        for glyph in &mut page.glyphs[4..] {
+            glyph.start.x += 150.0;
+            glyph.end.x += 150.0;
+        }
+        let mut selection = Selection::default();
+        load(&mut selection, 0, page);
+        begin_clicks(&mut selection, Point { x: 15.0, y: 80.0 }, 3);
+        assert_eq!(selection.selected_text().as_deref(), Some("left"));
+        begin_clicks(&mut selection, Point { x: 165.0, y }, 3);
+        assert_eq!(selection.selected_text().as_deref(), Some("right"));
+    }
+}
+
+#[test]
+fn new_single_click_or_miss_clears_multi_click_gesture() {
+    let mut selection = Selection::default();
+    load(&mut selection, 0, text(&[("one two", 80.0)]));
+    for count in [2, 3] {
+        begin_clicks(&mut selection, Point { x: 15.0, y: 80.0 }, count);
+        assert!(selection.has_selection());
+        selection.begin(0, Some(Point { x: 10.0, y: 80.0 }));
+        assert!(!selection.has_selection());
+        selection.extend(Point { x: 20.0, y: 80.0 });
+        assert_eq!(selection.selected_text().as_deref(), Some("n"));
+        begin_clicks(&mut selection, Point { x: 1000.0, y: 80.0 }, count);
+        assert_eq!(selection.page(), None);
+        assert_eq!(selection.dragging_page(), None);
+    }
 }

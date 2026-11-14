@@ -68,7 +68,7 @@ impl ReaderView {
         // them on mouse-down would move the PDF underneath a text drag.
         self.selected_annotation = None;
         cx.notify();
-        if dragged {
+        if dragged || self.selection.has_selection() {
             return;
         }
         let Some(at) = self.pointer_document(page, position) else {

@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Double-click to select a word or triple-click to select a paragraph; keep
+  holding the mouse button to extend the selection by whole words or paragraphs.
 - Follow a page with a reading ruler: toggle it from the menu or command
   palette, or Option/Alt-click text to place it. In the Vim keymap, `r`
   toggles the guide and `j`/`k` follow lines while it is enabled.

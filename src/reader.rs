@@ -1330,6 +1330,7 @@ impl ReaderView {
         &mut self,
         page: usize,
         position: gpui::Point<gpui::Pixels>,
+        click_count: usize,
         cx: &mut Context<Self>,
     ) {
         self.ruler.cancel_work();
@@ -1339,6 +1340,7 @@ impl ReaderView {
             page,
             self.pointer_document(page, position),
             self.page_text.get(page).cloned(),
+            click_count,
         );
         cx.notify();
     }
@@ -2226,7 +2228,7 @@ impl Render for ReaderView {
                     if event.modifiers.alt {
                         this.place_ruler(index, event.position, cx);
                     } else {
-                        this.start_selection(index, event.position, cx);
+                        this.start_selection(index, event.position, event.click_count, cx);
                     }
                 }),
             );

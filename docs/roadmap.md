@@ -8,17 +8,6 @@ These are directions, not a release schedule or implementation checklist.
 Kver takes inspiration from Sioyek without aiming for feature parity or
 requiring an academic workflow.
 
-## High priority: visual ruler
-
-A keyboard-controlled reading guide that highlights the current line and
-moves to the next or previous line in reading order, including in
-multi-column documents. It should make it easy to keep your place and
-resume reading after an interruption.
-
-The ruler should also provide a keyboard target for future reference
-actions: preview or follow a reference on the current line without reaching
-for the mouse. The reading guide is useful on its own; reference recognition
-need not arrive with it.
 
 ## Priority: composable keyboard navigation and splits
 

@@ -78,7 +78,11 @@ fn ruler_keyboard_reads_columns_preserves_focus_and_resumes_without_scroll(
     assert_eq!(target(&reader, cx), initial);
     // Traverse all remaining columns in this page, then reverse within it.
     let last = reader.read_with(cx, |reader, _| {
-        reader.ruler.target.as_ref().unwrap().text.lines.len() - 1
+        let target = reader.ruler.target.as_ref().unwrap();
+        (0..target.text.lines.len())
+            .rev()
+            .find(|line| !reader.ruler.evidence.excludes(2, *line))
+            .unwrap()
     });
     for _ in initial.1..last {
         cx.simulate_keystrokes(window, "j");
@@ -409,10 +413,30 @@ fn ruler_reveals_edges_at_zoom_in_both_layouts_and_reactivation_uses_visible_tex
 }
 
 fn boundary(reader: &Entity<ReaderView>, cx: &mut TestAppContext, page: usize, last: bool) {
-    let text =
-        std::sync::Arc::new(pdf::page_text(Path::new("examples/reading-order.pdf"), page).unwrap());
+    let path = Path::new("examples/reading-order.pdf");
+    let sizes = pdf::document_pages(path).unwrap();
+    let text = std::sync::Arc::new(pdf::page_text(path, page).unwrap());
     reader.update(cx, |reader, cx| {
-        let line = if last { text.lines.len() - 1 } else { 0 };
+        // Delayed-extraction tests hold a destination request after this setup.
+        // Supply real bounded furniture evidence so they delay traversal text,
+        // rather than accidentally delaying an unrelated neighbor-evidence read.
+        let keep = crate::reader::ruler::furniture::window(page, sizes.len());
+        for neighbor in keep.clone() {
+            let source = pdf::page_text(path, neighbor).unwrap();
+            reader.ruler.evidence.insert(
+                neighbor,
+                crate::reader::ruler::furniture::candidates(&source, sizes[neighbor]),
+                keep.clone(),
+            );
+        }
+        let line = if last {
+            (0..text.lines.len())
+                .rev()
+                .find(|line| !reader.ruler.evidence.excludes(page, *line))
+                .unwrap()
+        } else {
+            0
+        };
         reader.ruler.cancel_work();
         reader.ruler.enabled = true;
         reader.ruler.target = Some(Target { page, line, text });

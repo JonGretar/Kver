@@ -144,10 +144,15 @@ pub(in crate::reader) fn candidates(text: &PageText, size: (f32, f32)) -> Vec<Ca
         // A footnote paragraph or margin-adjacent body line has nearby text.
         // Require clear separation on both sides, across columns too: the
         // first line of a footnote paragraph must not lose its following lines.
+        // Separate fragments on the same row (such as a footer and its page
+        // number) do not make a paragraph. Both still need repetition evidence.
         if rects.iter().enumerate().any(|(other, rect)| {
             other != line
-                && rect.is_some_and(|[_, t, _, b]| {
-                    (t - bottom).max(top - b).max(0.) < line_height * 1.5
+                && rect.is_some_and(|[l, t, r, b]| {
+                    let same_row = (t - top).abs() <= line_height * 0.25
+                        && (b - bottom).abs() <= line_height * 0.25;
+                    let separate = (l - right).max(left - r) > line_height * 1.5;
+                    !(same_row && separate) && (t - bottom).max(top - b).max(0.) < line_height * 1.5
                 })
         }) {
             continue;

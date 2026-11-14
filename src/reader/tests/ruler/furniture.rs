@@ -1,5 +1,32 @@
 use super::*;
 
+#[gpui_kit::test]
+fn reading_order_footer_is_skipped_by_keyboard_across_pages(cx: &mut TestAppContext) {
+    let (window, reader) = open(cx, "examples/reading-order.pdf", 0);
+    cx.simulate_keystrokes(window, "r");
+    settle(cx, window);
+    let assert_not_footer = |cx: &mut TestAppContext| {
+        let value = line_text(&reader, cx);
+        assert!(
+            !value.contains("KVER / MARGINS") && value.trim().parse::<u32>().is_err(),
+            "keyboard traversal reached footer: {value:?}"
+        );
+    };
+    for _ in 0..200 {
+        cx.simulate_keystrokes(window, "j");
+        settle(cx, window);
+        assert_not_footer(cx);
+        if target(&reader, cx).0 == 1 {
+            break;
+        }
+    }
+    assert_eq!(target(&reader, cx).0, 1);
+    cx.simulate_keystrokes(window, "k");
+    settle(cx, window);
+    assert_not_footer(cx);
+    assert_eq!(target(&reader, cx).0, 0);
+}
+
 fn line_text(reader: &Entity<ReaderView>, cx: &mut TestAppContext) -> String {
     reader.read_with(cx, |reader, _| {
         let target = reader.ruler.target.as_ref().unwrap();

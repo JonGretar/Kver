@@ -14,6 +14,46 @@ fn contents(text: &PageText, line: usize) -> String {
 }
 
 #[test]
+fn reading_order_specimen_automatic_steps_skip_repeated_footer_and_page_numbers() {
+    let path = Path::new("examples/reading-order.pdf");
+    let sizes = crate::pdf::document_pages(path).unwrap();
+    let pages: Vec<_> = (0..sizes.len())
+        .map(|page| Arc::new(crate::pdf::page_text(path, page).unwrap()))
+        .collect();
+    let mut ruler = Ruler::default();
+    for (page, text) in pages.iter().enumerate() {
+        ruler
+            .evidence
+            .insert(page, candidates(text, sizes[page]), 0..pages.len());
+    }
+    for (page, text) in pages.iter().enumerate() {
+        let footer = text.lines.len() - 2;
+        let number = text.lines.len() - 1;
+        assert_eq!(contents(text, footer), "KVER / MARGINS & METHODS");
+        assert_eq!(contents(text, number), (page + 1).to_string());
+        let at = text.glyphs[text.lines[0].start].start;
+        assert!(ruler.place(page, text.clone(), at, true));
+        let mut reached = vec![0];
+        while ruler.step(true) {
+            let line = ruler.target.as_ref().unwrap().line;
+            assert!(
+                line != footer && line != number,
+                "automatic traversal reached page {} footer: {:?}",
+                page + 1,
+                contents(text, line)
+            );
+            reached.push(line);
+        }
+        assert_eq!(reached, (0..footer).collect::<Vec<_>>());
+        for expected in (0..footer - 1).rev() {
+            assert!(ruler.step(false));
+            assert_eq!(ruler.target.as_ref().unwrap().line, expected);
+        }
+        assert!(!ruler.step(false));
+    }
+}
+
+#[test]
 fn furniture_only_changes_automatic_movement_in_both_directions() {
     let mut ruler = Ruler::default();
     for group in [0..5, 5..10, 10..15] {

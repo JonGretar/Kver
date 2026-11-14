@@ -35,6 +35,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - In Vim mode, `j` and `k` navigate the focused Contents or Annotations
   sidebar just like the Down and Up arrow keys.
 
+### Fixed
+
+- The reading ruler now recognizes repeated footers with a separate page number
+  on the same row, instead of stopping at both during automatic line movement.
+
 ## [0.5.1] - 2026-11-14
 
 ### Changed

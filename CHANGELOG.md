@@ -29,6 +29,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- In Standard, toggle the reading ruler with Command-Shift-R on macOS or
+  Ctrl-Shift-R on Linux/Windows. In both keymaps, Down/Up follow ruler lines
+  while it is on and scroll normally while it is off.
 - In Vim mode, `j` and `k` navigate the focused Contents or Annotations
   sidebar just like the Down and Up arrow keys.
 

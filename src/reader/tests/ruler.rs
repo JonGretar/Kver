@@ -9,6 +9,7 @@ use gpui_kit::{
 mod furniture;
 mod history;
 mod interactions;
+mod shortcuts;
 mod traversal;
 
 fn open(cx: &mut TestAppContext, path: &str, page: usize) -> (AnyWindowHandle, Entity<ReaderView>) {

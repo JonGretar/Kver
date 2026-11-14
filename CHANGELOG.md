@@ -7,42 +7,34 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
+Keep your place with a reading ruler, read PDFs in dark mode, and select text
+by word or paragraph.
+
 ### Added
 
-- Optionally match PDF pages, including scans, to the app appearance in Reader
-  settings (off by default). “Toggle PDF dark mode” overrides the current PDF
-  for this session without changing the preference or other windows.
-  Saved PDFs stay unchanged.
-- Double-click to select a word or triple-click to select a paragraph; keep
-  holding the mouse button to extend the selection by whole words or paragraphs.
-- Follow a page with a reading ruler: toggle it from the menu or command
-  palette, or Option/Alt-click text to place it. In the Vim keymap, `r`
-  toggles the guide and `j`/`k` follow lines while it is enabled.
-- Continue ruler reading across columns and pages in either layout, including
-  past textless pages. The guide reveals text at high zoom and follows manual
-  scrolling after it settles, without pulling the page back.
-- Keep the ruler through search, links, marks, contents, and back/forward
-  navigation. Page jumps place it on the first line; selection and annotation
-  editing temporarily hide it without losing your place.
-- Automatic ruler movement skips confidently repeated running headers, footers,
-  and page numbers using nearby pages. Option/Alt-click can still place the
-  ruler on skipped text; selection, copying, and search remain unchanged.
-- Resume the ruler's remembered line when reopening a PDF and enabling the
-  guide, if that line is visible. Windows keep independent targets, and ruler
-  locations follow the existing reading-history privacy and clearing settings.
+- **Reading ruler:** follow text across columns and pages with a keyboard-driven
+  guide that keeps the active line in view and skips confidently identified
+  running headers, footers, and page numbers. Place it with Option/Alt-click or
+  toggle it from the menu or command palette.
+- **Ruler shortcuts:** in Standard, use Command-Shift-R on macOS or Ctrl-Shift-R
+  on Linux/Windows; in Vim, use `r`. Up/Down follow lines while the ruler is on
+  and scroll normally while it is off; Vim also supports `j`/`k`.
+- **Remembered reading targets:** the ruler follows navigation and can resume
+  its remembered line after reopening when that line is visible. Each window
+  keeps its own target; saved locations respect reading-history preferences.
+- **PDF dark mode:** optionally match PDF pages, including scans, to the app
+  appearance in Reader settings. It is off by default, and “Toggle PDF dark
+  mode” overrides it for the current window without changing saved PDF contents.
+- **Word and paragraph selection:** double-click to select a word or triple-click
+  to select a paragraph, then drag to extend the selection by whole words or
+  paragraphs.
 
 ### Changed
 
-- In Standard, toggle the reading ruler with Command-Shift-R on macOS or
-  Ctrl-Shift-R on Linux/Windows. In both keymaps, Down/Up follow ruler lines
-  while it is on and scroll normally while it is off.
 - In Vim mode, `j` and `k` navigate the focused Contents or Annotations
   sidebar just like the Down and Up arrow keys.
-
-### Fixed
-
-- The reading ruler now recognizes repeated footers with a separate page number
-  on the same row, instead of stopping at both during automatic line movement.
 
 ## [0.5.1] - 2026-11-14
 

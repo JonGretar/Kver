@@ -5,6 +5,32 @@ use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
 #[test]
+fn vim_sidebar_navigation_is_scoped_to_contents_and_annotations() {
+    use gpui_kit::base::actions::{SelectDown, SelectUp};
+
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        let vim = resolve(platform, Preset::Vim).unwrap();
+        let standard = resolve(platform, Preset::Standard).unwrap();
+        for (key, action) in [("j", SelectDown.name()), ("k", SelectUp.name())] {
+            for context in [Context::Contents, Context::Annotations] {
+                assert_eq!(vim.action(key, context), Some(action));
+                assert_eq!(standard.action(key, context), None);
+            }
+            for context in [
+                Context::Global,
+                Context::Sidebar,
+                Context::Settings,
+                Context::About,
+            ] {
+                assert_eq!(vim.action(key, context), None);
+            }
+        }
+        assert_eq!(vim.action("j", Context::Reader), Some("kver::ReadDown"));
+        assert_eq!(vim.action("k", Context::Reader), Some("kver::ReadUp"));
+    }
+}
+
+#[test]
 fn annotation_creation_keys_are_preset_specific_and_never_input_bindings() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
         let standard = resolve(platform, Preset::Standard).unwrap();
@@ -799,9 +825,7 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             assert_eq!(map.action(keys, Context::Reader), Some(action));
         }
         for (keys, action) in [
-            ("j", "kver::ReadDown"),
             ("r", "kver::ToggleReadingRuler"),
-            ("k", "kver::ReadUp"),
             ("h", "kver::ScrollLeft"),
             ("l", "kver::ScrollRight"),
             ("left", "kver::ScrollLeft"),

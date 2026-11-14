@@ -4,6 +4,7 @@
 //! Views still own focused contexts and action handlers; GPUI owns dispatch
 //! and pending multi-keystroke sequences.
 
+use gpui_kit::base::actions::{SelectDown, SelectUp};
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::{
     Action, App, AppContext as _, Global, KeyBinding, KeyBindingContextPredicate, Keystroke,
@@ -788,6 +789,10 @@ fn preset_defaults(preset: Preset) -> Vec<Entry> {
                 Entry::bind("a w", Context::Reader, crate::reader::Squiggly),
                 Entry::bind("g a", Context::Reader, ShowAnnotations),
                 Entry::bind("g c", Context::Reader, ShowContents),
+                Entry::bind("j", Context::Contents, SelectDown),
+                Entry::bind("k", Context::Contents, SelectUp),
+                Entry::bind("j", Context::Annotations, SelectDown),
+                Entry::bind("k", Context::Annotations, SelectUp),
                 Entry::bind("u", Context::Reader, crate::reader::UndoAnnotation),
                 Entry::bind("ctrl-r", Context::Reader, crate::reader::RedoAnnotation),
                 Entry::bind("x", Context::Reader, DeleteHighlight),

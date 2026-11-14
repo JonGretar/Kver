@@ -22,6 +22,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   and page numbers using nearby pages. Option/Alt-click can still place the
   ruler on skipped text; selection, copying, and search remain unchanged.
 
+### Changed
+
+- In Vim mode, `j` and `k` navigate the focused Contents or Annotations
+  sidebar just like the Down and Up arrow keys.
+
 ## [0.5.1] - 2026-11-14
 
 ### Changed

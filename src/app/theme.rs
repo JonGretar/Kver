@@ -24,6 +24,18 @@ pub(crate) fn document_identification() -> gpui_kit::Hsla {
     gpui_kit::rgb(0x1e66f5).into()
 }
 
+/// Document-surface roles, deliberately independent of warning/status colors.
+/// PDF paper stays light in both chrome themes; the darker marker must contrast
+/// with it and remain distinct over embedded yellow highlights.
+pub(crate) fn reading_ruler(dark: bool) -> (gpui_kit::Hsla, gpui_kit::Hsla) {
+    let wash: gpui_kit::Hsla = gpui_kit::rgb(0xf9e2af).into();
+    let marker: gpui_kit::Hsla = gpui_kit::rgb(0x9b640b).into();
+    (
+        wash.opacity(if dark { 0.58 } else { 0.52 }),
+        marker.opacity(0.88),
+    )
+}
+
 // Official palette roles: https://catppuccin.com/palette/
 struct Palette {
     base: &'static str,

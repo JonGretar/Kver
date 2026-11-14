@@ -1,40 +1,22 @@
-//! Document-space text selection and the page text it needs.
+//! Document-space text selection.
 //!
 //! The reader supplies visible pages and executes text requests off-thread.
 //! This module owns hit testing, drag state, copy/highlight derivation, and
-//! retention: visible pages plus the selected page, with one current request.
+//! retention of the selected page only. PageTexts owns shared extraction.
 //! It has no window, clipboard, PDF path, or independent document identity.
 
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+use std::{ops::Range, sync::Arc};
 
 use crate::{
-    coordinates::{PageTransform, Point},
+    coordinates::Point,
     pdf::{PageText, TextGlyph},
 };
 
 #[derive(Default)]
 pub(super) struct Selection {
-    text: HashMap<usize, PageText>,
-    failed: HashSet<usize>,
-    in_flight: Option<TextRequest>,
+    text: Option<Arc<PageText>>,
     span: Option<Span>,
     dragging: bool,
-}
-
-/// Carries the reader's document generation, not its zoom/raster generation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TextRequest {
-    page: usize,
-    generation: u64,
-}
-
-impl TextRequest {
-    pub(super) fn page(self) -> usize {
-        self.page
-    }
 }
 
 /// Page-local PDF points, after crop/rotation and before logical zoom.
@@ -62,15 +44,16 @@ struct Span {
 }
 
 impl Selection {
-    /// Replacing a document invalidates both selected text and pending replies.
+    /// Replacing a document invalidates the selected text and gesture.
     pub(super) fn reset(&mut self) {
         *self = Self::default();
     }
 
-    /// Clear a gesture/selection without discarding this document's page text.
+    /// Release the selected page without discarding shared cached text.
     pub(super) fn clear(&mut self) {
         self.span = None;
         self.dragging = false;
+        self.text = None;
     }
 
     pub(super) fn page(&self) -> Option<usize> {
@@ -81,14 +64,17 @@ impl Selection {
         self.page().filter(|_| self.dragging)
     }
 
-    pub(super) fn page_transform(&self, page: usize) -> Option<PageTransform> {
-        self.text.get(&page).map(|text| text.transform)
+    pub(super) fn has_selection(&self) -> bool {
+        self.span.is_some_and(|span| {
+            (span.start.line, span.start.boundary) != (span.end.line, span.end.boundary)
+        })
     }
 
     /// A miss (including unavailable text/geometry) clears the old selection.
-    pub(super) fn begin(&mut self, page: usize, at: Option<Point>) {
+    pub(super) fn begin(&mut self, page: usize, at: Option<Point>, text: Option<Arc<PageText>>) {
+        self.text = text;
         self.span = at
-            .and_then(|at| hit_boundary(self.text.get(&page)?, at))
+            .and_then(|at| hit_boundary(self.text.as_ref()?, at))
             .map(|anchor| Span {
                 page,
                 start: anchor,
@@ -100,10 +86,10 @@ impl Selection {
     /// Extend only on the starting page. A miss preserves the last valid end.
     /// The caller notifies its view when this returns true.
     pub(super) fn extend(&mut self, at: Point) -> bool {
-        let Some(page) = self.dragging_page() else {
+        let Some(_) = self.dragging_page() else {
             return false;
         };
-        let Some(anchor) = self.text.get(&page).and_then(|text| hit_boundary(text, at)) else {
+        let Some(anchor) = self.text.as_ref().and_then(|text| hit_boundary(text, at)) else {
             return false;
         };
         if let Some(span) = &mut self.span {
@@ -118,7 +104,7 @@ impl Selection {
 
     pub(super) fn selected_text(&self) -> Option<String> {
         let span = self.span?;
-        selected_text(span, self.text.get(&span.page)?)
+        selected_text(span, self.text.as_ref()?)
     }
 
     /// Capture the selected line fragments before any crop, rotation, zoom, or
@@ -129,7 +115,7 @@ impl Selection {
         let Some(span) = self.span else {
             return Vec::new();
         };
-        let Some(text) = self.text.get(&span.page) else {
+        let Some(text) = self.text.as_ref() else {
             return Vec::new();
         };
         selected_ranges(span, text)
@@ -146,7 +132,7 @@ impl Selection {
         let selected = self
             .span
             .filter(|span| span.page == page)
-            .and_then(|span| self.text.get(&page).map(|text| (span, text)));
+            .zip(self.text.as_ref());
         selected.into_iter().flat_map(move |(span, text)| {
             selected_ranges(span, text).into_iter().map(move |range| {
                 let corners = selection_quad(&text.glyphs[range])
@@ -179,48 +165,6 @@ impl Selection {
                 }
             })
         })
-    }
-
-    /// Choose from the current viewport, not a queue captured before a scroll.
-    /// Retain the selected page so copying still works after scrolling away.
-    pub(super) fn request_text(
-        &mut self,
-        mut visible: Range<usize>,
-        generation: u64,
-    ) -> Option<TextRequest> {
-        if self.in_flight.is_some() {
-            return None;
-        }
-        let selected = self.page();
-        self.text
-            .retain(|page, _| visible.contains(page) || selected == Some(*page));
-        let page =
-            visible.find(|page| !self.text.contains_key(page) && !self.failed.contains(page))?;
-        let request = TextRequest { page, generation };
-        self.in_flight = Some(request);
-        Some(request)
-    }
-
-    /// An old document's reply cannot install text or clear a newer request.
-    /// Failed pages are not retried until document replacement.
-    pub(super) fn finish_text(
-        &mut self,
-        request: TextRequest,
-        result: Result<PageText, String>,
-    ) -> bool {
-        if self.in_flight != Some(request) {
-            return false;
-        }
-        self.in_flight = None;
-        match result {
-            Ok(text) => {
-                self.text.insert(request.page, text);
-            }
-            Err(_) => {
-                self.failed.insert(request.page);
-            }
-        }
-        true
     }
 }
 

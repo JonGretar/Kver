@@ -83,6 +83,24 @@ impl CommandPalette {
         let has_document = available.page_count > 0;
         let mut items = vec![
             command("Open PDF…", OpenPdf, true),
+            reader_command(
+                "Toggle reading ruler",
+                crate::reader::ToggleReadingRuler,
+                has_document,
+                cx,
+            ),
+            reader_command(
+                "Next ruler line",
+                crate::reader::NextRulerLine,
+                has_document,
+                cx,
+            ),
+            reader_command(
+                "Previous ruler line",
+                crate::reader::PreviousRulerLine,
+                has_document,
+                cx,
+            ),
             command("Save", Save, available.save_available),
             command("Save As…", SaveAs, available.save_as_available),
             reader_command(

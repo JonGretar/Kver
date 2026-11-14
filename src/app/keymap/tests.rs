@@ -799,8 +799,9 @@ fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_con
             assert_eq!(map.action(keys, Context::Reader), Some(action));
         }
         for (keys, action) in [
-            ("j", "kver::ScrollDown"),
-            ("k", "kver::ScrollUp"),
+            ("j", "kver::ReadDown"),
+            ("r", "kver::ToggleReadingRuler"),
+            ("k", "kver::ReadUp"),
             ("h", "kver::ScrollLeft"),
             ("l", "kver::ScrollRight"),
             ("left", "kver::ScrollLeft"),

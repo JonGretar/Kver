@@ -114,6 +114,7 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "single-page",
     "continuous",
     "use-default-reading-mode",
+    "toggle-reading-ruler",
     "next-page",
     "previous-page",
 ];
@@ -254,6 +255,8 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                     MenuItem::action("Single Page", SinglePage),
                     MenuItem::action("Continuous", Continuous),
                     MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle reading ruler", crate::reader::ToggleReadingRuler),
                 ]),
                 Menu::new("Navigate").items([
                     MenuItem::action("Contents", ShowContents),

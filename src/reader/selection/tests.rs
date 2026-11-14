@@ -1,4 +1,51 @@
 use super::*;
+use crate::coordinates::PageTransform;
+use crate::reader::page_text::{PageTexts, TextRequest};
+
+/// Exercise selection with the same shared source lifecycle as ReaderView.
+#[derive(Default)]
+struct Selection {
+    state: super::Selection,
+    pages: PageTexts,
+}
+
+impl std::ops::Deref for Selection {
+    type Target = super::Selection;
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for Selection {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}
+
+impl Selection {
+    fn begin(&mut self, page: usize, at: Option<Point>) {
+        self.state.begin(page, at, self.pages.get(page).cloned());
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn page_transform(&self, page: usize) -> Option<PageTransform> {
+        self.pages.get(page).map(|text| text.transform).or_else(|| {
+            (self.state.page() == Some(page)).then(|| self.state.text.as_ref().unwrap().transform)
+        })
+    }
+
+    fn request_text(&mut self, visible: Range<usize>, generation: u64) -> Option<TextRequest> {
+        self.pages
+            .request(visible, None, [self.state.page(), None], generation)
+    }
+
+    fn finish_text(&mut self, request: TextRequest, result: Result<PageText, String>) -> bool {
+        self.pages.finish(request, result)
+    }
+}
 
 fn phrase_points(text: &PageText, phrase: &str) -> (Point, Point) {
     for range in &text.lines {

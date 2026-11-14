@@ -94,10 +94,20 @@ fn mixed_type_overlap_requires_an_explicit_target_and_preserves_text_dragging(
 
 #[gpui_kit::test]
 fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppContext) {
+    use crate::app::keymap::{Context as KeyContext, active_map};
     use crate::pdf::annotations::MarkupKind;
     cx.update(|cx| {
         gpui_kit::init(cx);
         bind_reader_keys(cx);
+    });
+    // Exercise the installed bindings: `secondary` is not necessarily the
+    // modifier used by the product's history shortcuts on every platform.
+    let (undo_key, redo_key) = cx.update(|cx| {
+        let map = active_map(cx).unwrap();
+        (
+            map.shortcuts(&UndoAnnotation, KeyContext::Reader)[0].to_owned(),
+            map.shortcuts(&RedoAnnotation, KeyContext::Reader)[0].to_owned(),
+        )
     });
     let directory = tempfile::tempdir().unwrap();
     for (kind, subtype) in
@@ -216,13 +226,13 @@ fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppCon
         assert_eq!(changed.author(), imported.author());
         assert_eq!(changed.comment(), imported.comment());
         cx.update_window(handle, |_, window, cx| {
-            window.press("secondary-z", cx);
+            window.press(&undo_key, cx);
         })
         .unwrap();
         cx.run_until_parked();
         assert!(catalog(&reader, cx).contains(&imported));
         cx.update_window(handle, |_, window, cx| {
-            window.press("secondary-shift-z", cx);
+            window.press(&redo_key, cx);
         })
         .unwrap();
         cx.run_until_parked();

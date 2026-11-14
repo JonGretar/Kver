@@ -29,15 +29,19 @@ intended behavior, not a finalized default keymap.
 - **Counts (numeric prefixes):** apply a quantity to a command, such as
   `10J` to advance ten pages or `5j` to move five steps. Define count behavior
   consistently for supported commands, including line movement with the ruler.
+- **Keyboard text selection:** start a selection, extend it by word or line,
+  then copy or highlight it without using the mouse. Build on the ruler where
+  useful. Do something similar to sioyek's visual selection.
+- **Follow Links:** Pressing `f` or `shift-F`(new window) will allow clicking 
+  links and such things with keyboard only motion. Follow examples of ui from 
+  sioyek, vimlike, vimium.
 - **Independent splits:** view the same PDF at two locations, or two different
   PDFs, with independent navigation and keyboard focus switching. Start here;
   pinned reference panes and linked scrolling are possible later extensions.
 - **Viewport positioning:** place the current reading target at the top,
   centre, or bottom of the view, following Vim's `zt`, `zz`, and `zb` idea.
   Apply this to the ruler, search results, and marks.
-- **Keyboard text selection:** start a selection, extend it by word or line,
-  then copy or highlight it without using the mouse. Build on the ruler where
-  useful.
+
 
 ## Read references without losing context
 
@@ -72,6 +76,10 @@ recognition either.
 - **Typesetting:** SyncTeX forward/inverse navigation with LaTeX editors and
   a reload workflow suited to repeated PDF builds.
 - **Layouts:** snapshots and two-page/presentation layouts.
+- **PDF Dark Mode:** Zathura/gpui-pdf supports making the PDF itself be dark mode
+- **Form Support:** Allow filling out PDF Forms(Zathura/gpui-pdf do it)
+- **CLI Tool:** Better support opening files from the cli
+- **Open Links:** Download and open links.
 - **Library integration:** investigate Zotero without assuming its database
   annotations are embedded in the PDF. No integration API is selected.
 - **Desktop delivery:** signed/notarized macOS distribution and separately
@@ -116,5 +124,6 @@ scope, priorities, ownership, and blockers. Check the code before treating an
 idea here as missing functionality. Change this page when product direction
 changes, not when a ticket lands; shipped changes belong in the changelog.
 
-PDF content editing, OCR, form editing, digital signatures, cloud document
-libraries, and collaboration are not current product commitments.
+PDF content editing, OCR, digital signatures, cloud document libraries, 
+and collaboration are a later luxury to research when we have nothing better 
+to do.

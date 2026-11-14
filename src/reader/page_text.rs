@@ -95,4 +95,29 @@ mod tests {
             assert!(pages.request(page..page + 1, None, [None; 2], 2).is_none());
         }
     }
+
+    #[test]
+    fn textless_traversal_retains_only_visible_active_and_one_priority_page() {
+        let mut pages = PageTexts::default();
+        let empty = || PageText {
+            transform: crate::coordinates::PageTransform::from_coefficients([
+                1., 0., 0., 1., 0., 0.,
+            ]),
+            glyphs: Vec::new(),
+            lines: Vec::new(),
+        };
+        for page in 0..2 {
+            let request = pages.request(0..2, Some(page), [Some(1), None], 1).unwrap();
+            assert!(pages.finish(request, Ok(empty())));
+        }
+        for page in 2..1000 {
+            let request = pages.request(0..1, Some(page), [Some(1), None], 1).unwrap();
+            assert_eq!(request.page(), page);
+            assert!(pages.finish(request, Ok(empty())));
+            assert_eq!(pages.pages.len(), 3);
+            assert!(pages.get(0).is_some());
+            assert!(pages.get(1).is_some());
+            assert!(pages.get(page).is_some());
+        }
+    }
 }

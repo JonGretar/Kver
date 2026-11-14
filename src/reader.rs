@@ -745,6 +745,14 @@ impl ReaderView {
     }
 
     pub fn status(&self) -> &str {
+        if self.ruler.enabled {
+            if self.ruler.traversal.is_some() {
+                return "Reading ruler: looking for text…";
+            }
+            if let Some(notice) = self.ruler.notice {
+                return notice;
+            }
+        }
         if self.ruler.enabled && self.ruler.target.is_none() {
             if self.page_text.failed(self.page_index) {
                 return "Reading ruler: couldn’t read page text";
@@ -1162,6 +1170,7 @@ impl ReaderView {
     }
 
     fn focus_page(&mut self, page: usize) {
+        self.ruler.cancel_work();
         if self.reading_mode == ReadingMode::SinglePage && page != self.page_index {
             self.selection.clear();
         }
@@ -1285,7 +1294,7 @@ impl ReaderView {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.ruler.pending = None;
+        self.ruler.cancel_work();
         self.annotation_identification = None;
         self.annotation_press = Some((page, position, false));
         self.selection.begin(
@@ -1358,7 +1367,7 @@ impl ReaderView {
             return;
         }
         self.ruler.enabled = !self.ruler.enabled;
-        self.ruler.pending = None;
+        self.ruler.cancel_work();
         if self.ruler.enabled && !self.ruler_visible() {
             self.ruler.target = None;
             let bounds = self.scroll.bounds();
@@ -1404,6 +1413,7 @@ impl ReaderView {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) {
+        self.ruler.cancel_work();
         self.annotation_press = None;
         self.selection.finish();
         if self.page_text.get(page).is_none() && !self.page_text.failed(page) {
@@ -1455,8 +1465,27 @@ impl ReaderView {
     }
 
     fn move_ruler(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if !self.ruler.enabled || !self.ruler.step(forward) {
+        self.traverse_ruler(forward, cx);
+    }
+
+    fn reveal_ruler(&mut self, cx: &mut Context<Self>) {
+        let Some(page) = self.ruler.target.as_ref().map(|target| target.page) else {
             return;
+        };
+        self.position_touched = true;
+        if self.page_index != page {
+            let position = if self.reading_mode == ReadingMode::SinglePage {
+                self.selection.clear();
+                Position { page, y: 0. }
+            } else {
+                self.layout().position_at(self.viewport().0)
+            };
+            self.page_index = page;
+            self.selected_page = Some(page);
+            let (_, width, height) = self.viewport();
+            self.apply_fit(page, position, (width, height), 0.);
+        } else {
+            self.selected_page = Some(page);
         }
         if let Some(target) = &self.ruler.target
             && let Some([left, top, right, bottom]) = target.page_rect(self.pages[target.page])
@@ -1509,7 +1538,7 @@ impl ReaderView {
         let visible = self.layout().visible_pages(top, height);
         let Some(request) = self.page_text.request(
             visible,
-            self.ruler.pending.map(|(page, _, _)| page),
+            self.ruler.text_priority(),
             [
                 self.selection.page(),
                 self.ruler.target.as_ref().map(|target| target.page),
@@ -1528,6 +1557,7 @@ impl ReaderView {
                     return;
                 }
                 this.finish_ruler_placement();
+                this.continue_ruler(cx);
                 this.schedule_text(cx);
                 cx.notify();
             });
@@ -1967,6 +1997,7 @@ impl Render for ReaderView {
                 );
             }
             if self.ruler.enabled
+                && (self.ruler.browse_task.is_none() || self.ruler_visible())
                 && !self.selection.has_selection()
                 && self.selected_annotation.is_none()
                 && let Some(target) = self
@@ -2165,7 +2196,7 @@ impl Render for ReaderView {
                     this.selection.clear();
                 } else {
                     this.ruler.enabled = false;
-                    this.ruler.pending = None;
+                    this.ruler.cancel_work();
                 }
                 cx.notify();
             }))
@@ -2326,6 +2357,7 @@ impl Render for ReaderView {
                             this.selected_page = None;
                         }
                         this.sync_viewport(cx);
+                        this.browse_ruler(cx);
                     }))
                     .bg(cx.theme().muted)
                     .p_4()
@@ -2459,6 +2491,7 @@ impl ReaderView {
         self.position_touched = true;
         self.scroll_to(next, self.viewport().0);
         self.sync_viewport(cx);
+        self.browse_ruler(cx);
     }
 
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
@@ -2473,6 +2506,7 @@ impl ReaderView {
             self.selected_page = None;
         }
         self.sync_viewport(cx);
+        self.browse_ruler(cx);
     }
 }
 

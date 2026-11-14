@@ -380,6 +380,11 @@ impl ResolvedKeymap {
             // its toolbar buttons have focus. Menus handle Escape first.
             .chain([KeyBinding::new(
                 "escape",
+                crate::reader::ExitReadingRuler,
+                Some("Reader && !SelectedAnnotation"),
+            )])
+            .chain([KeyBinding::new(
+                "escape",
                 crate::reader::DeselectAnnotation,
                 Some(crate::key_context::SELECTED_ANNOTATION),
             )])
@@ -804,9 +809,10 @@ fn preset_defaults(preset: Preset) -> Vec<Entry> {
                 Entry::bind("ctrl-d", Context::Reader, ScrollHalfScreenDown),
                 Entry::bind("ctrl-u", Context::Reader, ScrollHalfScreenUp),
                 Entry::bind("down", Context::Reader, ScrollDown),
-                Entry::bind("j", Context::Reader, ScrollDown),
+                Entry::bind("r", Context::Reader, crate::reader::ToggleReadingRuler),
+                Entry::bind("j", Context::Reader, crate::reader::ReadDown),
                 Entry::bind("up", Context::Reader, ScrollUp),
-                Entry::bind("k", Context::Reader, ScrollUp),
+                Entry::bind("k", Context::Reader, crate::reader::ReadUp),
                 Entry::bind("h", Context::Reader, ScrollLeft),
                 Entry::bind("l", Context::Reader, ScrollRight),
                 Entry::bind("space", Context::Reader, ScrollHalfScreenDown),

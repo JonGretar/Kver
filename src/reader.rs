@@ -9,7 +9,9 @@ mod links;
 mod marks;
 mod navigation;
 mod page_annotations;
+mod page_text;
 mod rendering;
+mod ruler;
 mod selection;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
@@ -94,6 +96,8 @@ pub struct ReaderView {
     pages: Vec<(f32, f32)>,
     rasters: PageRasters,
     document_generation: u64,
+    page_text: page_text::PageTexts,
+    ruler: ruler::Ruler,
     selection: Selection,
     // A remembered one-shot command, not a persistent pointer tool.
     active_markup: pdf::annotations::MarkupKind,
@@ -222,6 +226,8 @@ impl ReaderView {
             pages: Vec::new(),
             rasters: PageRasters::default(),
             document_generation: 0,
+            page_text: page_text::PageTexts::default(),
+            ruler: ruler::Ruler::default(),
             selection: Selection::default(),
             active_markup: pdf::annotations::MarkupKind::Highlight,
             links: PageLinks::default(),
@@ -263,6 +269,8 @@ impl ReaderView {
         self.annotation_press = None;
         self.annotation_choice = None;
         self.selection.reset();
+        self.page_text = page_text::PageTexts::default();
+        self.ruler = ruler::Ruler::default();
         self.links.reset();
         self.path = Some(path);
         self.record_path = None;
@@ -737,6 +745,16 @@ impl ReaderView {
     }
 
     pub fn status(&self) -> &str {
+        if self.ruler.enabled && self.ruler.target.is_none() {
+            if self.page_text.failed(self.page_index) {
+                return "Reading ruler: couldn’t read page text";
+            }
+            return if self.page_text.get(self.page_index).is_some() {
+                "Reading ruler: no usable text on this page"
+            } else {
+                "Reading ruler: loading page text…"
+            };
+        }
         &self.status
     }
     pub(crate) fn report_link_error(&mut self, error: String, cx: &mut Context<Self>) {
@@ -946,6 +964,8 @@ impl ReaderView {
         self.document = Some(document.clone());
         self.pages = session.read(cx).reloaded_pages();
         self.selection.reset();
+        self.page_text = page_text::PageTexts::default();
+        self.ruler = ruler::Ruler::default();
         self.links.reset();
         self.rasters.invalidate();
         self.find_highlight = None;
@@ -1224,7 +1244,17 @@ impl ReaderView {
 
     /// Measured scroll bounds and centered page layout define the window origin.
     fn page_viewport(&self, index: usize) -> Option<PageViewport> {
-        let transform = self.selection.page_transform(index)?;
+        let transform = self
+            .page_text
+            .get(index)
+            .map(|text| text.transform)
+            .or_else(|| {
+                self.ruler
+                    .target
+                    .as_ref()
+                    .filter(|target| target.page == index)
+                    .map(|target| target.text.transform)
+            })?;
         let bounds = self.scroll.bounds();
         self.layout().page_viewport(
             index,
@@ -1255,10 +1285,14 @@ impl ReaderView {
         position: gpui::Point<gpui::Pixels>,
         cx: &mut Context<Self>,
     ) {
+        self.ruler.pending = None;
         self.annotation_identification = None;
         self.annotation_press = Some((page, position, false));
-        self.selection
-            .begin(page, self.pointer_document(page, position));
+        self.selection.begin(
+            page,
+            self.pointer_document(page, position),
+            self.page_text.get(page).cloned(),
+        );
         cx.notify();
     }
 
@@ -1283,6 +1317,187 @@ impl ReaderView {
         }
     }
 
+    fn ruler_visible(&self) -> bool {
+        let Some(target) = &self.ruler.target else {
+            return false;
+        };
+        let (top, _, height) = self.viewport();
+        if !self
+            .layout()
+            .visible_pages(top, height)
+            .contains(&target.page)
+        {
+            return false;
+        }
+        let Some([left, y, right, bottom]) = target.page_rect(self.pages[target.page]) else {
+            return false;
+        };
+        let Some(viewport) = self.page_viewport(target.page) else {
+            return false;
+        };
+        let project = |x, y| {
+            viewport.document_to_screen(
+                target
+                    .text
+                    .transform
+                    .page_to_document(Point { x, y })
+                    .unwrap_or(Point { x, y }),
+            )
+        };
+        let a = project(left, y);
+        let b = project(right, bottom);
+        let bounds = self.scroll.bounds();
+        a.y >= f32::from(bounds.top()) as f64
+            && b.y <= f32::from(bounds.bottom()) as f64
+            && b.x > f32::from(bounds.left()) as f64
+            && a.x < f32::from(bounds.right()) as f64
+    }
+
+    fn toggle_ruler(&mut self, cx: &mut Context<Self>) {
+        if self.pages.is_empty() {
+            return;
+        }
+        self.ruler.enabled = !self.ruler.enabled;
+        self.ruler.pending = None;
+        if self.ruler.enabled && !self.ruler_visible() {
+            self.ruler.target = None;
+            let bounds = self.scroll.bounds();
+            let center = bounds.center();
+            let (top, _, height) = self.viewport();
+            let page = self.layout().current_page_at(top, height);
+            if let Some(text) = self.page_text.get(page).cloned() {
+                if let Some(at) = self.pointer_document(page, center) {
+                    self.ruler.place(page, text, at, false);
+                }
+            } else {
+                self.queue_ruler_placement(page, center, false);
+            }
+            self.schedule_text(cx);
+        }
+        cx.notify();
+    }
+
+    fn finish_ruler_placement(&mut self) {
+        let Some((page, at, exact)) = self.ruler.pending else {
+            return;
+        };
+        if !self.ruler.enabled {
+            return;
+        }
+        if let Some(text) = self.page_text.get(page).cloned() {
+            if let Some(at) = text.transform.page_to_document(at) {
+                let placed = self.ruler.place(page, text, at, exact);
+                if exact && placed {
+                    self.selection.clear();
+                    self.selected_annotation = None;
+                    self.annotation_identification = None;
+                }
+            }
+        } else if self.page_text.failed(page) {
+            self.ruler.pending = None;
+        }
+    }
+
+    fn place_ruler(
+        &mut self,
+        page: usize,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.annotation_press = None;
+        self.selection.finish();
+        if self.page_text.get(page).is_none() && !self.page_text.failed(page) {
+            self.ruler.enabled = true;
+            self.queue_ruler_placement(page, position, true);
+            self.schedule_text(cx);
+            cx.notify();
+            return;
+        }
+        if let Some(at) = self.pointer_document(page, position)
+            && let Some(text) = self.page_text.get(page).cloned()
+            && self.ruler.place(page, text, at, true)
+        {
+            self.ruler.enabled = true;
+            self.selection.clear();
+            self.selected_annotation = None;
+            self.annotation_identification = None;
+        }
+        cx.notify();
+    }
+
+    fn queue_ruler_placement(
+        &mut self,
+        page: usize,
+        position: gpui::Point<gpui::Pixels>,
+        exact: bool,
+    ) {
+        // Capture page-local points until extraction supplies the PDF transform.
+        // No backend work runs in an input handler.
+        let bounds = self.scroll.bounds();
+        if let Some(viewport) = self.layout().page_viewport(
+            page,
+            crate::coordinates::PageTransform::from_coefficients([1., 0., 0., 1., 0., 0.]),
+            Point {
+                x: f32::from(bounds.left()) as f64,
+                y: f32::from(bounds.top()) as f64,
+            },
+            f32::from(bounds.size.width),
+            Point {
+                x: -f32::from(self.scroll.offset().x) as f64,
+                y: -f32::from(self.scroll.offset().y) as f64,
+            },
+        ) && let Some(at) = viewport.screen_to_document(Point {
+            x: f32::from(position.x) as f64,
+            y: f32::from(position.y) as f64,
+        }) {
+            self.ruler.pending = Some((page, at, exact));
+        }
+    }
+
+    fn move_ruler(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if !self.ruler.enabled || !self.ruler.step(forward) {
+            return;
+        }
+        if let Some(target) = &self.ruler.target
+            && let Some([left, top, right, bottom]) = target.page_rect(self.pages[target.page])
+            && let Some(viewport) = self.page_viewport(target.page)
+        {
+            let bounds = self.scroll.bounds();
+            let project = |x, y| {
+                viewport.document_to_screen(
+                    target
+                        .text
+                        .transform
+                        .page_to_document(Point { x, y })
+                        .unwrap_or(Point { x, y }),
+                )
+            };
+            let a = project(left, top);
+            let b = project(right, bottom);
+            let (scroll_top, _, height) = self.viewport();
+            let margin = ((b.y - a.y) * 2.).min(height as f64 * 0.2);
+            let dx = ruler::reveal_delta(
+                a.x,
+                b.x,
+                f32::from(bounds.left()) as f64,
+                f32::from(bounds.right()) as f64,
+                margin,
+            );
+            let dy = ruler::reveal_delta(
+                a.y,
+                b.y,
+                f32::from(bounds.top()) as f64,
+                f32::from(bounds.bottom()) as f64,
+                margin,
+            );
+            let new_x = -f32::from(self.scroll.offset().x) + dx as f32;
+            let new_top = scroll_top + dy as f32;
+            self.scroll_to(new_x, new_top);
+            self.sync_viewport(cx);
+        }
+        cx.notify();
+    }
+
     fn schedule_text(&mut self, cx: &mut Context<Self>) {
         if self.pages.is_empty() {
             return;
@@ -1292,10 +1507,15 @@ impl ReaderView {
         };
         let (top, _, height) = self.viewport();
         let visible = self.layout().visible_pages(top, height);
-        let Some(request) = self
-            .selection
-            .request_text(visible, self.document_generation)
-        else {
+        let Some(request) = self.page_text.request(
+            visible,
+            self.ruler.pending.map(|(page, _, _)| page),
+            [
+                self.selection.page(),
+                self.ruler.target.as_ref().map(|target| target.page),
+            ],
+            self.document_generation,
+        ) else {
             return;
         };
         let work = cx
@@ -1304,9 +1524,10 @@ impl ReaderView {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                if !this.selection.finish_text(request, result) {
+                if !this.page_text.finish(request, result) {
                     return;
                 }
+                this.finish_ruler_placement();
                 this.schedule_text(cx);
                 cx.notify();
             });
@@ -1745,6 +1966,46 @@ impl Render for ReaderView {
                         .bg(gpui::rgba(0x278acb70)),
                 );
             }
+            if self.ruler.enabled
+                && !self.selection.has_selection()
+                && self.selected_annotation.is_none()
+                && let Some(target) = self
+                    .ruler
+                    .target
+                    .as_ref()
+                    .filter(|target| target.page == index)
+                && let Some([left, _, right, bottom]) = target.page_rect(self.pages[index])
+            {
+                let (wash, marker) = crate::app::theme::reading_ruler(cx.theme().mode.is_dark());
+                // All overlay measurements are document geometry in PDF points.
+                // Leave active text unobscured; quiet the unread portion below it.
+                let marker_bottom = (bottom + 3.).min(self.pages[index].1 as f64);
+                page = page
+                    .child(
+                        div()
+                            .id("reading-ruler-wash")
+                            .test_support()
+                            .absolute()
+                            .left(px(0.))
+                            .top(px(marker_bottom as f32 * self.scale))
+                            .w(page_width)
+                            .h(px(
+                                (self.pages[index].1 as f64 - marker_bottom) as f32 * self.scale
+                            ))
+                            .bg(wash),
+                    )
+                    .child(
+                        div()
+                            .id("reading-ruler-marker")
+                            .test_support()
+                            .absolute()
+                            .left(px(left as f32 * self.scale))
+                            .top(px(bottom as f32 * self.scale))
+                            .w(px((right - left) as f32 * self.scale))
+                            .h(px((marker_bottom - bottom) as f32 * self.scale))
+                            .bg(marker),
+                    );
+            }
             if let Some((_, _, [left, top, right, bottom])) = self
                 .annotation_identification
                 .filter(|(_, page, _)| *page == index)
@@ -1800,11 +2061,25 @@ impl Render for ReaderView {
                                 element.border_2().border_color(cx.theme().ring)
                             })
                             .track_focus(focus.read(cx))
-                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                // Following a link must not begin a selection in its page.
-                                cx.stop_propagation();
-                            })
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(
+                                    move |this, event: &gpui::MouseDownEvent, window, cx| {
+                                        // Following a link must not begin a selection in its page.
+                                        if event.modifiers.alt {
+                                            this.place_ruler(index, event.position, cx);
+                                            window.focus(&this.focus, cx);
+                                        }
+                                        cx.stop_propagation();
+                                    },
+                                ),
+                            )
+                            .on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                                // Gesture ownership comes from mouse-down, even
+                                // if Option is released before mouse-up.
+                                if matches!(event, gpui::ClickEvent::Mouse(mouse) if mouse.down.modifiers.alt) {
+                                    return;
+                                }
                                 if this.activate_link(generation, index, link_index, cx) {
                                     window.focus(&this.focus, cx);
                                 }
@@ -1815,7 +2090,11 @@ impl Render for ReaderView {
             page = page.on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
-                    this.start_selection(index, event.position, cx);
+                    if event.modifiers.alt {
+                        this.place_ruler(index, event.position, cx);
+                    } else {
+                        this.start_selection(index, event.position, cx);
+                    }
                 }),
             );
             content = content.child(
@@ -1864,6 +2143,32 @@ impl Render for ReaderView {
                 this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
+            .on_action(cx.listener(|this, _: &ToggleReadingRuler, _, cx| this.toggle_ruler(cx)))
+            .on_action(cx.listener(|this, _: &NextRulerLine, _, cx| this.move_ruler(true, cx)))
+            .on_action(cx.listener(|this, _: &PreviousRulerLine, _, cx| this.move_ruler(false, cx)))
+            .on_action(cx.listener(|this, _: &ReadDown, _, cx| {
+                if this.ruler.enabled {
+                    this.move_ruler(true, cx);
+                } else {
+                    this.scroll_by(100., cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ReadUp, _, cx| {
+                if this.ruler.enabled {
+                    this.move_ruler(false, cx);
+                } else {
+                    this.scroll_by(-100., cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ExitReadingRuler, _, cx| {
+                if this.selection.page().is_some() {
+                    this.selection.clear();
+                } else {
+                    this.ruler.enabled = false;
+                    this.ruler.pending = None;
+                }
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &ApplyMarkup, window, cx| {
                 this.markup_selection(this.active_markup, window, cx)
             }))

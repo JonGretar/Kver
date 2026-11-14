@@ -693,11 +693,13 @@ fn shortcut_task(action: &str) -> &'static str {
         "Find"
     } else if name.contains("Zoom")
         || name.contains("Fit")
+        || name.contains("Ruler")
         || name.contains("Page") && matches!(name, "SinglePage")
         || matches!(name, "Continuous")
     {
         "View"
     } else if name.contains("Scroll")
+        || matches!(name, "ReadDown" | "ReadUp")
         || name.contains("Page")
         || name.contains("Navigate")
         || name.contains("Document")
@@ -711,6 +713,8 @@ fn shortcut_task(action: &str) -> &'static str {
 fn shortcut_label(action: &str) -> String {
     let name = action.rsplit("::").next().unwrap_or(action);
     match name {
+        "ReadDown" => return "Scroll down / next ruler line".into(),
+        "ReadUp" => return "Scroll up / previous ruler line".into(),
         "ApplyMarkup" => return "Apply annotation".into(),
         "StrikeOut" => return "Strikethrough".into(),
         "Squiggly" => return "Squiggly underline".into(),

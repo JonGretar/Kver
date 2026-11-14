@@ -21,6 +21,7 @@ domain terms.
 | Shared PDF baseline, annotation edits, undo, saving, and reload | [`reader/document_session.rs`](../src/reader/document_session.rs) and its child modules |
 | Layout, zoom anchors, and navigation geometry | [`reader/navigation.rs`](../src/reader/navigation.rs) |
 | Raster scheduling and bitmap retention | [`reader/rendering.rs`](../src/reader/rendering.rs) |
+| Shared page-text access and window-local reading ruler | [`reader/page_text.rs`](../src/reader/page_text.rs), [`reader/ruler.rs`](../src/reader/ruler.rs) |
 | Text selection, links, and on-page annotation targeting | [`reader/selection.rs`](../src/reader/selection.rs), [`reader/links.rs`](../src/reader/links.rs), [`reader/page_annotations.rs`](../src/reader/page_annotations.rs) |
 | Find, Contents, annotations list, and local marks | [`reader/find.rs`](../src/reader/find.rs), [`reader/contents.rs`](../src/reader/contents.rs), [`reader/annotations.rs`](../src/reader/annotations.rs), [`reader/marks.rs`](../src/reader/marks.rs) |
 | Back/Forward jump history | [`app/document_window/jumplist.rs`](../src/app/document_window/jumplist.rs) |
@@ -40,8 +41,10 @@ domain terms.
 - **Document session:** shared immutable PDF baseline, annotation catalog,
   editing history, dirty state, and serialized save/reload operations.
   Readers opening the same canonical path join the same session.
-- **Reader:** window-local navigation, zoom, reading mode, selection, and
+- **Reader:** window-local navigation, zoom, reading mode, ruler, selection, and
   viewport resources. Closing one reader does not discard another's session.
+  Selection and ruler share bounded background page-text access; each retains
+  only its active text page independently of the viewport cache.
 - **Tools:** Find, Contents, Annotations, marks, and Recent own their retained
   interaction and asynchronous lifetimes, rather than storing them in the
   window compositor.

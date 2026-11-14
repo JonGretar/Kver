@@ -91,6 +91,7 @@ by the current keyboard configuration:
 | Application and windows | `open-pdf`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `copy` |
+| Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
 | Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
@@ -109,7 +110,8 @@ Vim distinguishes PDF pages from viewport-sized scrolling:
 
 | Task | Vim shortcut |
 | --- | --- |
-| Scroll down / up | `j` / `k` |
+| Scroll down / up (follow lines in ruler mode) | `j` / `k` |
+| Toggle reading ruler | `r` |
 | Next / previous PDF page | `J` / `K` |
 | Forward / backward one screen | Ctrl-F / Ctrl-B |
 | Down / up half a screen | Ctrl-D / Ctrl-U or Space / Shift-Space |
@@ -122,6 +124,18 @@ These Vim keys belong to the reader, not text inputs or sidebar lists.
 `p` no longer turns pages and has no default binding. Escape dismisses the
 sidebar in either preset. Native menu commands remain available in Vim without
 turning bare reader keys into macOS shortcuts that intercept input text.
+
+## Reading ruler
+
+Choose **Toggle reading ruler** from the View menu or command palette, or
+Option/Alt-click text to place the guide. Vim uses `r` to toggle and `j`/`k`
+to follow lines on the current page. Ctrl-R remains annotation redo.
+Escape leaves ruler mode after dismissing a more-specific interaction.
+
+The Standard preset has no default ruler shortcuts. Assign the three
+reading-ruler commands above in the `reader` context to use your preferred
+keys. Line commands do nothing while the ruler is off. The guide and its
+remembered line belong to the current window and are not saved in the PDF.
 
 ## Annotation shortcuts
 

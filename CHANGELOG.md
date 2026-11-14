@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Follow a page with a reading ruler: toggle it from the menu or command
+  palette, or Option/Alt-click text to place it. In the Vim keymap, `r`
+  toggles the guide and `j`/`k` follow lines while it is enabled.
+
 ## [0.5.1] - 2026-11-14
 
 ### Changed

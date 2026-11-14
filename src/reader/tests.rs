@@ -21,6 +21,7 @@ mod page_annotations;
 mod positions;
 mod reading_mode;
 mod rendering;
+mod ruler;
 mod selection;
 mod sessions;
 mod vim;

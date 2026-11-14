@@ -303,10 +303,7 @@ fn replacing_document_during_drag_clears_selection_and_late_pointer_input(cx: &m
     })
     .unwrap();
     reader.read_with(cx, |reader, _| {
-        assert!(
-            reader.selection.page_transform(0).is_some(),
-            "replacement text loaded"
-        );
+        assert!(reader.page_text.get(0).is_some(), "replacement text loaded");
         assert_eq!(reader.selected_text(), None);
     });
 }

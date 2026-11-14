@@ -12,6 +12,7 @@ mod page_annotations;
 mod page_text;
 mod rendering;
 mod ruler;
+mod ruler_history;
 mod selection;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
@@ -98,6 +99,7 @@ pub struct ReaderView {
     document_generation: u64,
     page_text: page_text::PageTexts,
     ruler: ruler::Ruler,
+    ruler_history: ruler_history::RulerHistory,
     selection: Selection,
     // A remembered one-shot command, not a persistent pointer tool.
     active_markup: pdf::annotations::MarkupKind,
@@ -228,6 +230,7 @@ impl ReaderView {
             document_generation: 0,
             page_text: page_text::PageTexts::default(),
             ruler: ruler::Ruler::default(),
+            ruler_history: ruler_history::RulerHistory::default(),
             selection: Selection::default(),
             active_markup: pdf::annotations::MarkupKind::Highlight,
             links: PageLinks::default(),
@@ -273,6 +276,7 @@ impl ReaderView {
         self.ruler = ruler::Ruler::default();
         self.links.reset();
         self.path = Some(path);
+        self.ruler_history = ruler_history::RulerHistory::default();
         self.record_path = None;
         self.position_ready = false;
         self.position_touched = false;
@@ -649,6 +653,7 @@ impl ReaderView {
                         }
                         this.record_path = Some(path.clone());
                         if let Some(history) = history {
+                            this.load_ruler_anchor(&history, history_epoch.unwrap_or(0), cx);
                             let record =
                                 history.record_at(path.clone(), history_epoch.unwrap_or(0));
                             let position = history.position(path, history_epoch.unwrap_or(0));
@@ -1025,7 +1030,7 @@ impl ReaderView {
         self.selected_page = selected_page.map(|page| page.min(self.pages.len() - 1));
         self.ruler.enabled = ruler_enabled;
         if let Some((page, at)) = ruler_anchor.filter(|(page, _)| *page < self.pages.len()) {
-            self.ruler.pending = Some((page, ruler::Placement::Document(at)));
+            self.ruler.pending = Some((page, ruler::Placement::Reload(at)));
         } else if ruler_enabled {
             self.queue_ruler_placement(self.page_index, self.scroll.bounds().center(), false);
         }
@@ -1409,6 +1414,10 @@ impl ReaderView {
         self.ruler.enabled = !self.ruler.enabled;
         self.ruler.cancel_work();
         if self.ruler.enabled && !self.ruler_visible() {
+            if self.resume_ruler(cx) {
+                cx.notify();
+                return;
+            }
             self.ruler.target = None;
             let bounds = self.scroll.bounds();
             let center = bounds.center();
@@ -1422,21 +1431,28 @@ impl ReaderView {
                 self.queue_ruler_placement(page, center, false);
             }
             self.schedule_text(cx);
+            self.remember_ruler(cx);
         }
         cx.notify();
     }
 
-    fn finish_ruler_placement(&mut self) {
+    fn finish_ruler_placement(&mut self, cx: &mut Context<Self>) {
         let Some((page, placement)) = self.ruler.pending else {
             return;
         };
         // Reload also refreshes a remembered, hidden anchor. It must not turn
         // mode on, retain old text identities, or reveal/refocus the reader.
-        if !self.ruler.enabled && !matches!(placement, ruler::Placement::Document(_)) {
+        if !self.ruler.enabled && !matches!(placement, ruler::Placement::Reload(_)) {
             return;
         }
         if let Some(text) = self.page_text.get(page).cloned() {
-            let exact = matches!(placement, ruler::Placement::ExactPage(_));
+            let restoring = matches!(placement, ruler::Placement::Remembered(_));
+            let exact = matches!(
+                placement,
+                ruler::Placement::ExactPage(_)
+                    | ruler::Placement::Remembered(_)
+                    | ruler::Placement::Reload(_)
+            );
             let at = match placement {
                 ruler::Placement::First => {
                     let line =
@@ -1449,16 +1465,28 @@ impl ReaderView {
                 ruler::Placement::Page(at) | ruler::Placement::ExactPage(at) => {
                     text.transform.page_to_document(at)
                 }
-                ruler::Placement::Document(at) => Some(at),
+                ruler::Placement::Document(at)
+                | ruler::Placement::Remembered(at)
+                | ruler::Placement::Reload(at) => Some(at),
             };
             self.ruler.pending = None;
             if let Some(at) = at {
                 let placed = self.ruler.place(page, text, at, exact);
+                if matches!(placement, ruler::Placement::Reload(_)) {
+                    return;
+                }
+                if restoring {
+                    if !placed || !self.ruler_visible() {
+                        self.place_ruler_at_center(cx);
+                    }
+                    return;
+                }
                 if exact && placed {
                     self.selection.clear();
                     self.selected_annotation = None;
                     self.annotation_identification = None;
                 }
+                self.remember_ruler(cx);
             }
         } else if self.page_text.failed(page) {
             self.ruler.pending = None;
@@ -1489,6 +1517,7 @@ impl ReaderView {
             self.selection.clear();
             self.selected_annotation = None;
             self.annotation_identification = None;
+            self.remember_ruler(cx);
         }
         cx.notify();
     }
@@ -1644,7 +1673,7 @@ impl ReaderView {
                     evidence,
                     ruler::furniture::window(center, this.pages.len()),
                 );
-                this.finish_ruler_placement();
+                this.finish_ruler_placement(cx);
                 this.continue_ruler(cx);
                 this.schedule_text(cx);
                 cx.notify();

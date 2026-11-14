@@ -3,6 +3,8 @@
 
 mod store;
 #[cfg(feature = "gui")]
+pub(crate) use store::ruler::RulerAnchor;
+#[cfg(feature = "gui")]
 mod worker;
 
 #[cfg(feature = "gui")]

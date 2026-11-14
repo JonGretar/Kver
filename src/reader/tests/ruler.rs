@@ -7,6 +7,7 @@ use gpui_kit::{
 };
 
 mod furniture;
+mod history;
 mod interactions;
 mod traversal;
 
@@ -296,7 +297,7 @@ fn ruler_late_text_does_not_reenable_a_cancelled_activation(cx: &mut TestAppCont
     let text = pdf::page_text(Path::new("examples/readme-sample.pdf"), 0).unwrap();
     reader.update(cx, |reader, cx| {
         assert!(reader.page_text.finish(request, Ok(text)));
-        reader.finish_ruler_placement();
+        reader.finish_ruler_placement(cx);
         cx.notify();
     });
     settle(cx, window);
@@ -328,7 +329,7 @@ fn ruler_distinguishes_loading_failure_and_textless_without_spatial_fallback(
                 .page_text
                 .finish(request, Err("extraction failed".into()))
         );
-        reader.finish_ruler_placement();
+        reader.finish_ruler_placement(cx);
         cx.notify();
     });
     reader.read_with(cx, |reader, _| {

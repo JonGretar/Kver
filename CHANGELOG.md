@@ -23,6 +23,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Automatic ruler movement skips confidently repeated running headers, footers,
   and page numbers using nearby pages. Option/Alt-click can still place the
   ruler on skipped text; selection, copying, and search remain unchanged.
+- Resume the ruler's remembered line when reopening a PDF and enabling the
+  guide, if that line is visible. Windows keep independent targets, and ruler
+  locations follow the existing reading-history privacy and clearing settings.
 
 ### Changed
 

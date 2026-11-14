@@ -364,7 +364,7 @@ fn ruler_delayed_destination_supersession_never_steals_find_focus(cx: &mut TestA
     let text = pdf::page_text(Path::new("examples/reading-order.pdf"), 3).unwrap();
     reader.update(cx, |reader, cx| {
         assert!(reader.page_text.finish(request, Ok(text)));
-        reader.finish_ruler_placement();
+        reader.finish_ruler_placement(cx);
         reader.schedule_text(cx);
     });
     settle(cx, window);

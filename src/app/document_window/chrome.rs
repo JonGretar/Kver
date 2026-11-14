@@ -325,9 +325,11 @@ fn creation_types(mut menu: PopupMenu, kind: MarkupKind, available: bool) -> Pop
 }
 
 fn creation_colors(mut menu: PopupMenu, current: HighlightColor) -> PopupMenu {
+    menu = menu.check_side(gpui_kit::component::Side::Right);
     for color in HighlightColor::ALL {
         menu = menu.item(
             PopupMenuItem::new(color.label())
+                .icon(crate::reader::markup_color_icon(color))
                 .checked(color == current)
                 .action(Box::new(crate::reader::SetMarkupColor(color))),
         );

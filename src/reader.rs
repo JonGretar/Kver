@@ -17,8 +17,8 @@ pub use crate::app::document_window::sidebar::{
     ShowAnnotations, ShowContents, ShowFind, ToggleSidebar,
 };
 pub use crate::reading_history::ShowRecent;
-pub(crate) use annotations::markup_icon;
 pub(crate) use annotations::{AnnotationEdit, AnnotationNavigation, AnnotationsPanel};
+pub(crate) use annotations::{markup_color_icon, markup_icon};
 pub use commands::*;
 pub use contents::ActivateOutline;
 pub(crate) use contents::ContentsPanel;
@@ -1835,10 +1835,22 @@ impl Render for ReaderView {
             .tab_group()
             .track_focus(&self.focus)
             .when(
+                self.selected_annotation.is_some()
+                    && !self.marks_open(cx)
+                    && self.annotation_choice.is_none(),
+                |reader| reader.key_context(crate::key_context::SELECTED_ANNOTATION),
+            )
+            .when(
                 !self.marks_open(cx)
                     && self.annotation_choice.is_none()
                     && self.focus.is_focused(window),
-                |reader| reader.key_context(crate::key_context::READER),
+                |reader| {
+                    reader.key_context(if self.selected_annotation.is_some() {
+                        "Reader SelectedAnnotation"
+                    } else {
+                        crate::key_context::READER
+                    })
+                },
             )
             .on_action(cx.listener(|this, action: &SetLocalMark, _, cx| {
                 if !this.pages.is_empty() {
@@ -1877,8 +1889,15 @@ impl Render for ReaderView {
                     });
                 }
             }))
-            .on_action(cx.listener(|this, _: &DeleteHighlight, _, cx| {
+            .on_action(cx.listener(|this, _: &DeleteHighlight, window, cx| {
+                if this.annotation_edit_available(cx) {
+                    // A focused strip control disappears with the selection.
+                    window.focus(&this.focus, cx);
+                }
                 this.edit_selected_highlight(None, cx);
+            }))
+            .on_action(cx.listener(|this, _: &DeselectAnnotation, window, cx| {
+                this.deselect_annotation(window, cx);
             }))
             .on_mouse_up(
                 gpui::MouseButton::Left,

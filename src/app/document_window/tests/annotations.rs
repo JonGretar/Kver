@@ -57,7 +57,7 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
                         .unwrap()
                         .starts_with("No marked text available")
                 );
-                assert_eq!(window.find("copy-annotation").disabled(), Some(true));
+                assert!(window.try_find("copy-annotation").is_none());
             }
             // Commands target this row without first selecting/navigating it.
             window
@@ -197,7 +197,7 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
         window.render_frame(cx);
         assert!(window.try_find(row(epoch, 3)).is_none());
         assert!(window.try_find("annotation-identification").is_none());
-        assert_eq!(window.find("copy-annotation").disabled(), Some(true));
+        assert!(window.try_find("copy-annotation").is_none());
     })
     .unwrap();
     cx.update_window(handle, |_, window, cx| {
@@ -311,7 +311,7 @@ fn deleting_final_list_row_repairs_focus_and_replacement_rejects_open_color_menu
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find(row(epoch, 0)).visible());
-        assert_eq!(window.find("copy-annotation").disabled(), Some(true));
+        assert!(window.try_find("copy-annotation").is_none());
         assert_eq!(window.find("annotations-panel").focused(), Some(true));
         assert!(window.try_find("annotation-identification").is_none());
         assert!(window.find("document-unsaved").visible());
@@ -508,7 +508,7 @@ fn imported_annotations_browse_copy_and_identify_all_four_types(cx: &mut TestApp
                 .unwrap()
                 .starts_with("No marked text available")
         );
-        assert_eq!(window.find("copy-annotation").disabled(), Some(true));
+        assert!(window.try_find("copy-annotation").is_none());
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("untouched".into()));
         window.press("cmd-c", cx);
         assert_eq!(
@@ -571,7 +571,7 @@ fn replacing_document_while_annotations_load_never_restores_old_rows_or_copy(
             window.find("annotations-status").label(),
             Some("No text markup in this PDF")
         );
-        assert_eq!(window.find("copy-annotation").disabled(), Some(true));
+        assert!(window.try_find("copy-annotation").is_none());
         window.press("down", cx);
         window.press("enter", cx);
     })
@@ -618,7 +618,8 @@ fn a_growing_annotation_list_virtualizes_rows_and_navigates_offscreen_entries(
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.click("copy-annotation", cx);
+        assert!(window.try_find("copy-annotation").is_none());
+        window.press("cmd-c", cx);
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
             Some("Highlight passage")
@@ -702,7 +703,7 @@ fn replacing_a_document_with_an_unreadable_pdf_does_not_leave_annotations_loadin
                 .unwrap()
                 .starts_with("Couldn’t load")
         );
-        assert_eq!(window.find("copy-annotation").disabled(), Some(true));
+        assert!(window.try_find("copy-annotation").is_none());
     })
     .unwrap();
 }

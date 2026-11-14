@@ -376,6 +376,13 @@ impl ResolvedKeymap {
                 gpui_kit::NoAction,
                 Some(crate::key_context::ANNOTATION_ROW_ACTIONS),
             )])
+            // Selection dismissal is a surface lifecycle key, including while
+            // its toolbar buttons have focus. Menus handle Escape first.
+            .chain([KeyBinding::new(
+                "escape",
+                crate::reader::DeselectAnnotation,
+                Some(crate::key_context::SELECTED_ANNOTATION),
+            )])
             .collect()
     }
 }

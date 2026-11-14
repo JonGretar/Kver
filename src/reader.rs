@@ -357,6 +357,14 @@ impl ReaderView {
                             reader.pending_restore = None;
                             reader.restore_position(*position);
                             reader.sync_viewport(cx);
+                            reader.retarget_ruler(
+                                position.page,
+                                ruler::Placement::Page(Point {
+                                    x: 0.,
+                                    y: position.y as f64,
+                                }),
+                                cx,
+                            );
                             reader.emit_jump(before, cx);
                         } else {
                             reader.status = format!("Local mark {letter} is outside this PDF");
@@ -423,6 +431,7 @@ impl ReaderView {
                 .offset_for(Position { page: hit.page, y }, height * 0.25),
         );
         self.sync_viewport(cx);
+        self.retarget_ruler(hit.page, ruler::Placement::Document(hit.corners[0]), cx);
         self.emit_jump(before, cx);
         cx.notify();
     }
@@ -472,6 +481,7 @@ impl ReaderView {
             self.status = "This annotation has no usable location; showing its page".into();
         }
         self.sync_viewport(cx);
+        self.retarget_ruler(page, ruler::Placement::Page(Point { x: left, y: top }), cx);
         self.emit_jump(before, cx);
         cx.notify();
     }
@@ -857,6 +867,14 @@ impl ReaderView {
             ),
         );
         self.sync_viewport(cx);
+        self.retarget_ruler(
+            location.page,
+            ruler::Placement::Page(Point {
+                x: location.x as f64,
+                y: location.y as f64,
+            }),
+            cx,
+        );
         true
     }
     pub fn page_count(&self) -> Option<usize> {
@@ -967,6 +985,17 @@ impl ReaderView {
             location.page = position.0;
             location.y = position.1;
         }
+        let ruler_enabled = self.ruler.enabled;
+        let ruler_anchor = self.ruler.target.as_ref().and_then(|target| {
+            let [left, bottom, right, top] = ruler::document_rect(&target.text, target.line)?;
+            Some((
+                target.page,
+                Point {
+                    x: (left + right) / 2.,
+                    y: (bottom + top) / 2.,
+                },
+            ))
+        });
         self.session_epoch = session.read(cx).epoch();
         self.document_generation += 1;
         self.document = Some(document.clone());
@@ -994,6 +1023,12 @@ impl ReaderView {
             self.restore_jump(&location, cx);
         }
         self.selected_page = selected_page.map(|page| page.min(self.pages.len() - 1));
+        self.ruler.enabled = ruler_enabled;
+        if let Some((page, at)) = ruler_anchor.filter(|(page, _)| *page < self.pages.len()) {
+            self.ruler.pending = Some((page, ruler::Placement::Document(at)));
+        } else if ruler_enabled {
+            self.queue_ruler_placement(self.page_index, self.scroll.bounds().center(), false);
+        }
         self.status = self.ready_status();
         cx.emit(DocumentEvent::Replaced {
             generation: self.document_generation,
@@ -1170,7 +1205,6 @@ impl ReaderView {
     }
 
     fn focus_page(&mut self, page: usize) {
-        self.ruler.cancel_work();
         if self.reading_mode == ReadingMode::SinglePage && page != self.page_index {
             self.selection.clear();
         }
@@ -1182,6 +1216,7 @@ impl ReaderView {
         if self.reading_mode == mode {
             return;
         }
+        self.ruler.browse_task = None;
         self.position_touched = true;
         if self.pages.is_empty() {
             self.reading_mode = mode;
@@ -1190,7 +1225,10 @@ impl ReaderView {
         }
         let (top, _, height) = self.viewport();
         let position = self.layout().position_at(top);
-        let page = if mode == ReadingMode::SinglePage && self.selected_page.is_none() {
+        let page = if mode == ReadingMode::SinglePage && self.ruler.enabled && self.ruler_visible()
+        {
+            self.ruler.target.as_ref().unwrap().page
+        } else if mode == ReadingMode::SinglePage && self.selected_page.is_none() {
             self.layout().current_page_at(top, height)
         } else {
             self.page_index
@@ -1387,14 +1425,32 @@ impl ReaderView {
     }
 
     fn finish_ruler_placement(&mut self) {
-        let Some((page, at, exact)) = self.ruler.pending else {
+        let Some((page, placement)) = self.ruler.pending else {
             return;
         };
-        if !self.ruler.enabled {
+        // Reload also refreshes a remembered, hidden anchor. It must not turn
+        // mode on, retain old text identities, or reveal/refocus the reader.
+        if !self.ruler.enabled && !matches!(placement, ruler::Placement::Document(_)) {
             return;
         }
         if let Some(text) = self.page_text.get(page).cloned() {
-            if let Some(at) = text.transform.page_to_document(at) {
+            let exact = matches!(placement, ruler::Placement::ExactPage(_));
+            let at = match placement {
+                ruler::Placement::First => {
+                    let line =
+                        (0..text.lines.len()).find_map(|line| ruler::document_rect(&text, line));
+                    line.map(|[left, bottom, right, top]| Point {
+                        x: (left + right) / 2.,
+                        y: (bottom + top) / 2.,
+                    })
+                }
+                ruler::Placement::Page(at) | ruler::Placement::ExactPage(at) => {
+                    text.transform.page_to_document(at)
+                }
+                ruler::Placement::Document(at) => Some(at),
+            };
+            self.ruler.pending = None;
+            if let Some(at) = at {
                 let placed = self.ruler.place(page, text, at, exact);
                 if exact && placed {
                     self.selection.clear();
@@ -1460,7 +1516,14 @@ impl ReaderView {
             x: f32::from(position.x) as f64,
             y: f32::from(position.y) as f64,
         }) {
-            self.ruler.pending = Some((page, at, exact));
+            self.ruler.pending = Some((
+                page,
+                if exact {
+                    ruler::Placement::ExactPage(at)
+                } else {
+                    ruler::Placement::Page(at)
+                },
+            ));
         }
     }
 
@@ -1586,6 +1649,9 @@ impl ReaderView {
             self.restore_position(position);
         }
         let (top, width, height) = self.viewport();
+        if (width, height) != (self.last_viewport.1, self.last_viewport.2) {
+            self.ruler.browse_task = None;
+        }
         if self.reading_mode == ReadingMode::SinglePage {
             self.scroll_to(-f32::from(self.scroll.offset().x), top);
         }
@@ -1650,6 +1716,7 @@ impl ReaderView {
         if next == self.scale {
             return;
         }
+        self.ruler.browse_task = None;
         self.scale = next;
         self.rasters.invalidate();
         self.scroll_to(
@@ -1671,7 +1738,7 @@ impl ReaderView {
             return;
         }
         self.position_touched = true;
-        let y = if self.reading_mode == ReadingMode::SinglePage {
+        let y = if self.reading_mode == ReadingMode::SinglePage && !self.ruler.enabled {
             self.reading_position().1
         } else {
             0.0
@@ -1681,9 +1748,14 @@ impl ReaderView {
         let (_, width, height) = self.viewport();
         self.apply_fit(index, Position { page: index, y }, (width, height), 0.0);
         self.scroll_to(
-            -f32::from(self.scroll.offset().x),
+            if self.ruler.enabled {
+                0.
+            } else {
+                -f32::from(self.scroll.offset().x)
+            },
             self.layout().offset_for(Position { page: index, y }, 0.0),
         );
+        self.retarget_ruler(index, ruler::Placement::First, cx);
         self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
@@ -1725,6 +1797,14 @@ impl ReaderView {
             0.0
         };
         self.scroll_to(x, self.layout().offset_for(Position { page, y }, 0.0));
+        self.retarget_ruler(
+            page,
+            ruler::Placement::Page(Point {
+                x: page_x as f64,
+                y: y as f64,
+            }),
+            cx,
+        );
         self.record_position(cx);
         self.schedule(cx);
         self.schedule_text(cx);
@@ -1997,9 +2077,8 @@ impl Render for ReaderView {
                 );
             }
             if self.ruler.enabled
+                && !self.ruler_editing()
                 && (self.ruler.browse_task.is_none() || self.ruler_visible())
-                && !self.selection.has_selection()
-                && self.selected_annotation.is_none()
                 && let Some(target) = self
                     .ruler
                     .target

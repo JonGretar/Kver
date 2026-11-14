@@ -110,7 +110,10 @@ fn ruler_explicit_traversal_passes_long_textless_runs_but_browsing_does_not(
     }
 }
 
-fn hold_next(reader: &Entity<ReaderView>, cx: &mut TestAppContext) -> page_text::TextRequest {
+pub(super) fn hold_next(
+    reader: &Entity<ReaderView>,
+    cx: &mut TestAppContext,
+) -> page_text::TextRequest {
     reader.update(cx, |reader, _| {
         reader.page_text = page_text::PageTexts::default();
         reader

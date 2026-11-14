@@ -6,6 +6,7 @@ use gpui_kit::{
     test::{ClickOptions, TestEventExt},
 };
 
+mod interactions;
 mod traversal;
 
 fn open(cx: &mut TestAppContext, path: &str, page: usize) -> (AnyWindowHandle, Entity<ReaderView>) {

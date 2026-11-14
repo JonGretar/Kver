@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- First-launch setup now explains each keyboard map and lists system appearance first.
+
 ## [0.5.0] - 2026-11-13
 
 Add a little emphasis to your reading: Kver can now save text markup directly

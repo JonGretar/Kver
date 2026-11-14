@@ -64,7 +64,7 @@ pub(super) fn open(
     ]);
     let (finished, receiver) = async_channel::bounded(1);
     // Native window bounds are platform pixels; content uses the rem scale.
-    let bounds = Bounds::centered(None, size(px(560.), px(680.)), cx);
+    let bounds = Bounds::centered(None, size(px(560.), px(720.)), cx);
     let (handle, _) = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -297,7 +297,7 @@ fn reading_preview(view: ReadingView, cx: &App) -> gpui_kit::Div {
 impl Render for Welcome {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         const APPEARANCES: [Appearance; 3] =
-            [Appearance::Light, Appearance::Dark, Appearance::System];
+            [Appearance::System, Appearance::Light, Appearance::Dark];
         const PRESETS: [Preset; 2] = [Preset::Standard, Preset::Vim];
         const VIEWS: [ReadingView; 2] = [ReadingView::Continuous, ReadingView::Page];
         let mut light = cx.theme().clone();
@@ -428,8 +428,32 @@ impl Render for Welcome {
                             .child(field(
                                 "Keyboard map",
                                 RadioGroup::horizontal("onboarding-keyboard")
-                                    .child(Radio::new("keyboard-standard").label("OS-style"))
-                                    .child(Radio::new("keyboard-vim").label("Vim-style"))
+                                    .children(PRESETS.map(|preset| {
+                                        let (id, label, description) = match preset {
+                                            Preset::Standard => (
+                                                "keyboard-standard",
+                                                "OS-style",
+                                                "Use familiar shortcuts and arrow keys to navigate.",
+                                            ),
+                                            Preset::Vim => (
+                                                "keyboard-vim",
+                                                "Vim-style",
+                                                "Use Vim shortcuts like h, j, k, and l to navigate.",
+                                            ),
+                                        };
+                                        visual_choice(
+                                            id,
+                                            label,
+                                            self.preset == preset,
+                                            self.saving,
+                                            div()
+                                                .pr_6()
+                                                .text_sm()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(description),
+                                            cx,
+                                        )
+                                    }))
                                     .selected_index(
                                         PRESETS.iter().position(|value| *value == self.preset),
                                     )
@@ -519,11 +543,19 @@ mod tests {
                 cx.update_window(handle, |_, window, cx| {
                     window.render_frame(cx);
                     let author = window.find("onboarding-author").bounds();
-                    let appearance = window.find_by_label("Light").bounds();
+                    let appearance = window.find_by_label("Follow system").bounds();
+                    let light = window.find_by_label("Light").bounds();
+                    let dark = window.find_by_label("Dark").bounds();
                     let keyboard = window.find_by_label("OS-style").bounds();
+                    let vim = window.find_by_label("Vim-style").bounds();
                     let view = window.find_by_label("Continuous").bounds();
+                    assert!(appearance.right() <= light.left());
+                    assert!(light.right() <= dark.left());
                     assert_eq!(appearance.left(), author.left());
                     assert_eq!(keyboard.left(), author.left());
+                    assert_eq!(vim.right(), author.right());
+                    assert!((keyboard.size.width - vim.size.width).abs() <= px(1.));
+                    assert_eq!(keyboard.size.height, vim.size.height);
                     assert_eq!(view.left(), author.left());
                     assert!(appearance.bottom() < view.top());
                     assert!(view.bottom() < keyboard.top());
@@ -557,11 +589,12 @@ mod tests {
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             window.press("tab", cx);
+            assert_eq!(window.find_by_label("Follow system").focused(), Some(true));
+            window.press("tab", cx);
             window.press("tab", cx);
             window.press("space", cx);
             assert_eq!(window.find_by_label("Dark").focused(), Some(true));
             assert_eq!(Theme::global(cx).mode, ThemeMode::Dark);
-            window.press("tab", cx);
             window.press("tab", cx);
             window.press("tab", cx);
             window.press("space", cx);

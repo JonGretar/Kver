@@ -65,7 +65,6 @@ recognition either.
 - **Typesetting:** SyncTeX forward/inverse navigation with LaTeX editors and
   a reload workflow suited to repeated PDF builds.
 - **Layouts:** snapshots and two-page/presentation layouts.
-- **PDF Dark Mode:** Zathura/gpui-pdf supports making the PDF itself be dark mode
 - **Form Support:** Allow filling out PDF Forms(Zathura/gpui-pdf do it)
 - **CLI Tool:** Better support opening files from the cli
 - **Open Links:** Download and open links.

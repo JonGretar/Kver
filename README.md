@@ -17,13 +17,15 @@ _Kver_ is Icelandic for a small book or booklet.
 
 ## Made for reading
 
-It like... reads PDFs. Just in a way that I like. With limited mouse-y-feel-y. TOC right when you need it. 
+It like... reads PDFs. Just in a way that I like. With limited mouse-y-feel-y. TOC right when you need it.  Oh... And vim style marks. Did I mention that?
 
 No unneeded UI in your way and the little there is is mostly optional. Everything is behind a command palette thingy anyway.
 
-Oh... And vim style marks. Did I mention that?
+### The Visual ruler
 
-![Kver displaying an illustrated PDF with the Contents sidebar open](docs/screenshots/reading.png)
+The visual ruler eases reading PDFs my marking your reading positions for easier following. Enable it and move it around with your movement keys. It tries it's best to follow the columns.
+
+![Kver displaying an illustrated PDF with the Contents sidebar open](docs/screenshots/visual_ruler.png)
 
 ### Text markup
 

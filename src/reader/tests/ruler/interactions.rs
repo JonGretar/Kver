@@ -251,7 +251,7 @@ fn ruler_search_targets_matching_column_and_escape_is_layered(cx: &mut TestAppCo
     });
     cx.update_window(window, |_, frame, cx| {
         frame.click("find-query", cx);
-        frame.press("cmd-a", cx);
+        frame.press("secondary-a", cx);
         frame.input("rjk", cx);
         assert_eq!(frame.find("find-query").value(), Some("rjk"));
         frame.press("escape", cx);

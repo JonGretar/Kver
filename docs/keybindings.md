@@ -128,14 +128,26 @@ turning bare reader keys into macOS shortcuts that intercept input text.
 ## Reading ruler
 
 Choose **Toggle reading ruler** from the View menu or command palette, or
-Option/Alt-click text to place the guide. Vim uses `r` to toggle and `j`/`k`
-to follow lines on the current page. Ctrl-R remains annotation redo.
+Option/Alt-click text to place the guide.
+
+| Task | Standard | Vim |
+| --- | --- | --- |
+| Toggle reading ruler | Command-Shift-R on macOS; Ctrl-Shift-R on Linux/Windows | `r` |
+| Next / previous line with ruler on; scroll down / up with ruler off | Down / Up | Down / Up or `j` / `k` |
+
+Standard never binds bare `r`. Vim's Ctrl-R remains annotation redo.
+These shortcuts belong to the focused reader: inputs, menus, dialogs, Find,
+and focused Contents/Annotations keep their own navigation. In Vim, `j`/`k`
+also navigate the focused Contents or Annotations list.
 Escape leaves ruler mode after dismissing a more-specific interaction.
 
-The Standard preset has no default ruler shortcuts. Assign the three
-reading-ruler commands above in the `reader` context to use your preferred
-keys. Line commands do nothing while the ruler is off. The guide and its
-remembered line belong to the current window and are not saved in the PDF.
+Assign `toggle-reading-ruler`, `next-ruler-line`, and `previous-ruler-line`
+in the `reader` context to use your preferred keys in either preset.
+Explicit line commands do nothing while the ruler is off; explicit
+`scroll-down` / `scroll-up` always scroll, even with the ruler on.
+Line movement follows reading order across columns and pages.
+The guide belongs to the current window; its remembered location follows
+reading-history privacy settings and is never saved in the PDF.
 
 ## Annotation shortcuts
 

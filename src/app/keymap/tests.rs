@@ -5,6 +5,203 @@ use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
 #[test]
+fn ruler_defaults_are_platform_aware_and_reader_only() {
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        let modified = if platform == Platform::Mac {
+            "cmd"
+        } else {
+            "ctrl"
+        };
+        let toggle = format!("{modified}-shift-r");
+        for preset in [Preset::Standard, Preset::Vim] {
+            // Resolution checks duplicate slots and sequence conflicts too.
+            let map = resolve(platform, preset).unwrap();
+            assert_eq!(map.action("down", Context::Reader), Some("kver::ReadDown"));
+            assert_eq!(map.action("up", Context::Reader), Some("kver::ReadUp"));
+            let toggle_key = if preset == Preset::Standard {
+                &toggle
+            } else {
+                "r"
+            };
+            assert_eq!(
+                map.action(toggle_key, Context::Reader),
+                Some("kver::ToggleReadingRuler")
+            );
+            for context in [
+                Context::Global,
+                Context::Sidebar,
+                Context::Contents,
+                Context::Annotations,
+                Context::Settings,
+                Context::About,
+            ] {
+                for key in [toggle_key, "down", "up"] {
+                    assert_eq!(
+                        map.action(key, context),
+                        None,
+                        "{platform:?}/{preset:?}/{context:?}/{key}"
+                    );
+                }
+            }
+            if preset == Preset::Standard {
+                assert_eq!(map.action("r", Context::Reader), None);
+            } else {
+                assert_eq!(map.action(&toggle, Context::Reader), None);
+                for (key, action) in [
+                    ("j", "kver::ReadDown"),
+                    ("k", "kver::ReadUp"),
+                    ("ctrl-r", "kver::RedoAnnotation"),
+                ] {
+                    assert_eq!(map.action(key, Context::Reader), Some(action));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ruler_overrides_preserve_explicit_scroll_and_line_commands() {
+    let content = r#"
+[[keyboard.bindings]]
+keys = "secondary-shift-r"
+context = "reader"
+command = "next-page"
+[[keyboard.bindings]]
+keys = "ctrl-e"
+context = "reader"
+command = "toggle-reading-ruler"
+[[keyboard.bindings]]
+keys = "down"
+context = "reader"
+command = "scroll-down"
+[[keyboard.bindings]]
+keys = "up"
+context = "reader"
+command = "scroll-up"
+[[keyboard.bindings]]
+keys = "alt-down"
+context = "reader"
+command = "next-ruler-line"
+[[keyboard.bindings]]
+keys = "alt-up"
+context = "reader"
+command = "previous-ruler-line"
+"#;
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        for preset in [Preset::Standard, Preset::Vim] {
+            let map = resolve_config(content, platform, preset).unwrap();
+            for (key, action) in [
+                ("secondary-shift-r", "kver::NextPage"),
+                ("ctrl-e", "kver::ToggleReadingRuler"),
+                ("down", "kver::ScrollDown"),
+                ("up", "kver::ScrollUp"),
+                ("alt-down", "kver::NextRulerLine"),
+                ("alt-up", "kver::PreviousRulerLine"),
+            ] {
+                assert_eq!(map.action(key, Context::Reader), Some(action));
+            }
+            let hints = map.shortcuts(&crate::reader::ToggleReadingRuler, Context::Reader);
+            assert_eq!(
+                hints,
+                if preset == Preset::Standard {
+                    vec!["ctrl-e"]
+                } else {
+                    vec!["r", "ctrl-e"]
+                }
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[gpui_kit::test]
+fn ruler_menu_and_palette_use_effective_toggle_shortcuts(cx: &mut TestAppContext) {
+    use crate::reader::ToggleReadingRuler;
+    use gpui_kit::OwnedMenuItem;
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        install(cx);
+        super::super::menu::install(cx);
+        let check = |cx: &App, key: &str, native: bool| {
+            // The palette reads the final effective Reader shortcut.
+            assert_eq!(
+                active_map(cx)
+                    .unwrap()
+                    .shortcuts(&ToggleReadingRuler, Context::Reader)
+                    .last(),
+                Some(&key)
+            );
+            let menu_action = cx
+                .get_menus()
+                .unwrap()
+                .into_iter()
+                .find(|menu| menu.name == "View")
+                .unwrap()
+                .items
+                .into_iter()
+                .find_map(|item| match item {
+                    OwnedMenuItem::Action { name, action, .. }
+                        if name == "Toggle reading ruler" =>
+                    {
+                        Some(action)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            if native {
+                assert_eq!(menu_action.name(), ToggleReadingRuler.name());
+                let bindings = cx.key_bindings();
+                let bindings = bindings.borrow();
+                let first = bindings
+                    .bindings_for_action(menu_action.as_ref())
+                    .next()
+                    .unwrap();
+                assert_eq!(
+                    first.match_keystrokes(&parse(key, Platform::Mac.os()).unwrap()),
+                    Some(false)
+                );
+            } else {
+                // Bare Vim r is shown in the palette, never installed as a
+                // Cocoa key equivalent that can intercept text input.
+                assert_eq!(menu_action.name(), "kver::NativeMenuAction");
+                assert_eq!(
+                    cx.key_bindings()
+                        .borrow()
+                        .bindings_for_action(menu_action.as_ref())
+                        .count(),
+                    0
+                );
+            }
+        };
+        check(cx, "secondary-shift-r", true);
+        reload(
+            cx,
+            Some(
+                r#"
+[[keyboard.bindings]]
+keys = "secondary-shift-r"
+context = "reader"
+command = "next-page"
+[[keyboard.bindings]]
+keys = "ctrl-e"
+context = "reader"
+command = "toggle-reading-ruler"
+"#
+                .into(),
+            ),
+            Preset::Standard,
+        )
+        .unwrap();
+        check(cx, "ctrl-e", true);
+        reload(cx, None, Preset::Vim).unwrap();
+        check(cx, "r", false);
+        reload(cx, None, Preset::Standard).unwrap();
+        check(cx, "secondary-shift-r", true);
+    });
+}
+
+#[test]
 fn vim_sidebar_navigation_is_scoped_to_contents_and_annotations() {
     use gpui_kit::base::actions::{SelectDown, SelectUp};
 
@@ -938,8 +1135,8 @@ fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
             assert_eq!(map.action(keys, Context::Global), Some(action));
         }
         for (keys, action) in [
-            ("down", "kver::ScrollDown"),
-            ("up", "kver::ScrollUp"),
+            ("down", "kver::ReadDown"),
+            ("up", "kver::ReadUp"),
             ("pagedown", "kver::ScrollScreenDown"),
             ("pageup", "kver::ScrollScreenUp"),
             ("right", "kver::NextPage"),

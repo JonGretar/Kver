@@ -21,6 +21,125 @@ pub(super) fn region(top: f64) -> Vec<Quad> {
 }
 
 #[gpui_kit::test]
+fn imported_markup_edit_history_and_save_preserve_metadata_for_all_types(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("imported.pdf");
+    std::fs::copy("examples/annotations-clean.pdf", &source).unwrap();
+    let source = source.canonicalize().unwrap();
+    let session = cx.update(|cx| DocumentSession::join(source.clone(), cx));
+    cx.run_until_parked();
+    session.update(cx, |session, cx| session.ensure_annotations(cx));
+    cx.run_until_parked();
+    let original = session.read_with(cx, |session, _| session.annotations().unwrap().unwrap());
+    let entries: Vec<_> = original.iter().filter(|a| a.page() == 0).collect();
+    assert_eq!(entries.len(), 5);
+    for kind in MarkupKind::ALL {
+        assert!(entries.iter().any(|a| a.kind() == kind));
+    }
+    let assert_metadata = |before: &Annotation, after: &Annotation| {
+        assert_eq!(after.page(), before.page());
+        assert_eq!(after.kind(), before.kind());
+        assert_eq!(after.quads(), before.quads());
+        assert_eq!(after.author(), before.author());
+        assert_eq!(after.comment(), before.comment());
+        assert_eq!(after.name(), before.name());
+        assert_eq!(after.opacity(), before.opacity());
+    };
+    for before in &entries {
+        session.update(cx, |session, cx| {
+            session
+                .edit_annotation(before.id(), Some(HighlightColor::Pink), cx)
+                .unwrap();
+        });
+        cx.run_until_parked();
+        session.update(cx, |session, cx| {
+            let catalog = session.annotations().unwrap().unwrap();
+            let changed = catalog.iter().find(|a| a.id() == before.id()).unwrap();
+            assert_eq!(changed.color(), HighlightColor::Pink.color());
+            assert_metadata(before, changed);
+            session.undo_annotation(cx);
+        });
+        cx.run_until_parked();
+        session.update(cx, |session, cx| {
+            let catalog = session.annotations().unwrap().unwrap();
+            assert_eq!(
+                catalog.iter().find(|a| a.id() == before.id()).unwrap(),
+                *before
+            );
+            session.redo_annotation(cx);
+        });
+        cx.run_until_parked();
+        session.read_with(cx, |session, _| {
+            let catalog = session.annotations().unwrap().unwrap();
+            let changed = catalog.iter().find(|a| a.id() == before.id()).unwrap();
+            assert_eq!(changed.color(), HighlightColor::Pink.color());
+            assert_metadata(before, changed);
+        });
+    }
+    session.update(cx, |session, cx| {
+        assert!(session.is_dirty());
+        session.start_save(cx).unwrap();
+    });
+    cx.run_until_parked();
+    session.read_with(cx, |session, _| {
+        assert!(session.save_outcome().unwrap().1.is_ok());
+        assert!(!session.is_dirty());
+    });
+    let saved = pdf::Document::open(&source)
+        .unwrap()
+        .page_annotations(0, 100)
+        .unwrap();
+    assert_eq!(saved.len(), entries.len());
+    for (before, after) in entries.iter().zip(&saved) {
+        assert_metadata(before, after);
+        assert_eq!(after.color(), HighlightColor::Pink.color());
+    }
+    for before in &entries {
+        session.update(cx, |session, cx| {
+            session.edit_annotation(before.id(), None, cx).unwrap();
+        });
+        cx.run_until_parked();
+        session.update(cx, |session, cx| {
+            assert!(
+                session
+                    .annotations()
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .all(|a| a.id() != before.id())
+            );
+            session.undo_annotation(cx);
+        });
+        cx.run_until_parked();
+        session.update(cx, |session, cx| {
+            let catalog = session.annotations().unwrap().unwrap();
+            let restored = catalog.iter().find(|a| a.id() == before.id()).unwrap();
+            assert_eq!(restored.color(), HighlightColor::Pink.color());
+            assert_metadata(before, restored);
+            session.redo_annotation(cx);
+        });
+        cx.run_until_parked();
+    }
+    session.update(cx, |session, cx| {
+        session.start_save(cx).unwrap();
+    });
+    cx.run_until_parked();
+    session.read_with(cx, |session, _| {
+        assert!(session.save_outcome().unwrap().1.is_ok());
+        assert!(!session.is_dirty());
+    });
+    let saved = pdf::Document::open(&source).unwrap();
+    assert!(saved.page_annotations(0, 100).unwrap().is_empty());
+    let untouched: Vec<_> = original.iter().filter(|a| a.page() == 1).collect();
+    let saved = saved.page_annotations(1, 100).unwrap();
+    assert_eq!(saved.len(), 1);
+    for (before, after) in untouched.iter().zip(&saved) {
+        assert_metadata(before, after);
+        assert_eq!(after.color(), before.color());
+    }
+}
+
+#[gpui_kit::test]
 fn mutation_during_catalog_loading_is_rejected_without_losing_or_inventing_edits(
     cx: &mut TestAppContext,
 ) {

@@ -45,3 +45,16 @@ url = { version = "2", optional = true }
 # Native Sparkle/quit bridges; these versions are already used by the GUI stack.
 objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSError", "NSString"], optional = true }
+
+# Keep PDF processing fast in tests without optimizing the reader or GUI.
+[profile.test.package.vello_cpu]
+opt-level = 2
+
+[profile.test.package.vello_common]
+opt-level = 2
+
+[profile.test.package.hayro]
+opt-level = 2
+
+[profile.test.package.hayro-interpret]
+opt-level = 2

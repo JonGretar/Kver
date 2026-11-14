@@ -172,6 +172,7 @@ commands! {
         "undo-annotation" => crate::reader::UndoAnnotation,
         "redo-annotation" => crate::reader::RedoAnnotation,
         "toggle-reading-ruler" => crate::reader::ToggleReadingRuler,
+        "toggle-pdf-dark-mode" => crate::reader::TogglePdfDarkMode,
         "next-ruler-line" => crate::reader::NextRulerLine,
         "previous-ruler-line" => crate::reader::PreviousRulerLine,
         "delete-highlight" => DeleteHighlight,

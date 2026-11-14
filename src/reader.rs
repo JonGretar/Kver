@@ -96,6 +96,8 @@ pub struct ReaderView {
     display_scale: f32,
     pages: Vec<(f32, f32)>,
     rasters: PageRasters,
+    page_colors: Option<pdf::PageColors>,
+    pdf_dark_mode_override: Option<bool>,
     document_generation: u64,
     page_text: page_text::PageTexts,
     ruler: ruler::Ruler,
@@ -200,6 +202,11 @@ struct OpenRestoration {
 
 impl ReaderView {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
+        let settings = settings_ui::state(cx);
+        cx.observe(&settings, |reader, _, cx| {
+            reader.sync_page_colors(cx);
+        })
+        .detach();
         let participant = cx.entity_id();
         cx.on_release(move |reader, cx| {
             if let Some(session) = &reader.session {
@@ -227,6 +234,8 @@ impl ReaderView {
             display_scale,
             pages: Vec::new(),
             rasters: PageRasters::default(),
+            page_colors: None,
+            pdf_dark_mode_override: None,
             document_generation: 0,
             page_text: page_text::PageTexts::default(),
             ruler: ruler::Ruler::default(),
@@ -283,6 +292,7 @@ impl ReaderView {
         self.pending_restore = None;
         self.recorded_position = None;
         self.mode_override = None;
+        self.pdf_dark_mode_override = None;
         self.scale = 1.0;
         self.zoom_mode = ZoomMode::Fixed;
         self.pages.clear();
@@ -1945,6 +1955,43 @@ impl ReaderView {
         cx.notify();
     }
 
+    fn pdf_dark_mode(&self, cx: &mut App) -> bool {
+        self.pdf_dark_mode_override.unwrap_or_else(|| {
+            settings_ui::state(cx).read(cx).pdf_dark_mode() && cx.theme().mode.is_dark()
+        })
+    }
+
+    fn toggle_pdf_dark_mode(&mut self, cx: &mut Context<Self>) {
+        if self.document.is_none() {
+            return;
+        }
+        self.pdf_dark_mode_override = Some(!self.pdf_dark_mode(cx));
+        self.sync_page_colors(cx);
+        cx.notify();
+    }
+
+    fn sync_page_colors(&mut self, cx: &mut Context<Self>) {
+        let colors = self.pdf_dark_mode(cx).then(|| {
+            // A session override can darken the PDF even with light chrome.
+            let mut theme = cx.theme().clone();
+            if !theme.mode.is_dark() {
+                theme.apply_config(&theme.dark_theme.clone());
+            }
+            let background: gpui::Rgba = theme.background.into();
+            let foreground: gpui::Rgba = theme.foreground.into();
+            pdf::PageColors::new(
+                [background.r, background.g, background.b],
+                [foreground.r, foreground.g, foreground.b],
+            )
+        });
+        if self.page_colors != colors {
+            self.page_colors = colors;
+            self.rasters.invalidate();
+            self.schedule(cx);
+            cx.notify();
+        }
+    }
+
     fn schedule(&mut self, cx: &mut Context<Self>) {
         if self.pages.is_empty() {
             return;
@@ -1970,9 +2017,14 @@ impl ReaderView {
             request.page() + 1,
             (self.scale * 100.0).round()
         );
-        let work = cx
-            .background_executor()
-            .spawn(async move { document.render_bitmap(request.page(), request.scale()) });
+        let colors = self.page_colors;
+        let work = cx.background_executor().spawn(async move {
+            let mut bitmap = document.render_bitmap(request.page(), request.scale())?;
+            if let Some(colors) = colors {
+                colors.apply(&mut bitmap.bgra);
+            }
+            Ok(bitmap)
+        });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -2035,6 +2087,7 @@ impl Render for ReaderView {
             .detach();
             self.focus_initialized = true;
         }
+        self.sync_page_colors(cx);
         let density = window.scale_factor();
         if self.display_scale != density {
             self.display_scale = density;
@@ -2071,7 +2124,13 @@ impl Render for ReaderView {
                 .w(page_width)
                 .h(page_height)
                 .flex_shrink_0()
-                .bg(rgb(0xffffff))
+                .bg(if let Some(colors) = self.page_colors {
+                    let [r, g, b] = colors.paper();
+                    gpui::Rgba { r, g, b, a: 1. }
+                } else {
+                    // Original PDF paper is white, independently of chrome.
+                    rgb(0xffffff)
+                })
                 .when_some(image, |element, image| {
                     element.child(img(image).size_full())
                 });
@@ -2307,6 +2366,9 @@ impl Render for ReaderView {
                 this.change_mark(action.0, None, cx)
             }))
             .on_action(cx.listener(Self::on_copy))
+            .on_action(cx.listener(|this, _: &TogglePdfDarkMode, _, cx| {
+                this.toggle_pdf_dark_mode(cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleReadingRuler, _, cx| this.toggle_ruler(cx)))
             .on_action(cx.listener(|this, _: &NextRulerLine, _, cx| this.move_ruler(true, cx)))
             .on_action(cx.listener(|this, _: &PreviousRulerLine, _, cx| this.move_ruler(false, cx)))

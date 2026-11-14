@@ -1,4 +1,4 @@
-//! Catppuccin colors for application chrome; PDF raster colors are untouched.
+//! Catppuccin colors for application chrome and opt-in dark PDF paper/ink.
 use std::rc::Rc;
 
 use gpui_kit::{
@@ -17,7 +17,7 @@ pub(super) fn install(cx: &mut App) {
     Theme::change(mode, None, cx);
 }
 
-/// Selection on PDF pages has a paper-colored surface in either chrome theme.
+/// Selection on PDF pages normally has a paper-colored surface.
 /// Keep this document-surface role distinct from primary chrome, which may be
 /// white in a dark/custom theme and disappear against the PDF.
 pub(crate) fn document_identification() -> gpui_kit::Hsla {
@@ -25,8 +25,8 @@ pub(crate) fn document_identification() -> gpui_kit::Hsla {
 }
 
 /// Document-surface roles, deliberately independent of warning/status colors.
-/// PDF paper stays light in both chrome themes; the darker marker must contrast
-/// with it and remain distinct over embedded yellow highlights.
+/// The darker marker contrasts with original paper and remains distinct over
+/// embedded yellow highlights; the wash also reveals it on recolored paper.
 pub(crate) fn reading_ruler(dark: bool) -> (gpui_kit::Hsla, gpui_kit::Hsla) {
     let wash: gpui_kit::Hsla = gpui_kit::rgb(0xf9e2af).into();
     let marker: gpui_kit::Hsla = gpui_kit::rgb(0x9b640b).into();

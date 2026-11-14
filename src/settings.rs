@@ -157,6 +157,7 @@ impl ReadingView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppSettings {
     appearance: Appearance,
+    pdf_dark_mode: bool,
     show_toolbar: bool,
     show_statusbar: bool,
     remember_reading_history: bool,
@@ -171,6 +172,15 @@ pub struct AppSettings {
 }
 
 impl AppSettings {
+    pub fn pdf_dark_mode(&self) -> bool {
+        self.pdf_dark_mode
+    }
+
+    pub fn with_pdf_dark_mode(mut self, enabled: bool) -> Self {
+        self.pdf_dark_mode = enabled;
+        self
+    }
+
     pub fn show_toolbar(&self) -> bool {
         self.show_toolbar
     }
@@ -293,6 +303,11 @@ impl AppSettings {
                     .to_owned(),
             },
             appearance: appearance_in(document)?,
+            pdf_dark_mode: bool_in(
+                reader.and_then(|table| table.get("pdf_dark_mode")),
+                false,
+                "[reader].pdf_dark_mode",
+            )?,
             show_toolbar: bool_in(
                 application.and_then(|table| table.get("show_toolbar")),
                 true,
@@ -347,6 +362,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             appearance: Appearance::default(),
+            pdf_dark_mode: false,
             show_toolbar: true,
             show_statusbar: true,
             remember_reading_history: true,
@@ -366,6 +382,7 @@ impl Default for AppSettings {
 #[derive(Clone, Debug)]
 pub enum SettingsChange {
     Appearance(Appearance),
+    PdfDarkMode(bool),
     ShowToolbar(bool),
     ShowStatusbar(bool),
     RememberReadingHistory(bool),
@@ -383,6 +400,7 @@ impl SettingsChange {
     fn apply(self, document: &mut DocumentMut) {
         let (section, key, updated) = match self {
             Self::Appearance(choice) => ("application", "appearance", value(choice.key())),
+            Self::PdfDarkMode(enabled) => ("reader", "pdf_dark_mode", value(enabled)),
             Self::ShowToolbar(show) => ("application", "show_toolbar", value(show)),
             Self::ShowStatusbar(show) => ("application", "show_statusbar", value(show)),
             Self::RememberReadingHistory(remember) => ("persistence", "remember", value(remember)),
@@ -682,6 +700,32 @@ pub(crate) fn save_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pdf_dark_mode_defaults_off_round_trips_and_preserves_config() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert!(!super::load(&path).unwrap().pdf_dark_mode());
+        fs::write(
+            &path,
+            "# keep\n[reader]\npdf_dark_mode = false # choice\n[other]\nvalue = 7\n",
+        )
+        .unwrap();
+        for enabled in [true, false] {
+            let updated = super::save(&path, SettingsChange::PdfDarkMode(enabled)).unwrap();
+            assert_eq!(updated.pdf_dark_mode(), enabled);
+            assert_eq!(super::load(&path).unwrap().pdf_dark_mode(), enabled);
+            let content = fs::read_to_string(&path).unwrap();
+            assert!(content.contains("# keep"));
+            assert!(content.contains("# choice"));
+            assert!(content.contains("[other]\nvalue = 7"));
+        }
+        let invalid = "[reader]\npdf_dark_mode = 'yes'\n";
+        fs::write(&path, invalid).unwrap();
+        assert!(super::load(&path).is_err());
+        assert!(super::save(&path, SettingsChange::PdfDarkMode(true)).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+    }
 
     #[test]
     fn missing_recent_cleanup_defaults_off_round_trips_and_rejects_invalid_values() {

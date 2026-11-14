@@ -373,6 +373,13 @@ impl Render for SettingsView {
                 SettingPage::new("Reader")
                     .resettable(false)
                     .group(SettingGroup::new().title("Reading experience").items([
+                        toggle(
+                            "Match PDF to app appearance",
+                            "Darken PDF pages when the app is dark, including images.",
+                            "pdf-dark-mode",
+                            SettingsState::pdf_dark_mode,
+                            SettingsChange::PdfDarkMode,
+                        ),
                         choice(Choice {
                             title: "Initial zoom",
                             description: "Set how newly opened PDFs fit the window. Open readers keep their zoom.",

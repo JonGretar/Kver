@@ -24,6 +24,7 @@ gpui::actions!(
         SinglePage,
         Continuous,
         UseDefaultReadingMode,
+        TogglePdfDarkMode,
         ToggleReadingRuler,
         NextRulerLine,
         PreviousRulerLine,

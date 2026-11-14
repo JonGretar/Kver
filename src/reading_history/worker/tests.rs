@@ -1,6 +1,63 @@
 use super::*;
 use std::fs;
 
+#[gpui_kit::test]
+fn ruler_worker_orders_movements_not_reply_polling_and_obeys_privacy_epochs(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (root, store) = store();
+    let history = install_history(cx, root.path());
+    let path = root.path().join("ruler.pdf");
+    complete(cx, history.set_recording(false)).unwrap();
+    complete(cx, history.record(path.clone())).unwrap();
+    let epoch = history.epoch();
+    let first = RulerAnchor {
+        page: 0,
+        x: 20.,
+        y: 30.,
+    };
+    let second = RulerAnchor { x: 320., ..first };
+    let older = history.save_ruler_anchor(path.clone(), first, epoch);
+    let newer = history.save_ruler_anchor(path.clone(), second, epoch);
+    complete(cx, newer).unwrap();
+    complete(cx, older).unwrap();
+    assert_eq!(
+        complete(cx, history.ruler_anchor(path.clone(), epoch)).unwrap(),
+        Some(second)
+    );
+    // Closing a window drops its waiter, not the synchronously queued movement.
+    drop(history.save_ruler_anchor(path.clone(), first, epoch));
+    assert_eq!(
+        complete(cx, history.ruler_anchor(path.clone(), epoch)).unwrap(),
+        Some(first)
+    );
+    drop(history.save_ruler_anchor(path.clone(), second, epoch));
+    assert!(!root.path().join("local/reading.sqlite3").exists());
+    complete(cx, history.set_recording(true)).unwrap();
+    assert_eq!(store.ruler_anchor(&path).unwrap(), Some(second));
+    // Reads and late writes from pre-clear windows cannot resurrect saved data,
+    // even after a different window explicitly reopens the same PDF.
+    complete(cx, history.clear()).unwrap();
+    complete(cx, history.record(path.clone())).unwrap();
+    complete(cx, history.save_ruler_anchor(path.clone(), first, epoch)).unwrap();
+    assert_eq!(
+        complete(cx, history.ruler_anchor(path.clone(), epoch)).unwrap(),
+        None
+    );
+    assert_eq!(store.ruler_anchor(&path).unwrap(), None);
+    complete(
+        cx,
+        history.save_ruler_anchor(path.clone(), second, history.epoch()),
+    )
+    .unwrap();
+    complete(cx, history.remove(path.clone())).unwrap();
+    assert_eq!(
+        complete(cx, history.ruler_anchor(path.clone(), history.epoch())).unwrap(),
+        None
+    );
+    assert_eq!(store.ruler_anchor(&path).unwrap(), None);
+}
+
 fn store() -> (tempfile::TempDir, RecentStore) {
     let root = tempfile::tempdir().unwrap();
     let paths = AppPaths::for_locations(root.path().join("config.toml"), root.path().join("local"));

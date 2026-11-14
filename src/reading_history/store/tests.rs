@@ -1,4 +1,76 @@
+use super::ruler::RulerAnchor;
 use super::*;
+
+#[test]
+fn ruler_migration_preserves_viewport_and_marks_and_cascades_with_document() {
+    let (root, store) = store();
+    let path = root.path().join("old.pdf");
+    store.record(&path).unwrap();
+    let position = ReadingPosition { page: 2, y: 42.0 };
+    store.save_position(&path, position).unwrap();
+    let marks = BTreeMap::from([(
+        'a',
+        LocalMark {
+            position,
+            label: None,
+        },
+    )]);
+    store.replace_marks(&path, &marks).unwrap();
+    // Model the previous schema, including pre-existing saved reading data.
+    store
+        .connect()
+        .unwrap()
+        .execute_batch("DROP TABLE ruler_anchors; PRAGMA user_version = 6;")
+        .unwrap();
+    assert_eq!(store.ruler_anchor(&path).unwrap(), None);
+    let anchor = RulerAnchor {
+        page: 1,
+        x: -30.25,
+        y: 204.5,
+    };
+    store.save_ruler_anchor(&path, anchor).unwrap();
+    assert_eq!(store.ruler_anchor(&path).unwrap(), Some(anchor));
+    assert_eq!(store.position(&path).unwrap(), Some(position));
+    assert_eq!(store.marks(&path).unwrap(), marks);
+    assert_eq!(
+        store
+            .connect()
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    store.remove(&path).unwrap();
+    store.save_ruler_anchor(&path, anchor).unwrap();
+    assert_eq!(store.ruler_anchor(&path).unwrap(), None);
+    store.record(&path).unwrap();
+    store.save_ruler_anchor(&path, anchor).unwrap();
+    store.clear().unwrap();
+    assert_eq!(store.ruler_anchor(&path).unwrap(), None);
+}
+
+#[test]
+fn ruler_store_rejects_invalid_geometry_and_ignores_corrupt_rows() {
+    let (root, store) = store();
+    let path = root.path().join("geometry.pdf");
+    store.record(&path).unwrap();
+    for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(
+            store
+                .save_ruler_anchor(&path, RulerAnchor { page: 0, x, y: 1.0 })
+                .is_err()
+        );
+    }
+    store
+        .connect()
+        .unwrap()
+        .execute(
+            "INSERT INTO ruler_anchors VALUES (?1, -1, 20, 30)",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    assert_eq!(store.ruler_anchor(&path).unwrap(), None);
+}
 
 fn store() -> (tempfile::TempDir, RecentStore) {
     let root = tempfile::tempdir().unwrap();

@@ -24,8 +24,12 @@ pub(super) enum Placement {
     /// Displayed page coordinates, resolved after extraction supplies its transform.
     Page(Point),
     ExactPage(Point),
-    /// Identifiable text (search) or a reload anchor in PDF document coordinates.
+    /// Identifiable destination text (such as search) in PDF document coordinates.
     Document(Point),
+    /// Reopening resolves against current raw geometry, never traversal indices.
+    Remembered(Point),
+    /// Refresh retained text after reload without creating a new movement.
+    Reload(Point),
 }
 
 #[derive(Clone, Copy)]
@@ -149,7 +153,7 @@ impl super::ReaderView {
         }
         self.ruler.target = None;
         self.ruler.pending = Some((page, placement));
-        self.finish_ruler_placement();
+        self.finish_ruler_placement(cx);
         self.schedule_text(cx);
     }
 
@@ -248,6 +252,7 @@ impl super::ReaderView {
                 work.remaining -= 1;
                 work.enter = false;
                 self.ruler.traversal = (work.remaining > 0).then_some(work);
+                self.remember_ruler(cx);
                 self.reveal_ruler(cx);
             } else if let Some(page) = adjacent(work.page, work.forward, self.pages.len()) {
                 work.page = page;
@@ -288,7 +293,7 @@ impl super::ReaderView {
                     let (top, _, height) = this.viewport();
                     let page = this.layout().current_page_at(top, height);
                     this.queue_ruler_placement(page, center, false);
-                    this.finish_ruler_placement();
+                    this.finish_ruler_placement(cx);
                     this.schedule_text(cx);
                 }
                 cx.notify();

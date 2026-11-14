@@ -5,7 +5,7 @@
 //! Its lifetime follows the shared request senders, not an individual panel.
 
 use super::store::{RESULT_LIMIT, valid_mark_label};
-use super::{LocalMark, ReadingPosition, RecentFile, RecentStore};
+use super::{LocalMark, ReadingPosition, RecentFile, RecentStore, RulerAnchor};
 use crate::settings::{AppPaths, ReadingView};
 use gpui_kit::{App, AppContext as _, Entity, Global};
 use std::{
@@ -24,6 +24,17 @@ enum MarkEdit {
 }
 
 enum Request {
+    Ruler(
+        PathBuf,
+        u64,
+        async_channel::Sender<Result<Option<RulerAnchor>, String>>,
+    ),
+    SaveRuler(
+        PathBuf,
+        RulerAnchor,
+        u64,
+        async_channel::Sender<Result<(), String>>,
+    ),
     Record(PathBuf, u64, async_channel::Sender<Result<(), String>>),
     Search(
         String,
@@ -77,6 +88,47 @@ pub struct RecentHistory {
 }
 
 impl RecentHistory {
+    pub(crate) fn ruler_anchor(
+        &self,
+        path: PathBuf,
+        epoch: u64,
+    ) -> impl Future<Output = Result<Option<RulerAnchor>, String>> + use<> {
+        let (reply, answer) = async_channel::bounded(1);
+        let queued = self
+            .sender
+            .try_send(Request::Ruler(path, epoch, reply))
+            .map_err(|_| "Reading history worker is unavailable".to_owned());
+        async move {
+            queued?;
+            answer
+                .recv()
+                .await
+                .map_err(|_| "Reading history worker stopped".to_owned())?
+        }
+    }
+
+    /// Called synchronously when the target moves, never from a close or a
+    /// delayed save task. The shared queue is the order across live windows.
+    pub(crate) fn save_ruler_anchor(
+        &self,
+        path: PathBuf,
+        anchor: RulerAnchor,
+        epoch: u64,
+    ) -> impl Future<Output = Result<(), String>> + use<> {
+        let (reply, answer) = async_channel::bounded(1);
+        let queued = self
+            .sender
+            .try_send(Request::SaveRuler(path, anchor, epoch, reply))
+            .map_err(|_| "Reading history worker is unavailable".to_owned());
+        async move {
+            queued?;
+            answer
+                .recv()
+                .await
+                .map_err(|_| "Reading history worker stopped".to_owned())?
+        }
+    }
+
     fn new(store: RecentStore, config: PathBuf, cx: &mut App) -> Self {
         let (sender, receiver) = async_channel::unbounded();
         let epoch = Arc::new(AtomicU64::new(0));
@@ -93,8 +145,34 @@ impl RecentHistory {
                 let mut positions = HashMap::<PathBuf, ReadingPosition>::new();
                 let mut modes = HashMap::<PathBuf, Option<ReadingView>>::new();
                 let mut marks = HashMap::<PathBuf, BTreeMap<char, LocalMark>>::new();
+                let mut rulers = HashMap::<PathBuf, RulerAnchor>::new();
                 while let Ok(request) = receiver.recv().await {
                     match request {
+                        Request::Ruler(path, token, reply) => {
+                            let result = if token != worker_epoch.load(Ordering::SeqCst) {
+                                Ok(None)
+                            } else if let Some(anchor) = rulers.get(&path) {
+                                Ok(Some(*anchor))
+                            } else {
+                                store.ruler_anchor(&path)
+                            };
+                            let _ = reply.try_send(result);
+                        }
+                        Request::SaveRuler(path, anchor, token, reply) => {
+                            let valid = token == worker_epoch.load(Ordering::SeqCst)
+                                && session.contains(&path);
+                            let result = if !anchor.is_valid() {
+                                Err("Invalid reading ruler location".into())
+                            } else if valid && recording {
+                                store.save_ruler_anchor(&path, anchor)
+                            } else {
+                                Ok(())
+                            };
+                            if valid && result.is_ok() {
+                                rulers.insert(path, anchor);
+                            }
+                            let _ = reply.try_send(result);
+                        }
                         Request::Record(path, token, reply) => {
                             let result = if token != worker_epoch.load(Ordering::SeqCst) {
                                 Ok(())
@@ -160,6 +238,7 @@ impl RecentHistory {
                                 positions.remove(&path);
                                 modes.remove(&path);
                                 marks.remove(&path);
+                                rulers.remove(&path);
                                 worker_epoch.fetch_add(1, Ordering::SeqCst);
                             }
                             let _ = reply.try_send(result);
@@ -172,6 +251,7 @@ impl RecentHistory {
                                 positions.clear();
                                 modes.clear();
                                 marks.clear();
+                                rulers.clear();
                                 worker_epoch.fetch_add(1, Ordering::SeqCst);
                             }
                             let _ = reply.try_send(result);
@@ -188,6 +268,9 @@ impl RecentHistory {
                                         }
                                         if let Some(position) = positions.get(path) {
                                             store.save_position(path, *position)?;
+                                        }
+                                        if let Some(anchor) = rulers.get(path) {
+                                            store.save_ruler_anchor(path, *anchor)?;
                                         }
                                         Ok(())
                                     })

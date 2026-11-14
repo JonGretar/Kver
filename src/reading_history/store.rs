@@ -15,8 +15,9 @@ use crate::settings::{AppPaths, ReadingView};
 // Version 2 holds reading modes; version 3 added positions in an independent
 // branch. Version 4 reconciles databases created by either branch alone;
 // version 5 adds document-local letter marks; version 6 separates recent-list
-// membership from the document identity that owns saved reading data.
-const SCHEMA_VERSION: i64 = 6;
+// membership from the document identity that owns saved reading data; version 7
+// adds independent document-space ruler anchors.
+const SCHEMA_VERSION: i64 = 7;
 pub(super) const RESULT_LIMIT: i64 = 100;
 
 /// Page-local distance in PDF points from the top of the displayed page.
@@ -169,6 +170,21 @@ impl RecentStore {
                      COMMIT;",
                 )
                 .map_err(|e| format!("Cannot migrate recent files: {e}"))?;
+        }
+        if version < 7 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                 CREATE TABLE IF NOT EXISTS ruler_anchors (
+                     path TEXT PRIMARY KEY NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
+                     page INTEGER NOT NULL,
+                     x REAL NOT NULL,
+                     y REAL NOT NULL
+                 );
+                 PRAGMA user_version = 7;
+                 COMMIT;",
+                )
+                .map_err(|e| format!("Cannot migrate reading ruler: {e}"))?;
         }
         Ok(connection)
     }
@@ -539,3 +555,5 @@ impl RecentStore {
 
 #[cfg(test)]
 mod tests;
+
+pub(super) mod ruler;

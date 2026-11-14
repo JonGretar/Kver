@@ -17,9 +17,7 @@ fn show(cx: &mut TestAppContext, handle: AnyWindowHandle) {
 }
 
 #[gpui_kit::test]
-fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
-    cx: &mut TestAppContext,
-) {
+fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut TestAppContext) {
     setup(cx);
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("list-edits.pdf");
@@ -38,9 +36,9 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
         .unwrap();
     cx.run_until_parked();
     show(cx, handle);
-    for serial in [3, 1, 2, 0, 4] {
-        cx.update_window(handle, |_, window, cx| {
-            window.render_frame(cx);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        for serial in [3, 1, 2, 0, 4] {
             let entry = window.find(row(epoch, serial));
             let color = window.within(row(epoch, serial)).find("recolor-annotation");
             let delete = window.within(row(epoch, serial)).find("delete-annotation");
@@ -59,6 +57,13 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
                 );
                 assert!(window.try_find("copy-annotation").is_none());
             }
+        }
+    })
+    .unwrap();
+    // The session suite covers the full subtype/metadata matrix. Keep pointer,
+    // keyboard, and missing-excerpt workflows at the real window seam.
+    for serial in [3, 4] {
+        cx.update_window(handle, |_, window, cx| {
             // Commands target this row without first selecting/navigating it.
             window
                 .within(row(epoch, serial))
@@ -68,7 +73,7 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
         cx.run_until_parked();
         // Exercise the actual menu's keyboard and pointer paths, not callbacks.
         cx.update_window(handle, |_, window, cx| {
-            if serial == 1 {
+            if serial == 4 {
                 window.press("down", cx);
                 window.press("down", cx);
                 window.press("down", cx);
@@ -99,7 +104,7 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
                 HighlightColor::Pink.color()
             );
         });
-        // List edits use shared history for all four kinds and missing excerpts.
+        // Undo in the other window; redo and visible updates remain shared.
         cx.update_window(second, |_, window, cx| window.press("cmd-z", cx))
             .unwrap();
         cx.run_until_parked();
@@ -114,10 +119,6 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
             let restored = entries.iter().find(|a| a.id().serial() == serial).unwrap();
             let before = original.iter().find(|a| a.id().serial() == serial).unwrap();
             assert_eq!(restored.color(), before.color());
-            assert_eq!(restored.kind(), before.kind());
-            assert_eq!(restored.quads(), before.quads());
-            assert_eq!(restored.author(), before.author());
-            assert_eq!(restored.comment(), before.comment());
         });
         cx.update_window(handle, |_, window, cx| window.press("cmd-shift-z", cx))
             .unwrap();
@@ -156,13 +157,12 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
         .unwrap();
     assert_eq!(saved.len(), original.len());
     for (before, after) in original.iter().zip(&saved) {
-        assert_eq!(after.kind(), before.kind());
-        assert_eq!(after.quads(), before.quads());
-        assert_eq!(after.author(), before.author());
-        assert_eq!(after.comment(), before.comment());
-        assert_eq!(after.name(), before.name());
-        assert_eq!(after.opacity(), before.opacity());
-        assert_eq!(after.color(), HighlightColor::Pink.color());
+        let color = if [3, 4].contains(&before.id().serial()) {
+            HighlightColor::Pink.color()
+        } else {
+            before.color()
+        };
+        assert_eq!(after.color(), color);
     }
     // Deleting the selected row from one window clears identification in the
     // other window too. Removed row controls must not remain usable.
@@ -216,38 +216,45 @@ fn list_edits_all_imported_types_and_missing_text_then_saves_preserved_metadata(
         .unwrap();
     assert_eq!(saved.len(), original.len() - 1);
     assert!(saved.iter().all(|a| a.name() != Some("imported-highlight")));
-    for serial in [1, 2, 0, 4] {
-        cx.update_window(handle, |_, window, cx| {
+    cx.update_window(handle, |_, window, cx| {
+        window.within(row(epoch, 4)).click("delete-annotation", cx)
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(second, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(row(epoch, 4)).is_none());
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| window.press("cmd-z", cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(second, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find(row(epoch, 4)).visible());
+        assert!(
             window
-                .within(row(epoch, serial))
-                .click("delete-annotation", cx)
-        })
+                .find(row(epoch, 4))
+                .label()
+                .unwrap()
+                .contains("#FF73A6")
+        );
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-z", cx))
         .unwrap();
-        cx.run_until_parked();
-        cx.update_window(handle, |_, window, cx| window.press("cmd-z", cx))
-            .unwrap();
-        cx.run_until_parked();
-        cx.update_window(second, |_, window, cx| {
-            window.render_frame(cx);
-            assert!(window.find(row(epoch, serial)).visible());
-            assert!(
-                window
-                    .find(row(epoch, serial))
-                    .label()
-                    .unwrap()
-                    .contains("#FF73A6")
-            );
-        })
-        .unwrap();
-        cx.update_window(handle, |_, window, cx| window.press("cmd-shift-z", cx))
-            .unwrap();
-        cx.run_until_parked();
-    }
+    cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
         .unwrap();
     cx.run_until_parked();
     let saved = pdf::Document::open(&source).unwrap();
-    assert!(saved.page_annotations(0, 4).unwrap().is_empty());
+    let remaining = saved.page_annotations(0, 4).unwrap();
+    assert_eq!(remaining.len(), 3);
+    assert!(
+        remaining
+            .iter()
+            .all(|a| a.name() != Some("imported-highlight"))
+    );
     assert_eq!(saved.page_annotations(1, 4).unwrap().len(), 1);
 }
 

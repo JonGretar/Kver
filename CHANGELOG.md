@@ -19,6 +19,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   navigation. Page jumps place it on the first line; selection and annotation
   editing temporarily hide it without losing your place.
 
+### Changed
+
+- In Vim mode, `j` and `k` navigate the focused Contents or Annotations
+  sidebar just like the Down and Up arrow keys.
+
 ## [0.5.1] - 2026-11-14
 
 ### Changed

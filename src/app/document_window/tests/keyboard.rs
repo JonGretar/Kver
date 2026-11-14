@@ -14,6 +14,63 @@ fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
 }
 
 #[gpui_kit::test]
+fn vim_contents_j_k_match_arrow_selection(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| keymap::select_preset(cx, Preset::Vim).unwrap());
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    cx.run_until_parked();
+    press(cx, handle, "g c");
+    cx.update_window(handle, |_, window, cx| {
+        window.click(("contents-entry", 0usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let reader = document.read_with(cx, |d, _| d.reader().clone());
+    let first = reader.read_with(cx, |r, _| r.reading_position());
+    press(cx, handle, "down enter");
+    let second = reader.read_with(cx, |r, _| r.reading_position());
+    assert_ne!(second, first);
+    press(cx, handle, "up enter");
+    assert_eq!(reader.read_with(cx, |r, _| r.reading_position()), first);
+    press(cx, handle, "j enter");
+    assert_eq!(reader.read_with(cx, |r, _| r.reading_position()), second);
+    press(cx, handle, "k enter");
+    assert_eq!(reader.read_with(cx, |r, _| r.reading_position()), first);
+}
+
+#[gpui_kit::test]
+fn vim_annotations_j_k_match_arrow_selection(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| keymap::select_preset(cx, Preset::Vim).unwrap());
+    let (handle, _) = open(cx, Some(PathBuf::from("examples/annotations-clean.pdf")));
+    cx.run_until_parked();
+    let copied = |cx: &mut TestAppContext| {
+        press(cx, handle, "cmd-c");
+        cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap())
+    };
+    press(cx, handle, "g a");
+    press(cx, handle, "down");
+    let first = copied(cx);
+    press(cx, handle, "down");
+    let second = copied(cx);
+    assert_ne!(second, first);
+    press(cx, handle, "up");
+    assert_eq!(copied(cx), first);
+    press(cx, handle, "j");
+    assert_eq!(copied(cx), second);
+    press(cx, handle, "k");
+    assert_eq!(copied(cx), first);
+    press(cx, handle, "escape /");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("find-query").focused(), Some(true));
+        window.input("jk", cx);
+        assert_eq!(window.find("find-query").value(), Some("jk"));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn vim_distinguishes_pdf_pages_viewport_scroll_and_find_matches(cx: &mut TestAppContext) {
     setup(cx);
     cx.update(|cx| keymap::select_preset(cx, Preset::Vim).unwrap());

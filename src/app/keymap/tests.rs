@@ -5,6 +5,29 @@ use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
 #[test]
+fn pdf_dark_mode_is_available_for_custom_bindings_without_a_default_key() {
+    for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
+        for preset in [Preset::Standard, Preset::Vim] {
+            let map = resolve_config(
+                "[[keyboard.bindings]]\nkeys = 'ctrl-alt-d'\ncontext = 'reader'\ncommand = 'toggle-pdf-dark-mode'\n",
+                platform,
+                preset,
+            ).unwrap();
+            assert_eq!(
+                map.action("ctrl-alt-d", Context::Reader),
+                Some("kver::TogglePdfDarkMode")
+            );
+            assert!(
+                resolve(platform, preset)
+                    .unwrap()
+                    .shortcuts(&crate::reader::TogglePdfDarkMode, Context::Reader)
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
 fn ruler_defaults_are_platform_aware_and_reader_only() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
         let modified = if platform == Platform::Mac {

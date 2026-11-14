@@ -251,6 +251,7 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 ]),
                 Menu::new("View").items([
                     MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                    MenuItem::action("Toggle PDF dark mode", crate::reader::TogglePdfDarkMode),
                     MenuItem::separator(),
                     MenuItem::action("Single Page", SinglePage),
                     MenuItem::action("Continuous", Continuous),

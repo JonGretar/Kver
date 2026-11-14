@@ -12,6 +12,7 @@ mod authoring;
 mod authoring_geometry;
 mod authorship;
 mod current_save;
+mod dark_mode;
 mod find;
 mod links;
 mod loading;

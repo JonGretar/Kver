@@ -820,6 +820,7 @@ impl Render for DocumentWindow {
                 this.show_marks(MarksView::Delete, window, cx)
             }))
             .on_action(cx.listener(Self::route_reader_action::<NextPage>))
+            .on_action(cx.listener(Self::route_reader_action::<crate::reader::TogglePdfDarkMode>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::ToggleReadingRuler>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::NextRulerLine>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::PreviousRulerLine>))

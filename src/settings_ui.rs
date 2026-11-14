@@ -62,6 +62,10 @@ impl SettingsState {
         self.settings.appearance()
     }
 
+    pub fn pdf_dark_mode(&self) -> bool {
+        self.settings.pdf_dark_mode()
+    }
+
     pub fn show_toolbar(&self) -> bool {
         self.settings.show_toolbar()
     }
@@ -114,6 +118,7 @@ impl SettingsState {
         let current = self.settings.clone();
         let updated = match change.clone() {
             SettingsChange::Appearance(choice) => current.with_appearance(choice),
+            SettingsChange::PdfDarkMode(enabled) => current.with_pdf_dark_mode(enabled),
             SettingsChange::ShowToolbar(show) => current.with_show_toolbar(show),
             SettingsChange::ShowStatusbar(show) => current.with_show_statusbar(show),
             SettingsChange::InitialZoom(choice) => current.with_initial_zoom(choice),
@@ -692,6 +697,7 @@ fn shortcut_task(action: &str) -> &'static str {
     {
         "Find"
     } else if name.contains("Zoom")
+        || name == "TogglePdfDarkMode"
         || name.contains("Fit")
         || name.contains("Ruler")
         || name.contains("Page") && matches!(name, "SinglePage")
@@ -736,6 +742,37 @@ mod tests {
     use super::*;
     use crate::{app::document_window::DocumentWindow, reader::ShowRecent, recent::RecentStore};
     use gpui_kit::{TestAppContext, test::TestWindowExt as _};
+
+    #[gpui_kit::test]
+    fn pdf_dark_mode_appearance_switch_persists(cx: &mut TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            AppPaths::for_locations(root.path().join("config.toml"), root.path().join("local"));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(cx, Some(paths.clone()));
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let window = cx.update(|cx| cx.windows()[0]);
+        cx.update_window(window, |_, frame, cx| {
+            frame.render_frame(cx);
+            frame.within("settings-sidebar").click("0-1", cx);
+            assert_eq!(frame.find("pdf-dark-mode").checked(), Some(false));
+            frame.click("pdf-dark-mode", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(settings::load(paths.config()).unwrap().pdf_dark_mode());
+        cx.update_window(window, |_, frame, cx| {
+            frame.render_frame(cx);
+            assert_eq!(frame.find("pdf-dark-mode").checked(), Some(true));
+            frame.click("pdf-dark-mode", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(!settings::load(paths.config()).unwrap().pdf_dark_mode());
+    }
 
     fn choose(cx: &mut TestAppContext, window: AnyWindowHandle, option: usize) {
         cx.update(|cx| {

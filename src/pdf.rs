@@ -29,6 +29,10 @@ use hayro::{
 use crate::coordinates::{PageTransform, Point};
 
 mod annotation_read;
+#[cfg(feature = "gui")]
+mod dark_mode;
+#[cfg(feature = "gui")]
+pub(crate) use dark_mode::PageColors;
 #[cfg(test)]
 mod annotation_read_tests;
 pub mod annotations;

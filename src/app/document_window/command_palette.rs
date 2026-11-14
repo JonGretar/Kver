@@ -84,6 +84,12 @@ impl CommandPalette {
         let mut items = vec![
             command("Open PDF…", OpenPdf, true),
             reader_command(
+                "Toggle PDF dark mode",
+                crate::reader::TogglePdfDarkMode,
+                has_document,
+                cx,
+            ),
+            reader_command(
                 "Toggle reading ruler",
                 crate::reader::ToggleReadingRuler,
                 has_document,

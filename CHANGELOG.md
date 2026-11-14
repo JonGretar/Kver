@@ -15,6 +15,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Continue ruler reading across columns and pages in either layout, including
   past textless pages. The guide reveals text at high zoom and follows manual
   scrolling after it settles, without pulling the page back.
+- Keep the ruler through search, links, marks, contents, and back/forward
+  navigation. Page jumps place it on the first line; selection and annotation
+  editing temporarily hide it without losing your place.
 
 ## [0.5.1] - 2026-11-14
 

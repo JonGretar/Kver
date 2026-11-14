@@ -1,5 +1,5 @@
 //! Window-local reading guide. Line indices are valid only with retained text;
-//! replacement drops the state rather than reusing identities from an old PDF.
+//! reload resolves a geometric anchor rather than reusing old line identities.
 
 use crate::{coordinates::Point, pdf::PageText};
 use std::sync::Arc;
@@ -8,10 +8,21 @@ use std::sync::Arc;
 pub(super) struct Ruler {
     pub(super) enabled: bool,
     pub(super) target: Option<Target>,
-    pub(super) pending: Option<(usize, Point, bool)>,
+    pub(super) pending: Option<(usize, Placement)>,
     pub(super) traversal: Option<Traversal>,
     pub(super) notice: Option<&'static str>,
     pub(super) browse_task: Option<gpui_kit::Task<()>>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Placement {
+    /// Deliberate page turns use reading order, not distance to the old viewport.
+    First,
+    /// Displayed page coordinates, resolved after extraction supplies its transform.
+    Page(Point),
+    ExactPage(Point),
+    /// Identifiable text (search) or a reload anchor in PDF document coordinates.
+    Document(Point),
 }
 
 #[derive(Clone, Copy)]
@@ -39,7 +50,7 @@ impl Ruler {
     pub(super) fn text_priority(&self) -> Option<usize> {
         self.traversal
             .map(|work| work.page)
-            .or_else(|| self.pending.map(|(page, _, _)| page))
+            .or_else(|| self.pending.map(|(page, _)| page))
     }
 
     pub(super) fn place(
@@ -104,10 +115,35 @@ fn adjacent(page: usize, forward: bool, count: usize) -> Option<usize> {
 }
 
 impl super::ReaderView {
+    /// Navigation owns the viewport. Text completion may resolve a target, but
+    /// must not refocus the reader or replay a jump after the user moves on.
+    pub(super) fn retarget_ruler(
+        &mut self,
+        page: usize,
+        placement: Placement,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        self.ruler.cancel_work();
+        if !self.ruler.enabled {
+            return;
+        }
+        self.ruler.target = None;
+        self.ruler.pending = Some((page, placement));
+        self.finish_ruler_placement();
+        self.schedule_text(cx);
+    }
+
+    pub(super) fn ruler_editing(&self) -> bool {
+        self.selection.dragging_page().is_some()
+            || self.selection.has_selection()
+            || self.selected_annotation.is_some()
+            || self.annotation_choice.is_some()
+    }
+
     /// A single extraction is allowed to finish, but only the current intent
     /// consumes it. Reversing never queues behind an obsolete traversal.
     pub(super) fn traverse_ruler(&mut self, forward: bool, cx: &mut gpui_kit::Context<Self>) {
-        if !self.ruler.enabled || self.pages.is_empty() {
+        if !self.ruler.enabled || self.pages.is_empty() || self.ruler_editing() {
             return;
         }
         self.ruler.browse_task = None;
@@ -200,7 +236,7 @@ impl super::ReaderView {
     /// retarget once after wheel momentum settles without scrolling back.
     pub(super) fn browse_ruler(&mut self, cx: &mut gpui_kit::Context<Self>) {
         self.ruler.cancel_work();
-        if !self.ruler.enabled {
+        if !self.ruler.enabled || self.ruler_editing() {
             return;
         }
         let generation = self.document_generation;

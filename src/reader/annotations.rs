@@ -31,9 +31,18 @@ pub(crate) fn markup_icon(kind: MarkupKind) -> IconName {
     }
 }
 
+pub(crate) fn markup_color_icon(color: HighlightColor) -> Icon {
+    // A filled swatch represents PDF color data, not a themed command icon.
+    Icon::default()
+        .data(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor"/></svg>"#)
+        .when_some(color.color().rgb(), |icon, [r, g, b]| {
+            icon.text_color(gpui_kit::Rgba { r, g, b, a: 1. })
+        })
+}
+
 /// A text sample, not another rendering of the PDF appearance. Keep the
 /// foreground readable in both themes and never decorate extraction fallbacks.
-fn marked_excerpt(
+pub(super) fn marked_excerpt(
     annotation: &Annotation,
     text: String,
     recovered: bool,
@@ -83,10 +92,20 @@ pub(crate) struct AnnotationEdit {
 }
 
 #[derive(Clone)]
-enum Excerpt {
+pub(super) enum Excerpt {
     Text(String),
     Missing,
     Failed,
+}
+
+pub(super) fn excerpt_text(annotation: &Annotation, excerpt: Option<&Excerpt>) -> String {
+    match excerpt {
+        Some(Excerpt::Text(text)) => text.clone(),
+        _ if annotation.is_readonly() => "Malformed annotation — readonly".into(),
+        Some(Excerpt::Missing) => "No marked text available".into(),
+        Some(Excerpt::Failed) => "Couldn’t extract marked text".into(),
+        None => "Loading marked text…".into(),
+    }
 }
 
 struct AnnotationRows {
@@ -129,13 +148,7 @@ impl ListDelegate for AnnotationRows {
         cx: &mut Context<ListState<Self>>,
     ) -> Option<ListItem> {
         let annotation = self.entries.get(ix.row)?;
-        let text = match self.excerpts.get(&annotation.id()) {
-            Some(Excerpt::Text(text)) => text.clone(),
-            _ if annotation.is_readonly() => "Malformed annotation — readonly".into(),
-            Some(Excerpt::Missing) => "No marked text available".into(),
-            Some(Excerpt::Failed) => "Couldn’t extract marked text".into(),
-            None => "Loading marked text…".into(),
-        };
+        let text = excerpt_text(annotation, self.excerpts.get(&annotation.id()));
         let color = annotation
             .color()
             .rgb()
@@ -601,23 +614,6 @@ impl Render for AnnotationsPanel {
             .flex_col()
             .size_full()
             .min_h_0()
-            .child(
-                div()
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child("Annotations")
-                    .child(
-                        Button::new("copy-annotation")
-                            .ghost()
-                            .small()
-                            .label("Copy text")
-                            .disabled(self.selected_text(cx).is_none())
-                            .on_click(cx.listener(|this, _, _, cx| this.copy(cx))),
-                    ),
-            )
             .when_some(status, |panel, status| {
                 panel.child(
                     div()

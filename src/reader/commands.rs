@@ -30,6 +30,7 @@ gpui::actions!(
         StrikeOut,
         Squiggly,
         DeleteHighlight,
+        DeselectAnnotation,
         UndoAnnotation,
         RedoAnnotation,
         Copy

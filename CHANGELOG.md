@@ -10,6 +10,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 
 - First-launch setup now explains each keyboard map and lists system appearance first.
+- Selected annotations now have compact editing controls with their current
+  color, undoable deletion, and a separate dismiss button. Escape deselects
+  without deleting; toolbar creation controls remain separate.
+- Overlapping annotations show styled passage previews when choosing a target.
+  The Annotations sidebar now starts directly with the list; copying selected
+  annotation text remains available by keyboard.
 
 ## [0.5.0] - 2026-11-13
 

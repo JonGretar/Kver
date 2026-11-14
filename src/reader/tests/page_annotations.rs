@@ -41,6 +41,32 @@ fn mixed_type_overlap_requires_an_explicit_target_and_preserves_text_dragging(
         assert!(reader.annotation_choice.is_some());
     });
     cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let previews = window.find_all("annotation-choice-preview");
+        assert_eq!(previews.len(), 4);
+        for preview in previews {
+            assert_eq!(preview.label(), Some("Alpha"));
+        }
+    })
+    .unwrap();
+    for font in [12., 20.] {
+        cx.update(|cx| gpui_kit::component::Theme::update(cx, |theme| theme.font_size = px(font)));
+        for width in [360., 920.] {
+            cx.simulate_window_resize(handle, gpui::size(px(width), px(800.)));
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                for preview in window.find_all("annotation-choice-preview") {
+                    let bounds = preview.bounds();
+                    assert!(bounds.left() >= px(0.));
+                    assert!(bounds.right() <= px(width));
+                    assert!(bounds.top() >= px(0.));
+                    assert!(bounds.bottom() <= px(800.));
+                }
+            })
+            .unwrap();
+        }
+    }
+    cx.update_window(handle, |_, window, cx| {
         window.input("Squiggly", cx);
         window.press("enter", cx);
     })
@@ -85,6 +111,10 @@ fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppCon
             .get_dictionary_mut((7, 0))
             .unwrap()
             .set("Subtype", lopdf::Object::Name(subtype.as_bytes().to_vec()));
+        fixture.get_dictionary_mut((7, 0)).unwrap().set(
+            "C",
+            lopdf::Object::Array(vec![0.2.into(), 0.4.into(), 0.6.into()]),
+        );
         fixture.save(&source).unwrap();
         let (handle, reader) = recent_test_window(cx, Some(source.clone()));
         cx.run_until_parked();
@@ -98,11 +128,85 @@ fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppCon
             assert!(reader.annotation_edit_available(cx))
         });
         cx.update_window(handle, |_, window, cx| {
-            window.click("recolor-highlight", cx)
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("selected-annotation-type").label(),
+                Some(kind.label())
+            );
+            assert_eq!(
+                window.find("recolor-highlight").label(),
+                Some("Selected annotation color: #336699")
+            );
+            window.click("recolor-highlight", cx);
         })
         .unwrap();
         cx.run_until_parked();
-        click_label(cx, handle, "Green");
+        cx.update_window(handle, |_, window, cx| {
+            window.press("escape", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("popup-menu").is_none());
+            assert!(window.find("selected-highlight-controls").visible());
+            window.press("escape", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        reader.read_with(cx, |reader, cx| {
+            assert!(reader.selected_page_annotation(cx).is_none());
+            assert!(!reader.is_dirty(cx));
+            assert!(!reader.has_annotation_undo(cx));
+        });
+        click_annotation(cx, handle, &reader, &imported);
+        cx.update_window(handle, |_, window, cx| {
+            // Dismissal must work from a real Tab stop, not only PDF focus.
+            for _ in 0..32 {
+                if window.find("deselect-annotation").focused() == Some(true) {
+                    break;
+                }
+                window.press("tab", cx);
+            }
+            assert_eq!(window.find("deselect-annotation").focused(), Some(true));
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            assert!(reader.read(cx).focus.is_focused(window));
+            assert!(window.try_find("selected-highlight-controls").is_none());
+        })
+        .unwrap();
+        assert!(catalog(&reader, cx).contains(&imported));
+        click_annotation(cx, handle, &reader, &imported);
+        cx.update_window(handle, |_, window, cx| {
+            if kind == MarkupKind::Underline {
+                for _ in 0..32 {
+                    if window.find("recolor-highlight").focused() == Some(true) {
+                        break;
+                    }
+                    window.press("tab", cx);
+                }
+                assert_eq!(window.find("recolor-highlight").focused(), Some(true));
+                window.press("enter", cx);
+            } else {
+                window.click("recolor-highlight", cx);
+            }
+        })
+        .unwrap();
+        cx.run_until_parked();
+        if kind == MarkupKind::Underline {
+            cx.update_window(handle, |_, window, cx| {
+                window.press("down", cx);
+                window.press("down", cx);
+                window.press("enter", cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+        } else {
+            click_label(cx, handle, "Green");
+        }
         let changed = catalog(&reader, cx)
             .into_iter()
             .find(|a| a.id() == imported.id())
@@ -111,8 +215,33 @@ fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppCon
         assert_eq!(changed.quads(), imported.quads());
         assert_eq!(changed.author(), imported.author());
         assert_eq!(changed.comment(), imported.comment());
-        cx.update_window(handle, |_, window, cx| window.click("delete-highlight", cx))
-            .unwrap();
+        cx.update_window(handle, |_, window, cx| {
+            window.press("secondary-z", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(catalog(&reader, cx).contains(&imported));
+        cx.update_window(handle, |_, window, cx| {
+            window.press("secondary-shift-z", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(catalog(&reader, cx).contains(&changed));
+        cx.update_window(handle, |_, window, cx| {
+            if kind == MarkupKind::StrikeOut {
+                for _ in 0..32 {
+                    if window.find("delete-highlight").focused() == Some(true) {
+                        break;
+                    }
+                    window.press("tab", cx);
+                }
+                assert_eq!(window.find("delete-highlight").focused(), Some(true));
+                window.press("enter", cx);
+            } else {
+                window.click("delete-highlight", cx);
+            }
+        })
+        .unwrap();
         cx.run_until_parked();
         cx.update_window(handle, |_, window, cx| {
             assert!(reader.read(cx).focus.is_focused(window));
@@ -146,6 +275,117 @@ fn every_imported_type_uses_page_controls_and_shared_history(cx: &mut TestAppCon
         .unwrap();
         cx.run_until_parked();
     }
+}
+
+#[gpui_kit::test]
+fn selected_strip_wraps_at_large_text_and_readonly_annotations_can_be_dismissed(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{component::theme::Theme, size};
+
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("readonly.pdf");
+    let mut fixture = lopdf::Document::load("examples/annotations-clean.pdf").unwrap();
+    let entry = fixture.get_dictionary_mut((7, 0)).unwrap();
+    // Invalid opacity retains usable geometry but makes the imported entry
+    // read-only under the existing annotation safety policy.
+    entry.set("CA", 2);
+    entry.set(
+        "C",
+        lopdf::Object::Array(vec![0.2.into(), 0.4.into(), 0.6.into()]),
+    );
+    fixture.save(&source).unwrap();
+    let (handle, reader) = recent_test_window(cx, Some(source));
+    cx.run_until_parked();
+    let imported = catalog(&reader, cx)
+        .into_iter()
+        .find(|a| a.name() == Some("imported-highlight"))
+        .unwrap();
+    assert!(imported.is_readonly());
+    click_annotation(cx, handle, &reader, &imported);
+    for font in [12., 16., 20.] {
+        cx.update(|cx| Theme::update(cx, |theme| theme.font_size = px(font)));
+        for width in [360., 600., 920.] {
+            cx.simulate_window_resize(handle, size(px(width), px(800.)));
+            for sidebar in [false, true] {
+                if sidebar {
+                    cx.update_window(handle, |_, window, cx| {
+                        window.dispatch_action(Box::new(crate::reader::ShowAnnotations), cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                }
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    let strip = window.find("selected-highlight-controls").bounds();
+                    let mut previous: Option<gpui::Bounds<gpui::Pixels>> = None;
+                    for id in [
+                        "selected-annotation-type",
+                        "recolor-highlight",
+                        "delete-highlight",
+                        "deselect-annotation",
+                    ] {
+                        let control = window.find(id);
+                        let bounds = control.bounds();
+                        assert!(control.visible());
+                        assert!(bounds.left() >= strip.left());
+                        assert!(
+                            bounds.right() <= strip.right(),
+                            "{id} exceeds strip at width={width}, font={font}, sidebar={sidebar}: {bounds:?} vs {strip:?}"
+                        );
+                        assert!(bounds.top() >= strip.top());
+                        assert!(bounds.bottom() <= strip.bottom());
+                        if let Some(previous) = previous {
+                            assert!(
+                                bounds.left() >= previous.right()
+                                    || bounds.top() >= previous.bottom(),
+                                "{id} overlaps its predecessor at {width}px / {font}pt"
+                            );
+                        }
+                        previous = Some(bounds);
+                    }
+                    let dismiss = window.find("deselect-annotation").bounds();
+                    assert!(
+                        (strip.right() - dismiss.right() - window.rem_size() * 0.75).abs()
+                            <= px(1.),
+                        "dismiss stays at the strip's trailing inset"
+                    );
+                    assert_eq!(window.find("recolor-highlight").disabled(), Some(true));
+                    assert_eq!(window.find("delete-highlight").disabled(), Some(true));
+                    window.click("delete-highlight", cx);
+                    window.click("recolor-highlight", cx);
+                    assert!(window.try_find("popup-menu").is_none());
+                })
+                .unwrap();
+                if sidebar {
+                    cx.update_window(handle, |_, window, cx| {
+                        window.dispatch_action(Box::new(crate::reader::ToggleSidebar), cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                }
+            }
+        }
+    }
+    cx.update_window(handle, |_, window, cx| {
+        window.click("deselect-annotation", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    reader.read_with(cx, |reader, cx| {
+        assert!(reader.selected_page_annotation(cx).is_none());
+        assert!(!reader.is_dirty(cx));
+    });
+    assert!(catalog(&reader, cx).contains(&imported));
+    cx.update_window(handle, |_, window, cx| {
+        assert!(reader.read(cx).focus.is_focused(window));
+        assert!(window.try_find("selected-highlight-controls").is_none());
+    })
+    .unwrap();
 }
 
 fn catalog(reader: &Entity<ReaderView>, cx: &TestAppContext) -> Vec<Annotation> {
@@ -331,6 +571,68 @@ fn overlapping_pdf(path: &Path) {
 }
 
 #[gpui_kit::test]
+fn overlap_previews_do_not_use_comments_as_text_or_return_after_document_replacement(
+    cx: &mut TestAppContext,
+) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("blank-overlap.pdf");
+    let mut pdf = lopdf::Document::load("examples/annotations-clean.pdf").unwrap();
+    let duplicate = pdf.get_object((11, 0)).unwrap().clone();
+    let duplicate = pdf.add_object(duplicate);
+    pdf.get_dictionary_mut((3, 0))
+        .unwrap()
+        .get_mut(b"Annots")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .push(lopdf::Object::Reference(duplicate));
+    pdf.save(&source).unwrap();
+    let (handle, reader) = recent_test_window(cx, Some(source));
+    cx.run_until_parked();
+    let blank = catalog(&reader, cx)
+        .into_iter()
+        .find(|a| a.id().serial() == 4)
+        .unwrap();
+    click_annotation(cx, handle, &reader, &blank);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let previews = window.find_all("annotation-choice-preview");
+        assert_eq!(previews.len(), 2);
+        for preview in previews {
+            assert_eq!(preview.label(), Some("No marked text available"));
+        }
+        window.press("escape", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    // Replace the document before the next extraction continuation can publish.
+    draw(cx, handle);
+    let at = annotation_point(&reader, &blank, cx);
+    cx.update_window(handle, |_, window, cx| {
+        window.pointer_down(at, gpui::MouseButton::Left, cx);
+        window.pointer_up(at, gpui::MouseButton::Left, cx);
+        reader.update(cx, |reader, cx| {
+            reader.open_path(PathBuf::from("examples/readme-sample.pdf"), cx);
+        });
+        let focus = reader.read(cx).focus.clone();
+        window.focus(&focus, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("highlight-overlap-choice").is_none());
+        assert!(window.find_all("annotation-choice-preview").is_empty());
+        assert!(reader.read(cx).focus.is_focused(window));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn overlapping_highlights_require_choice_modal_input_does_not_reach_text_and_stale_choice_is_safe(
     cx: &mut TestAppContext,
 ) {
@@ -357,6 +659,10 @@ fn overlapping_highlights_require_choice_modal_input_does_not_reach_text_and_sta
     });
     cx.update_window(handle, |_, window, cx| {
         assert!(window.find("highlight-overlap-choice").visible());
+        assert_eq!(window.find_all("annotation-choice-preview").len(), 2);
+        for preview in window.find_all("annotation-choice-preview") {
+            assert_eq!(preview.label(), Some("Highlight passage"));
+        }
         window.input("Fixture", cx);
         window.press("down", cx);
         window.press("backspace", cx);

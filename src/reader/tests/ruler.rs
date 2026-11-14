@@ -1,9 +1,12 @@
 use super::*;
 use crate::app::keymap::{self, Preset};
+use crate::reader::ruler::Target;
 use gpui_kit::{
     Modifiers,
     test::{ClickOptions, TestEventExt},
 };
+
+mod traversal;
 
 fn open(cx: &mut TestAppContext, path: &str, page: usize) -> (AnyWindowHandle, Entity<ReaderView>) {
     cx.update(|cx| {
@@ -69,15 +72,15 @@ fn ruler_keyboard_reads_columns_preserves_focus_and_resumes_without_scroll(
     });
     cx.simulate_keystrokes(window, "r");
     assert_eq!(target(&reader, cx), initial);
-    // Movement crosses columns but never crosses this slice's page boundary.
-    for _ in 0..100 {
-        cx.simulate_keystrokes(window, "j");
-    }
+    // Traverse all remaining columns in this page, then reverse within it.
     let last = reader.read_with(cx, |reader, _| {
         reader.ruler.target.as_ref().unwrap().text.lines.len() - 1
     });
+    for _ in initial.1..last {
+        cx.simulate_keystrokes(window, "j");
+    }
     assert_eq!(target(&reader, cx), (2, last));
-    for _ in 0..100 {
+    for _ in 0..last {
         cx.simulate_keystrokes(window, "k");
     }
     assert_eq!(target(&reader, cx), (2, 0));
@@ -344,11 +347,21 @@ fn ruler_distinguishes_loading_failure_and_textless_without_spatial_fallback(
         assert!(reader.page_text.finish(request, Ok(text)));
     });
     cx.simulate_keystrokes(window, "r");
-    cx.simulate_keystrokes(window, "j");
     reader.read_with(cx, |reader, _| {
-        assert!(reader.ruler.enabled);
         assert!(reader.ruler.target.is_none());
         assert!(reader.status().contains("no usable text"));
+    });
+    cx.simulate_keystrokes(window, "j");
+    settle(cx, window);
+    reader.read_with(cx, |reader, _| {
+        assert!(reader.ruler.enabled);
+        assert!(
+            reader
+                .ruler
+                .target
+                .as_ref()
+                .is_some_and(|target| target.page > 0)
+        );
     });
 }
 
@@ -389,4 +402,134 @@ fn ruler_reveals_edges_at_zoom_in_both_layouts_and_reactivation_uses_visible_tex
         assert!(reader.read_with(cx, |reader, _| reader.ruler_visible()));
         cx.simulate_keystrokes(window, "r");
     }
+}
+
+fn boundary(reader: &Entity<ReaderView>, cx: &mut TestAppContext, page: usize, last: bool) {
+    let text =
+        std::sync::Arc::new(pdf::page_text(Path::new("examples/reading-order.pdf"), page).unwrap());
+    reader.update(cx, |reader, cx| {
+        let line = if last { text.lines.len() - 1 } else { 0 };
+        reader.ruler.cancel_work();
+        reader.ruler.enabled = true;
+        reader.ruler.target = Some(Target { page, line, text });
+        reader.reveal_ruler(cx);
+    });
+}
+
+#[gpui_kit::test]
+fn ruler_crosses_pages_both_directions_and_reveals_columns_at_high_zoom(cx: &mut TestAppContext) {
+    let (window, reader) = open(cx, "examples/reading-order.pdf", 2);
+    for mode in [ReadingMode::Continuous, ReadingMode::SinglePage] {
+        reader.update(cx, |reader, cx| {
+            reader.set_reading_mode(mode, cx);
+            reader.change_scale(3. / reader.scale, cx);
+        });
+        boundary(&reader, cx, 2, true);
+        settle(cx, window);
+        cx.simulate_keystrokes(window, "j");
+        settle(cx, window);
+        assert_eq!(target(&reader, cx), (3, 0));
+        cx.update_window(window, |_, frame, cx| {
+            frame.render_frame(cx);
+            let marker = frame.find("reading-ruler-marker").bounds();
+            let viewport = frame.find("page").bounds();
+            assert!(marker.top() >= viewport.top());
+            assert!(marker.bottom() <= viewport.bottom());
+            assert!(marker.left() < viewport.right() && marker.right() > viewport.left());
+        })
+        .unwrap();
+        cx.simulate_keystrokes(window, "k");
+        settle(cx, window);
+        assert_eq!(target(&reader, cx).0, 2);
+        reader.read_with(cx, |reader, _| {
+            assert!(reader.ruler_visible());
+            assert!(reader.ruler.traversal.is_none());
+        });
+        // Column transition has an upward reveal, not a jump to another page.
+        let column_end = reader.read_with(cx, |reader, _| {
+            let text = &reader.ruler.target.as_ref().unwrap().text;
+            (0..text.lines.len() - 1)
+                .find(|ix| {
+                    let a = Target {
+                        page: 2,
+                        line: *ix,
+                        text: text.clone(),
+                    }
+                    .page_rect(reader.pages[2])
+                    .unwrap();
+                    let b = Target {
+                        page: 2,
+                        line: ix + 1,
+                        text: text.clone(),
+                    }
+                    .page_rect(reader.pages[2])
+                    .unwrap();
+                    b[1] < a[1] && b[0] > a[0]
+                })
+                .expect("column transition")
+        });
+        reader.update(cx, |reader, cx| {
+            reader.ruler.target.as_mut().unwrap().line = column_end;
+            reader.reveal_ruler(cx);
+        });
+        let before = reader.read_with(cx, |reader, _| reader.viewport().0);
+        cx.simulate_keystrokes(window, "j");
+        settle(cx, window);
+        assert_eq!(target(&reader, cx), (2, column_end + 1));
+        reader.read_with(cx, |reader, _| {
+            assert!(reader.viewport().0 < before);
+            assert!(reader.ruler_visible());
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn ruler_browsing_debounces_retarget_without_reveal_or_feedback(cx: &mut TestAppContext) {
+    let (window, reader) = open(cx, "examples/reading-order.pdf", 2);
+    reader.update(cx, |reader, cx| reader.change_scale(3. / reader.scale, cx));
+    boundary(&reader, cx, 2, false);
+    settle(cx, window);
+    let initial = target(&reader, cx);
+    // A small gesture retains the same line.
+    cx.update_window(window, |_, frame, cx| {
+        frame.scroll(
+            "page",
+            gpui::ScrollDelta::Pixels(point(px(0.), px(-1.))),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.background_executor
+        .advance_clock(Duration::from_millis(200));
+    settle(cx, window);
+    assert_eq!(target(&reader, cx), initial);
+    for _ in 0..4 {
+        cx.update_window(window, |_, frame, cx| {
+            frame.scroll(
+                "page",
+                gpui::ScrollDelta::Pixels(point(px(0.), px(-200.))),
+                cx,
+            );
+        })
+        .unwrap();
+        cx.background_executor
+            .advance_clock(Duration::from_millis(100));
+        settle(cx, window);
+        assert_eq!(target(&reader, cx), initial);
+    }
+    let offset = reader.read_with(cx, |reader, _| reader.scroll.offset());
+    cx.background_executor
+        .advance_clock(Duration::from_millis(200));
+    settle(cx, window);
+    assert_ne!(target(&reader, cx), initial);
+    reader.read_with(cx, |reader, _| {
+        assert_eq!(reader.scroll.offset(), offset);
+        assert!(reader.ruler_visible());
+        assert!(reader.ruler.browse_task.is_none());
+    });
+    settle(cx, window);
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.scroll.offset()),
+        offset
+    );
 }

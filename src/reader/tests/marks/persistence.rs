@@ -54,7 +54,7 @@ fn local_marks_share_across_windows_restart_and_palette(cx: &mut TestAppContext)
     });
     first.read_with(cx, |reader, _| assert_eq!(reader.position_to_save(), saved));
 
-    cx.simulate_keystrokes(other_window, "cmd-shift-m");
+    cx.simulate_keystrokes(other_window, "secondary-shift-m");
     cx.run_until_parked();
     other.read_with(cx, |reader, cx| {
         let marks = reader.marks.as_ref().expect("marks owner").read(cx);

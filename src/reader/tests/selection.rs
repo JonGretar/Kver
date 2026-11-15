@@ -89,7 +89,7 @@ fn multi_click_selection_drags_copies_and_retains_word_or_paragraph_granularity(
             frame.pointer_up(positions[3], gpui::MouseButton::Left, cx)
         })
         .unwrap();
-        cx.simulate_keystrokes(window, "cmd-c");
+        cx.simulate_keystrokes(window, "secondary-c");
         assert_eq!(
             cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
             Some("café world\nSecond naïve".into())
@@ -198,7 +198,7 @@ fn dragging_from_column_text_onto_a_link_copies_without_following_it(cx: &mut Te
         frame.drag(start, end, cx);
     })
     .unwrap();
-    cx.simulate_keystrokes(window, "cmd-c");
+    cx.simulate_keystrokes(window, "secondary-c");
     let copied = cx
         .update(|cx| cx.read_from_clipboard().and_then(|item| item.text()))
         .unwrap();
@@ -268,7 +268,7 @@ fn field_guide_cross_column_copy_uses_reading_order_after_zoom_and_scroll(cx: &m
             for (start, end) in [(start, end), (end, start)] {
                 cx.update_window(window, |_, frame, cx| frame.drag(start, end, cx))
                     .unwrap();
-                cx.simulate_keystrokes(window, "cmd-c");
+                cx.simulate_keystrokes(window, "secondary-c");
                 let copied = cx
                     .update(|cx| cx.read_from_clipboard().and_then(|item| item.text()))
                     .unwrap();
@@ -337,7 +337,7 @@ fn dragging_text_and_copying_uses_document_coordinates(cx: &mut TestAppContext) 
             assert_eq!(reader.selected_text().as_deref(), Some("KVER "));
         })
         .unwrap();
-    cx.simulate_keystrokes(window.into(), "cmd-c");
+    cx.simulate_keystrokes(window.into(), "secondary-c");
     assert_eq!(
         cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
         Some("KVER ".into())
@@ -386,7 +386,7 @@ fn selection_copy_survives_zoom_and_scrolling_in_its_window(cx: &mut TestAppCont
     cx.run_until_parked();
     for zoomed in [false, true] {
         if zoomed {
-            cx.simulate_keystrokes(window, "cmd-=");
+            cx.simulate_keystrokes(window, "secondary-=");
             cx.run_until_parked();
             reader.read_with(cx, |reader, _| {
                 assert!(reader.scale() > 1.0);
@@ -408,7 +408,7 @@ fn selection_copy_survives_zoom_and_scrolling_in_its_window(cx: &mut TestAppCont
         assert_eq!(reader.page_index(), 1);
         assert_eq!(reader.selected_text().as_deref(), Some("KVER "));
     });
-    cx.simulate_keystrokes(window, "cmd-c");
+    cx.simulate_keystrokes(window, "secondary-c");
     assert_eq!(
         cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())),
         Some("KVER ".into())

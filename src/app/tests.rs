@@ -68,7 +68,7 @@ fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext
     });
     cx.update_window(reader, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-,", cx);
+        window.press("secondary-,", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -113,7 +113,7 @@ fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext
     });
     cx.update_window(about, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-w", cx);
+        window.press("secondary-w", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -122,7 +122,7 @@ fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext
     cx.update_window(reader, |_, window, cx| {
         window.activate_window();
         window.render_frame(cx);
-        window.press("cmd-n", cx);
+        window.press("secondary-n", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -134,7 +134,7 @@ fn startup_wires_document_and_auxiliary_window_shortcuts(cx: &mut TestAppContext
     });
     cx.update_window(second, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-w", cx);
+        window.press("secondary-w", cx);
     })
     .unwrap();
     cx.run_until_parked();

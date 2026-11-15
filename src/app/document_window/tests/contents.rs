@@ -14,7 +14,7 @@ fn outline_pointer_and_keyboard_activation_share_document_navigation(cx: &mut Te
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -48,7 +48,7 @@ fn document_replacement_discards_outline_and_keeps_the_sidebar_open(cx: &mut Tes
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
     reader.update(cx, |reader, cx| {
@@ -86,10 +86,10 @@ fn outline_completion_does_not_steal_find_focus(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-f", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-f", cx))
         .unwrap();
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {

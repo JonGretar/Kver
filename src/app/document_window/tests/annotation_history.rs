@@ -77,7 +77,7 @@ fn annotation_history_is_shared_save_retained_and_content_relative(cx: &mut Test
     // Identical selection selects the existing annotation without another edit.
     press(cx, first, "secondary-shift-h");
     assert_eq!(catalog(&other, cx), created);
-    press(cx, second, "cmd-z");
+    press(cx, second, "secondary-z");
     assert!(catalog(&document, cx).is_empty());
     for handle in [first, second] {
         dirty(cx, handle, false);
@@ -91,12 +91,12 @@ fn annotation_history_is_shared_save_retained_and_content_relative(cx: &mut Test
     other.read_with(cx, |document, cx| {
         assert!(document.reader.read(cx).selected_text().is_none());
     });
-    press(cx, first, "cmd-shift-z");
+    press(cx, first, REDO_KEY);
     assert_eq!(catalog(&other, cx), created);
-    press(cx, second, "cmd-s");
+    press(cx, second, "secondary-s");
     assert_eq!(persisted(&source).len(), 1);
     // Undoing a saved creation is dirty; redoing it returns to the saved state.
-    press(cx, first, "cmd-z");
+    press(cx, first, "secondary-z");
     for handle in [first, second] {
         dirty(cx, handle, true);
     }
@@ -111,7 +111,7 @@ fn annotation_history_is_shared_save_retained_and_content_relative(cx: &mut Test
     .unwrap();
     cx.run_until_parked();
     assert_eq!(persisted(&source).len(), 1);
-    press(cx, second, "cmd-shift-z");
+    press(cx, second, REDO_KEY);
     for handle in [first, second] {
         dirty(cx, handle, false);
     }
@@ -137,7 +137,7 @@ fn annotation_history_is_shared_save_retained_and_content_relative(cx: &mut Test
     assert_eq!(catalog(&document, cx), created);
     dirty(cx, first, false);
     action(cx, first, RedoAnnotation);
-    press(cx, second, "cmd-s");
+    press(cx, second, "secondary-s");
     assert!(persisted(&source).is_empty());
     action(cx, second, UndoAnnotation);
     assert_eq!(catalog(&other, cx), created);
@@ -150,7 +150,7 @@ fn annotation_history_is_shared_save_retained_and_content_relative(cx: &mut Test
     assert_eq!(catalog(&document, cx), branched);
 
     // A participant can close without discarding shared history or edits.
-    press(cx, first, "cmd-w");
+    press(cx, first, "secondary-w");
     drop(document);
     action(cx, second, UndoAnnotation);
     assert_eq!(catalog(&other, cx), created);
@@ -236,7 +236,7 @@ fn annotation_history_during_save_uses_the_committed_snapshot_not_the_current_re
     action(cx, second, UndoAnnotation);
     assert_eq!(catalog(&other, cx), created);
     dirty(cx, second, true);
-    press(cx, second, "cmd-s");
+    press(cx, second, "secondary-s");
     assert_eq!(persisted(&source).len(), 1);
     dirty(cx, first, false);
     action(cx, first, RedoAnnotation);
@@ -252,7 +252,7 @@ fn annotation_shortcuts_respect_find_input_undo_and_list_focus(cx: &mut TestAppC
     select_text(cx, handle, &document);
     press(cx, handle, "secondary-shift-h");
     let created = catalog(&document, cx);
-    press(cx, handle, "cmd-f");
+    press(cx, handle, "secondary-f");
     cx.update_window(handle, |_, window, cx| window.input("Alpha", cx))
         .unwrap();
     cx.run_until_parked();
@@ -270,13 +270,13 @@ fn annotation_shortcuts_respect_find_input_undo_and_list_focus(cx: &mut TestAppC
     })
     .unwrap();
     action(cx, handle, ShowAnnotations);
-    press(cx, handle, "cmd-z");
+    press(cx, handle, "secondary-z");
     assert!(catalog(&document, cx).is_empty());
     // Empty-list focus survives; redo is still routed to this shared session.
-    press(cx, handle, "cmd-shift-z");
+    press(cx, handle, REDO_KEY);
     assert_eq!(catalog(&document, cx), created);
     press(cx, handle, "down");
-    press(cx, handle, "cmd-c");
+    press(cx, handle, "secondary-c");
     cx.update(|cx| {
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
@@ -336,7 +336,7 @@ fn imported_annotation_history_restores_geometry_metadata_and_local_reading_stat
     assert_eq!(catalog(&document, cx), original);
     dirty(cx, second, false);
     action(cx, second, RedoAnnotation);
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     let saved = persisted(&source);
     let readback = saved.iter().find(|a| a.name() == imported.name()).unwrap();
     assert_eq!(readback.color(), HighlightColor::Blue.color());
@@ -350,7 +350,7 @@ fn imported_annotation_history_restores_geometry_metadata_and_local_reading_stat
     action(cx, second, UndoAnnotation);
     assert_eq!(catalog(&document, cx), original);
     dirty(cx, first, true);
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     let restored = persisted(&source);
     let restored = restored
         .iter()
@@ -369,7 +369,7 @@ fn imported_annotation_history_restores_geometry_metadata_and_local_reading_stat
     action(cx, second, RedoAnnotation);
     action(cx, first, RedoAnnotation);
     assert!(catalog(&other, cx).iter().all(|a| a.id() != imported.id()));
-    press(cx, second, "cmd-s");
+    press(cx, second, "secondary-s");
     assert!(
         persisted(&source)
             .iter()
@@ -423,7 +423,7 @@ fn palette_annotation_history_commands_work_from_either_preset(cx: &mut TestAppC
         }
         let created = catalog(&document, cx);
         for (query, expected) in [("Undo", 0), ("Redo", 1)] {
-            press(cx, handle, "cmd-shift-p");
+            press(cx, handle, "secondary-shift-p");
             cx.update_window(handle, |_, window, cx| window.input(query, cx))
                 .unwrap();
             cx.run_until_parked();
@@ -432,9 +432,9 @@ fn palette_annotation_history_commands_work_from_either_preset(cx: &mut TestAppC
             assert_eq!(catalog(&document, cx).len(), expected);
         }
         assert_eq!(catalog(&document, cx), created);
-        press(cx, handle, "cmd-z");
+        press(cx, handle, "secondary-z");
         assert!(catalog(&document, cx).is_empty());
-        press(cx, handle, "cmd-w");
+        press(cx, handle, "secondary-w");
         drop(document);
     }
 }
@@ -486,7 +486,7 @@ fn save_as_and_failed_writes_preserve_annotation_history(cx: &mut TestAppContext
     ]
     .concat();
     std::fs::write(&copy, &external).unwrap();
-    press(cx, second, "cmd-s");
+    press(cx, second, "secondary-s");
     assert_eq!(std::fs::read(&copy).unwrap(), external);
     dirty(cx, first, true);
     press(cx, second, "escape"); // dismiss conflict feedback

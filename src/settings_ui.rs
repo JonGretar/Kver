@@ -947,7 +947,7 @@ mod tests {
                 let page_keys = if keymap::platform(cx) == keymap::Platform::Mac {
                     vec!["cmd-alt-right", "right", "alt-down"]
                 } else {
-                    vec!["cmd-alt-right", "right", "ctrl-pagedown"]
+                    vec!["ctrl-pagedown", "right"]
                 };
                 assert_eq!(
                     frame.find("shortcut-Reader-NextPage").label(),
@@ -1061,7 +1061,14 @@ mod tests {
                     Some(
                         format!(
                             "Next Page: {}, J",
-                            shortcut_label::format("cmd-alt-right", cx)
+                            shortcut_label::format(
+                                if keymap::platform(cx) == keymap::Platform::Mac {
+                                    "cmd-alt-right"
+                                } else {
+                                    "ctrl-pagedown"
+                                },
+                                cx,
+                            )
                         )
                         .as_str()
                     )
@@ -2062,7 +2069,7 @@ mod tests {
         cx.update(|cx| {
             cx.update_window(reader.into(), |_, frame, cx| {
                 frame.render_frame(cx);
-                frame.press("cmd-,", cx);
+                frame.press("secondary-,", cx);
             })
             .unwrap();
         });

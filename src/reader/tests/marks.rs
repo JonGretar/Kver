@@ -80,7 +80,7 @@ fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
         })
         .unwrap();
     });
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     cx.update(|cx| {
         cx.update_window(window, |_, frame, cx| {
             frame.render_frame(cx);
@@ -268,7 +268,7 @@ fn replacing_document_rejects_old_mark_events_and_drops_popup(cx: &mut TestAppCo
     });
     let (window, reader) = recent_test_window(cx, Some(first));
     cx.run_until_parked();
-    cx.simulate_keystrokes(window, "cmd-shift-m");
+    cx.simulate_keystrokes(window, "secondary-shift-m");
     cx.run_until_parked();
     let old = reader.read_with(cx, |reader, _| reader.marks.clone().unwrap());
     reader.update(cx, |reader, cx| reader.open_path(next, cx));

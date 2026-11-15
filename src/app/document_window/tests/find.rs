@@ -10,7 +10,7 @@ fn reader_and_palette_match_actions_reach_the_window_owned_find(cx: &mut TestApp
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-f", cx);
+        frame.press("secondary-f", cx);
         frame.render_frame(cx);
         frame.input("This is page", cx);
         frame.press("enter", cx);
@@ -21,7 +21,7 @@ fn reader_and_palette_match_actions_reach_the_window_owned_find(cx: &mut TestApp
         frame.render_frame(cx);
         frame.press("escape", cx);
         frame.render_frame(cx);
-        frame.press("cmd-g", cx);
+        frame.press("secondary-g", cx);
     })
     .unwrap();
     document.read_with(cx, |document, cx| {
@@ -29,7 +29,7 @@ fn reader_and_palette_match_actions_reach_the_window_owned_find(cx: &mut TestApp
         assert_eq!(document.reader().read(cx).page_index(), 1);
     });
     cx.update_window(window, |_, frame, cx| {
-        frame.press("cmd-shift-p", cx);
+        frame.press("secondary-shift-p", cx);
         frame.render_frame(cx);
         frame.input("Next match", cx);
     })
@@ -58,11 +58,11 @@ fn reader_sidebar_opens_and_remembers_its_panel(cx: &mut TestAppContext) {
     document.read_with(cx, |document, cx| {
         assert_eq!(document.sidebar_panel(cx), Some(SidebarPanel::Contents));
     });
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     document.read_with(cx, |document, cx| {
         assert_eq!(document.sidebar_panel(cx), Some(SidebarPanel::Find));
     });
-    cx.simulate_keystrokes(window, "cmd-b cmd-b");
+    cx.simulate_keystrokes(window, "secondary-b secondary-b");
     document.read_with(cx, |document, cx| {
         assert_eq!(document.sidebar_panel(cx), Some(SidebarPanel::Find));
     });
@@ -75,7 +75,7 @@ fn find_query_survives_closing_and_reopening_the_sidebar(cx: &mut TestAppContext
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| frame.render_frame(cx))
         .unwrap();
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         assert_eq!(frame.find("find-query").focused(), Some(true));
@@ -83,7 +83,7 @@ fn find_query_survives_closing_and_reopening_the_sidebar(cx: &mut TestAppContext
     })
     .unwrap();
     cx.run_until_parked();
-    cx.simulate_keystrokes(window, "cmd-b cmd-b");
+    cx.simulate_keystrokes(window, "secondary-b secondary-b");
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         assert_eq!(frame.find("find-query").value(), Some("KVER"));
@@ -105,7 +105,7 @@ fn find_window(cx: &mut TestAppContext) -> (AnyWindowHandle, Entity<ReaderView>)
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-f", cx);
+        frame.press("secondary-f", cx);
     })
     .unwrap();
     (window, reader)
@@ -132,11 +132,11 @@ fn find_keyboard_pointer_and_highlight_share_selection(cx: &mut TestAppContext) 
                 .starts_with("1 /")
         );
         assert!(frame.find("find-highlight").visible());
-        frame.press("cmd-g", cx);
+        frame.press("secondary-g", cx);
     })
     .unwrap();
     assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 1);
-    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-g", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("secondary-shift-g", cx))
         .unwrap();
     assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 0);
     cx.update_window(window, |_, frame, cx| {

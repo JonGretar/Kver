@@ -36,7 +36,7 @@ fn open_marks(
     });
     let (window, reader) = recent_test_window(cx, Some(pdf.clone()));
     cx.run_until_parked();
-    cx.simulate_keystrokes(window, "cmd-shift-m");
+    cx.simulate_keystrokes(window, "secondary-shift-m");
     cx.run_until_parked();
     (root, store, pdf, window, reader)
 }
@@ -152,7 +152,7 @@ fn standard_marks_set_jump_and_delete_through_dialogs(cx: &mut TestAppContext) {
     reader.read_with(cx, |reader, cx| assert!(!reader.marks_open(cx)));
 
     reader.update(cx, |reader, cx| reader.select_page(2, cx));
-    cx.simulate_keystrokes(window, "cmd-shift-m");
+    cx.simulate_keystrokes(window, "secondary-shift-m");
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
@@ -167,7 +167,7 @@ fn standard_marks_set_jump_and_delete_through_dialogs(cx: &mut TestAppContext) {
         assert!(!reader.marks_open(cx));
     });
 
-    cx.simulate_keystrokes(window, "cmd-shift-p");
+    cx.simulate_keystrokes(window, "secondary-shift-p");
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         frame.input("Delete local mark", cx);

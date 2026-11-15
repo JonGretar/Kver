@@ -247,7 +247,7 @@ fn ruler_standard_commands_and_find_input_have_separate_ownership(cx: &mut TestA
     assert_eq!(target(&reader, cx), (0, initial.1 + 1));
     cx.simulate_keystrokes(window, "ctrl-alt-k");
     assert_eq!(target(&reader, cx), initial);
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     cx.update_window(window, |_, frame, cx| {
         frame.input("rjk", cx);
         frame.press("ctrl-alt-r", cx);

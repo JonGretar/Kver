@@ -20,6 +20,12 @@ mod saving;
 mod sidebar;
 mod unsaved;
 
+const REDO_KEY: &str = if cfg!(target_os = "windows") {
+    "ctrl-y"
+} else {
+    "secondary-shift-z"
+};
+
 fn setup(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -132,7 +138,7 @@ fn window_commands_bubble_from_sidebar_and_palette_without_moving_the_other_read
         window.activate_window();
         window.render_frame(cx);
         window.press("right", cx);
-        window.press("cmd-f", cx);
+        window.press("secondary-f", cx);
         window.render_frame(cx);
         window.input("next", cx);
         window.press(
@@ -152,7 +158,7 @@ fn window_commands_bubble_from_sidebar_and_palette_without_moving_the_other_read
 
     cx.update_window(second_window, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-shift-p", cx);
+        window.press("secondary-shift-p", cx);
         window.render_frame(cx);
         window.input("Previous Window", cx);
     })
@@ -171,7 +177,7 @@ fn window_commands_bubble_from_sidebar_and_palette_without_moving_the_other_read
     drop(first);
     cx.update_window(first_window, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-w", cx);
+        window.press("secondary-w", cx);
     })
     .unwrap();
     cx.run_until_parked();

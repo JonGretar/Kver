@@ -66,6 +66,11 @@ or obtain one from the non-publishing **Experimental Windows archive** Actions
 workflow. Read the [runtime, extraction and security guidance](docs/windows.md)
 first; a successful package job is not clean-PC or native GUI certification.
 
+Linux testers can obtain the experimental Ubuntu x86-64 tarball from the
+non-publishing **Experimental Linux archive** Actions workflow. See the
+[requirements and optional user-level install/remove instructions](docs/linux.md).
+It is not a supported Linux release or an older-distribution compatibility promise.
+
 ## Get started
 
 1. **Open a PDF.** Use **Open PDF**, Command-O, or Finder's Open With.

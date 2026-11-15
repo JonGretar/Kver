@@ -21,6 +21,10 @@ use gpui_kit::{App, AppContext as _, platform};
 
 use crate::{assets::ReaderAssets, reading_history, settings::AppPaths, settings_ui};
 
+/// Matches the Linux desktop entry basename, icon and X11 WM_CLASS.
+#[cfg(target_os = "linux")]
+pub(crate) const LINUX_APP_ID: &str = "kver";
+
 /// Only the elected primary initializes GPUI; requests queue during onboarding.
 fn run_primary(request: windows::OpenRequest, primary: instance::Primary) -> Result<(), String> {
     // Register before launching so Finder's initial open event is not lost.

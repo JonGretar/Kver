@@ -22,7 +22,7 @@ REQUIRED = {
     "kver", "LICENSE", "THIRD-PARTY-LICENSES.html", "README.md", "CLI.md",
     "ELF-DEPENDENCIES.json", "BUILD-INFO.json", "licenses/LICENSE-LUCIDE",
     "licenses/rust/COPYRIGHT.html", "licenses/rust/COPYRIGHT-library.html",
-    "resources/kver.png",
+    "resources/kver.png", "install.py",
 }
 
 
@@ -125,6 +125,9 @@ def verify_archive(archive, version, expected_hashes):
         unrelated.mkdir()
         require(output(str(stage / "kver"), "--version", cwd=unrelated).strip() == f"kver {version}",
                 "Extracted CLI identity/version mismatch")
+        # Run the production installer against this exact extracted archive.
+        print(output("python3", str(ROOT / "scripts/test_linux_install.py"), str(stage),
+                     "--version", version), end="")
 
 
 def package(release, licenses):
@@ -164,6 +167,7 @@ def package(release, licenses):
             (licenses, "THIRD-PARTY-LICENSES.html"), (lucide, "licenses/LICENSE-LUCIDE"),
             (ROOT / "docs/linux.md", "README.md"), (ROOT / "docs/cli.md", "CLI.md"),
             (ROOT / "assets/icons/png/256.png", "resources/kver.png"),
+            (ROOT / "scripts/linux/install.py", "install.py"),
             (rust_docs / "COPYRIGHT.html", "licenses/rust/COPYRIGHT.html"),
             (rust_docs / "COPYRIGHT-library.html", "licenses/rust/COPYRIGHT-library.html"),
         ):

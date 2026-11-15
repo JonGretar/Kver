@@ -44,7 +44,7 @@ fn unavailable_palette_commands_do_not_run_and_escape_restores_reader_focus(
     let (handle, document) = open(cx, None);
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-shift-p", cx);
+        window.press("secondary-shift-p", cx);
     })
     .unwrap();
     cx.update_window(handle, |_, window, cx| {
@@ -95,11 +95,13 @@ fn palette_runs_reader_action_then_returns_focus_to_the_open_sidebar(cx: &mut Te
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-f", cx);
+        window.press("secondary-f", cx);
     })
     .unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-p", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-p", cx)
+    })
+    .unwrap();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.input("Fit Width", cx);
@@ -133,7 +135,7 @@ fn palette_and_reader_keys_dispatch_once_to_the_owning_reader(cx: &mut TestAppCo
     cx.update_window(first_window, |_, window, cx| {
         window.activate_window();
         window.render_frame(cx);
-        window.press("cmd-shift-p", cx);
+        window.press("secondary-shift-p", cx);
         window.render_frame(cx);
         window.input("Next Page", cx);
     })
@@ -161,7 +163,7 @@ fn palette_and_reader_keys_dispatch_once_to_the_owning_reader(cx: &mut TestAppCo
         assert_eq!(document.reader().read(cx).page_index(), 2)
     });
     cx.update_window(first_window, |_, window, cx| {
-        window.press("cmd-shift-p", cx);
+        window.press("secondary-shift-p", cx);
         window.render_frame(cx);
         window.input("n", cx);
         window.press("down", cx);
@@ -198,15 +200,17 @@ fn window_overlays_keep_full_window_bounds_above_the_reader_workspace(cx: &mut T
             let root = window.find("document-window").bounds();
             let workspace = window.find("reader-workspace").bounds();
             assert!(workspace.origin.y > root.origin.y);
-            window.press("cmd-shift-p", cx);
+            window.press("secondary-shift-p", cx);
             window.render_frame(cx);
             assert_eq!(window.find("reader-command-palette").bounds(), root);
             assert_eq!(window.find("reader-workspace").bounds(), workspace);
             workspace
         })
         .unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-m", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-m", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);

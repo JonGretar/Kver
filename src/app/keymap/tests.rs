@@ -818,7 +818,7 @@ fn switching_presets_replaces_reader_bindings_without_losing_kit_or_app_keys(
         install(cx);
         let reader = [KeyContext::parse(key_context::READER).unwrap()];
         let assert_reader = |cx: &App, keys: &str, expected: &str| {
-            let input = parse(keys, Platform::Mac.os()).unwrap();
+            let input = parse(keys, platform(cx).os()).unwrap();
             let map = cx.key_bindings();
             let bindings = map.borrow();
             assert_eq!(
@@ -833,7 +833,7 @@ fn switching_presets_replaces_reader_bindings_without_losing_kit_or_app_keys(
         assert_eq!(active_preset(cx), Preset::Vim);
         assert_reader(cx, "right", "kver::ScrollRight");
         assert_reader(cx, "n", "kver::NextMatch");
-        assert_reader(cx, "cmd-o", "kver::OpenPdf");
+        assert_reader(cx, "o", "kver::OpenPdf");
         let vim_count = cx.key_bindings().borrow().bindings().count();
         select_preset(cx, Preset::Standard).unwrap();
         assert_eq!(active_preset(cx), Preset::Standard);
@@ -889,22 +889,9 @@ fn platform_filters_entries_before_duplicate_detection() {
                     Preset::Vim => "kver::ScrollRight",
                 })
             );
-            assert_eq!(map.action("cmd-o", Context::Global), Some("kver::OpenPdf"));
             assert_eq!(
-                map.action("ctrl-o", Context::Reader),
-                Some("kver::NavigateBack")
-            );
-            assert_eq!(
-                map.action("ctrl-i", Context::Reader),
-                Some("kver::NavigateForward")
-            );
-            assert_eq!(
-                map.action("ctrl-o", Context::Contents),
-                Some("kver::NavigateBack")
-            );
-            assert_eq!(
-                map.action("ctrl-i", Context::Contents),
-                Some("kver::NavigateForward")
+                map.action("secondary-o", Context::Global),
+                Some("kver::OpenPdf")
             );
             assert_eq!(map.action("ctrl-i", Context::Sidebar), None);
             assert_eq!(map.action("ctrl-i", Context::Global), None);
@@ -1035,13 +1022,12 @@ fn every_mark_letter_has_set_jump_and_delete_bindings() {
 }
 
 #[test]
-fn vim_defaults_inherit_native_commands_without_leaking_reader_keys_to_other_contexts() {
+fn vim_defaults_keep_application_commands_without_leaking_reader_keys_to_other_contexts() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
         let map = resolve(platform, Preset::Vim).unwrap();
         for (keys, action) in [
-            ("cmd-w", "kver::CloseWindow"),
-            ("cmd-n", "kver::NewWindow"),
-            ("cmd-o", "kver::OpenPdf"),
+            ("secondary-w", "kver::CloseWindow"),
+            ("secondary-n", "kver::NewWindow"),
         ] {
             assert_eq!(map.action(keys, Context::Global), Some(action));
             assert_eq!(map.action(keys, Context::Reader), Some(action));
@@ -1151,11 +1137,11 @@ fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {
         let map = resolve(platform, Preset::Standard).unwrap();
         for (keys, action) in [
-            ("cmd-o", "kver::OpenPdf"),
-            ("cmd-n", "kver::NewWindow"),
-            ("cmd-w", "kver::CloseWindow"),
-            ("cmd-f", "kver::ShowFind"),
-            ("cmd-t", "kver::ShowContents"),
+            ("secondary-o", "kver::OpenPdf"),
+            ("secondary-n", "kver::NewWindow"),
+            ("secondary-w", "kver::CloseWindow"),
+            ("secondary-f", "kver::ShowFind"),
+            ("secondary-t", "kver::ShowContents"),
         ] {
             assert_eq!(map.action(keys, Context::Global), Some(action));
         }
@@ -1166,10 +1152,17 @@ fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
             ("pageup", "kver::ScrollScreenUp"),
             ("right", "kver::NextPage"),
             ("left", "kver::PreviousPage"),
-            ("cmd-=", "kver::ZoomIn"),
-            ("cmd--", "kver::ZoomOut"),
-            ("cmd-alt-w", "kver::FitWidth"),
-            ("cmd-alt-f", "kver::FitPage"),
+            ("secondary-=", "kver::ZoomIn"),
+            ("secondary--", "kver::ZoomOut"),
+            ("secondary-alt-w", "kver::FitWidth"),
+            (
+                if platform == Platform::Mac {
+                    "cmd-alt-f"
+                } else {
+                    "ctrl-0"
+                },
+                "kver::FitPage",
+            ),
             ("alt-left", "kver::NavigateBack"),
             ("alt-right", "kver::NavigateForward"),
         ] {
@@ -1182,11 +1175,15 @@ fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
         }
         assert_eq!(
             map.action("ctrl-o", Context::Contents),
-            Some("kver::NavigateBack")
+            Some(if platform == Platform::Mac {
+                "kver::NavigateBack"
+            } else {
+                "kver::OpenPdf"
+            })
         );
         assert_eq!(
             map.action("ctrl-i", Context::Contents),
-            Some("kver::NavigateForward")
+            (platform == Platform::Mac).then_some("kver::NavigateForward")
         );
         assert_eq!(
             map.action("alt-left", Context::Contents),

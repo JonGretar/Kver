@@ -290,7 +290,7 @@ fn ruler_selection_copy_markup_and_dismissal_restore_without_scroll(cx: &mut Tes
         assert!(frame.try_find("reading-ruler-marker").is_none());
         frame.pointer_move(end, Some(gpui::MouseButton::Left), cx);
         frame.pointer_up(end, gpui::MouseButton::Left, cx);
-        frame.press("cmd-c", cx);
+        frame.press("secondary-c", cx);
         assert!(frame.try_find("reading-ruler-marker").is_none());
     })
     .unwrap();

@@ -14,6 +14,148 @@ fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
 }
 
 #[gpui_kit::test]
+fn platform_shortcuts_switch_in_place_without_leaking_reader_typing(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(menu::install);
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    cx.run_until_parked();
+    let page = |cx: &TestAppContext| document.read_with(cx, |d, cx| d.reader.read(cx).page_index());
+    for preset in [Preset::Standard, Preset::Vim, Preset::Standard] {
+        cx.update(|cx| keymap::select_preset(cx, preset).unwrap());
+        press(
+            cx,
+            handle,
+            if preset == Preset::Standard {
+                "secondary-f"
+            } else {
+                "/"
+            },
+        );
+        let before = page(cx);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find("find-query").focused(), Some(true));
+            window.press("secondary-a", cx);
+            window.input("oJma/aaus", cx);
+            assert_eq!(window.find("find-query").value(), Some("oJma/aaus"));
+        })
+        .unwrap();
+        assert_eq!(page(cx), before);
+        document.read_with(cx, |d, cx| assert!(!d.reader.read(cx).is_dirty(cx)));
+        press(cx, handle, "escape");
+        press(
+            cx,
+            handle,
+            if preset == Preset::Standard {
+                "secondary-t"
+            } else {
+                "g c"
+            },
+        );
+        cx.update_window(handle, |_, window, cx| {
+            window.click(("contents-entry", 0usize), cx);
+        })
+        .unwrap();
+        assert_eq!(page(cx), 2);
+        // This is an actual dispatch assertion, not just a resolver lookup:
+        // Standard non-Mac Open cannot shadow Vim's contextual history.
+        let back = if preset == Preset::Vim || cfg!(target_os = "macos") {
+            "ctrl-o"
+        } else {
+            "alt-left"
+        };
+        let forward = if preset == Preset::Vim || cfg!(target_os = "macos") {
+            "ctrl-i"
+        } else {
+            "alt-right"
+        };
+        press(cx, handle, back);
+        assert_eq!(page(cx), before);
+        press(cx, handle, forward);
+        assert_eq!(page(cx), 2);
+        press(cx, handle, "escape");
+        cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(crate::reader::GoToDocumentStart), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+}
+
+#[gpui_kit::test]
+fn overrides_refresh_reader_hints_and_installed_accelerators_in_both_presets(
+    cx: &mut TestAppContext,
+) {
+    setup(cx);
+    cx.update(menu::install);
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    for preset in [Preset::Standard, Preset::Vim] {
+        cx.update(|cx| {
+            keymap::reload(cx, Some(
+                "[[keyboard.bindings]]\nkeys = 'secondary-s'\ncommand = 'save-as'\n\
+                 [[keyboard.bindings]]\nkeys = 'secondary-shift-s'\ncommand = 'save'\n\
+                 [[keyboard.bindings]]\nkeys = 'ctrl-e'\ncontext = 'reader'\ncommand = 'next-page'\n\
+                 [[keyboard.bindings]]\nkeys = 'right'\ncontext = 'reader'\ncommand = 'previous-page'\n".into()
+            ), preset).unwrap();
+            let map = keymap::active_map(cx).unwrap();
+            assert_eq!(map.shortcuts(&crate::reader::NextPage, keymap::Context::Reader).last(), Some(&"ctrl-e"));
+            assert_eq!(map.shortcuts(&Save, keymap::Context::Reader), vec!["secondary-shift-s"]);
+            assert!(map.shortcuts(&SaveAs, keymap::Context::Reader).contains(&"secondary-s"));
+            let bindings = cx.key_bindings();
+            let bindings = bindings.borrow();
+            let first = bindings.bindings_for_action(&SaveAs).next().unwrap();
+            let stroke = gpui_kit::Keystroke::parse_with_os("secondary-s", cx.platform_info().os).unwrap();
+            assert_eq!(first.match_keystrokes(&[stroke]), Some(false));
+        });
+        let before = document.read_with(cx, |d, cx| d.reader.read(cx).page_index());
+        press(cx, handle, "ctrl-e");
+        document.read_with(cx, |d, cx| {
+            assert_eq!(d.reader.read(cx).page_index(), before + 1)
+        });
+        press(cx, handle, "right");
+        document.read_with(cx, |d, cx| {
+            assert_eq!(d.reader.read(cx).page_index(), before)
+        });
+        press(cx, handle, "secondary-s");
+        assert!(
+            cx.did_prompt_for_new_path(),
+            "override dispatches Save As, not Save"
+        );
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        press(cx, handle, "secondary-shift-p");
+        cx.update_window(handle, |_, window, cx| window.input("oJma/aaus", cx))
+            .unwrap();
+        assert_eq!(
+            document.read_with(cx, |d, cx| d.palette_query(cx).unwrap().to_string()),
+            "oJma/aaus"
+        );
+        document.read_with(cx, |d, cx| {
+            assert_eq!(d.reader.read(cx).page_index(), before)
+        });
+        press(cx, handle, "escape escape");
+        cx.update(|cx| keymap::reload(cx, None, preset).unwrap());
+        press(cx, handle, "ctrl-e");
+        document.read_with(cx, |d, cx| {
+            assert_eq!(d.reader.read(cx).page_index(), before)
+        });
+        cx.update(|cx| {
+            assert_eq!(
+                keymap::active_map(cx)
+                    .unwrap()
+                    .shortcuts(&Save, keymap::Context::Reader),
+                vec![if cfg!(target_os = "macos") {
+                    "cmd-s"
+                } else {
+                    "ctrl-s"
+                }],
+            )
+        });
+    }
+}
+
+#[gpui_kit::test]
 fn embedded_presets_switch_and_recover_live_filters_in_an_open_document(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
@@ -110,7 +252,7 @@ fn embedded_presets_switch_and_recover_live_filters_in_an_open_document(cx: &mut
     assert_eq!(page(cx), 1);
     press(cx, handle, "g g");
     assert_eq!(page(cx), 1);
-    press(cx, handle, "cmd-f");
+    press(cx, handle, "secondary-f");
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.input("ggma", cx);
@@ -159,11 +301,11 @@ fn embedded_presets_keep_annotation_save_and_save_as_shortcuts(cx: &mut TestAppC
             },
         );
         document.read_with(cx, |d, cx| assert!(d.reader.read(cx).is_dirty(cx)));
-        press(cx, handle, "cmd-s");
+        press(cx, handle, "secondary-s");
         document.read_with(cx, |d, cx| assert!(!d.reader.read(cx).is_dirty(cx)));
         let saved = std::fs::read(&source).unwrap();
         assert_ne!(saved, original);
-        press(cx, handle, "cmd-shift-s");
+        press(cx, handle, "secondary-shift-s");
         assert!(cx.did_prompt_for_new_path());
         cx.simulate_new_path_selection(|_| Some(copy.clone()));
         cx.run_until_parked();
@@ -212,7 +354,7 @@ fn vim_annotations_j_k_match_arrow_selection(cx: &mut TestAppContext) {
     let (handle, _) = open(cx, Some(PathBuf::from("examples/annotations-clean.pdf")));
     cx.run_until_parked();
     let copied = |cx: &mut TestAppContext| {
-        press(cx, handle, "cmd-c");
+        press(cx, handle, "secondary-c");
         cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap())
     };
     press(cx, handle, "g a");

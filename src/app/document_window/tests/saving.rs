@@ -143,14 +143,14 @@ fn ordinary_save_keeps_the_active_find_query_results_and_focus(cx: &mut TestAppC
     let (handle, document) = open(cx, Some(source));
     cx.run_until_parked();
     highlight(cx, handle, &document);
-    cx.update_window(handle, |_, window, cx| window.press("cmd-f", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-f", cx))
         .unwrap();
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| window.input("Alpha", cx))
         .unwrap();
     cx.run_until_parked();
     document.read_with(cx, |document, cx| assert!(document.has_matches(cx)));
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     let focus = document.read_with(cx, |document, cx| {
@@ -220,7 +220,7 @@ fn quit_from_focused_dirty_window(cx: &mut TestAppContext, keyboard: bool) {
         .unwrap();
     for _ in 0..2 {
         if keyboard {
-            cx.update_window(handle, |_, window, cx| window.press("cmd-q", cx))
+            cx.update_window(handle, |_, window, cx| window.press("secondary-q", cx))
                 .unwrap();
         } else {
             // Native menu actions enter App::dispatch_action and route through
@@ -249,8 +249,9 @@ fn quit_from_focused_dirty_window(cx: &mut TestAppContext, keyboard: bool) {
     assert_eq!(cx.update(|cx| cx.windows().len()), 1);
 }
 
+#[cfg(not(target_os = "windows"))]
 #[gpui_kit::test]
-fn command_q_protects_its_focused_dirty_window(cx: &mut TestAppContext) {
+fn primary_quit_shortcut_protects_its_focused_dirty_window(cx: &mut TestAppContext) {
     quit_from_focused_dirty_window(cx, true);
 }
 

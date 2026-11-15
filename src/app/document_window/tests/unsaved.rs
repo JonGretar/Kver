@@ -75,14 +75,14 @@ fn unsaved_title_follows_save_and_save_as_across_participants(cx: &mut TestAppCo
     }
     // Selection, zoom and navigation are not document edits.
     select_text(cx, first, &document);
-    cx.update_window(first, |_, window, cx| window.press("cmd-=", cx))
+    cx.update_window(first, |_, window, cx| window.press("secondary-=", cx))
         .unwrap();
     cx.run_until_parked();
     document.read_with(cx, |document, cx| {
         assert!(document.reader.read(cx).scale() > 1.)
     });
     indicator(cx, first, "original.pdf", false);
-    cx.update_window(first, |_, window, cx| window.press("cmd--", cx))
+    cx.update_window(first, |_, window, cx| window.press("secondary--", cx))
         .unwrap();
     cx.run_until_parked();
     highlight(cx, first, &document);
@@ -94,7 +94,7 @@ fn unsaved_title_follows_save_and_save_as_across_participants(cx: &mut TestAppCo
     let (joined, _) = open(cx, Some(source.clone()));
     cx.run_until_parked();
     indicator(cx, joined, "original.pdf", true);
-    cx.update_window(second, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(second, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     assert!(!cx.did_prompt_for_new_path());
@@ -151,7 +151,7 @@ fn unsaved_title_survives_cancel_failure_and_document_replacement(cx: &mut TestA
     ]
     .concat();
     std::fs::write(&source, &external).unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     indicator(cx, handle, "original.pdf", true);
@@ -262,7 +262,7 @@ fn late_edits(cx: &mut TestAppContext, save_as: bool) {
             .len(),
         1
     );
-    cx.update_window(second, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(second, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     for window in [first, second] {
@@ -312,7 +312,7 @@ fn unsaved_title_detaches_from_a_replaced_shared_document(cx: &mut TestAppContex
     cx.run_until_parked();
     indicator(cx, first, "field-guide.pdf", false);
     indicator(cx, second, "shared.pdf", true);
-    cx.update_window(second, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(second, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     indicator(cx, first, "field-guide.pdf", false);

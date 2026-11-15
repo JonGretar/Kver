@@ -3,6 +3,26 @@ use super::*;
 
 #[gpui_kit::test]
 fn local_marks_share_across_windows_restart_and_palette(cx: &mut TestAppContext) {
+    shared_marks_workflow(cx);
+}
+
+#[gpui_kit::test]
+fn linux_marks_popup_uses_the_effective_control_shortcut(cx: &mut TestAppContext) {
+    let mut info = cx.update(|cx| cx.platform_info());
+    info.os = gpui_kit::OperatingSystem::Linux;
+    cx.set_platform_info(info);
+    shared_marks_workflow(cx);
+}
+
+#[gpui_kit::test]
+fn windows_marks_popup_uses_the_effective_control_shortcut(cx: &mut TestAppContext) {
+    let mut info = cx.update(|cx| cx.platform_info());
+    info.os = gpui_kit::OperatingSystem::Windows;
+    cx.set_platform_info(info);
+    shared_marks_workflow(cx);
+}
+
+fn shared_marks_workflow(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();
     let paths = crate::settings::AppPaths::for_locations(
         root.path().join("config.toml"),
@@ -14,7 +34,7 @@ fn local_marks_share_across_windows_restart_and_palette(cx: &mut TestAppContext)
     cx.update(|cx| {
         gpui_kit::init(cx);
         let map = crate::app::keymap::resolve(
-            crate::app::keymap::Platform::Mac,
+            crate::app::keymap::platform(cx),
             crate::app::keymap::Preset::Vim,
         )
         .unwrap();
@@ -54,7 +74,7 @@ fn local_marks_share_across_windows_restart_and_palette(cx: &mut TestAppContext)
     });
     first.read_with(cx, |reader, _| assert_eq!(reader.position_to_save(), saved));
 
-    cx.simulate_keystrokes(other_window, "cmd-shift-m");
+    cx.simulate_keystrokes(other_window, "secondary-shift-m");
     cx.run_until_parked();
     other.read_with(cx, |reader, cx| {
         let marks = reader.marks.as_ref().expect("marks owner").read(cx);

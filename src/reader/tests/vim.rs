@@ -155,7 +155,7 @@ fn vim_native_window_command_survives_focused_find_input(cx: &mut TestAppContext
     })
     .unwrap();
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
-    cx.simulate_keystrokes(window, "cmd-w");
+    cx.simulate_keystrokes(window, "secondary-w");
     cx.run_until_parked();
     assert_eq!(cx.update(|cx| cx.windows()), vec![other]);
     other_reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));

@@ -13,7 +13,7 @@ fn stale_highlight_cannot_restore_previous_document_presentation(cx: &mut TestAp
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-f", cx);
+        frame.press("secondary-f", cx);
         frame.render_frame(cx);
         frame.input("This is page", cx);
         frame.press("enter", cx);

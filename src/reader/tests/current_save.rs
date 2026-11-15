@@ -38,7 +38,7 @@ fn command_save_updates_the_current_file_without_a_toolbar_button_for_both_windo
             window.try_find("save").is_none(),
             "Save is a menu/keyboard command, not a toolbar button"
         );
-        window.press("cmd-s", cx);
+        window.press("secondary-s", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -77,7 +77,7 @@ fn command_save_updates_the_current_file_without_a_toolbar_button_for_both_windo
         assert_eq!(reader.selected_text().as_deref(), Some("Alpha"))
     });
     other.read_with(cx, |reader, _| assert!(reader.selected_text().is_none()));
-    cx.update_window(first, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(first, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     assert_eq!(std::fs::read(source).unwrap(), saved);
@@ -106,7 +106,7 @@ fn save_conflict_keeps_external_version_and_offers_a_copy_of_kvers_loaded_versio
     .unwrap();
     let external = [original.as_slice(), b"\n% external version\n"].concat();
     std::fs::write(&source, &external).unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     assert_eq!(std::fs::read(&source).unwrap(), external);
@@ -165,7 +165,7 @@ fn save_routes_a_newly_readonly_original_to_save_as_and_cancel_keeps_edits(
     })
     .unwrap();
     std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o444)).unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     assert!(cx.did_prompt_for_new_path());

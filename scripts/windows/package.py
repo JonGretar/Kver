@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import struct
@@ -157,7 +157,7 @@ def verify_archive(archive, version, expected_hashes):
             require(len(names) == len(set(names)), "Duplicate ZIP paths")
             require(set(names) == set(expected_hashes) | {"SHA256SUMS"},
                     "Missing or unexpected ZIP content")
-            require(all(not Path(name).is_absolute() and ".." not in Path(name).parts
+            require(all(not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts
                         and "\\" not in name and ":" not in name for name in names),
                     "Unsafe ZIP paths")
             zipped.extractall(clean)

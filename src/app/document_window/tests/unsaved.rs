@@ -17,6 +17,49 @@ fn indicator(cx: &mut TestAppContext, handle: AnyWindowHandle, filename: &str, u
 }
 
 #[gpui_kit::test]
+fn cli_reuse_preserves_unsaved_work_until_the_user_decides(cx: &mut TestAppContext) {
+    use crate::app::windows::{OpenMode, OpenRequest};
+    setup(cx);
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("original.pdf");
+    std::fs::copy("examples/selection-sample.pdf", &source).unwrap();
+    let (handle, document) = open(cx, Some(source.clone()));
+    cx.run_until_parked();
+    highlight(cx, handle, &document);
+    let next = PathBuf::from("examples/field-guide.pdf");
+    let request = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            windows::open_request(
+                cx,
+                &document.downgrade(),
+                OpenRequest {
+                    path: Some(next.clone()),
+                    mode: OpenMode::Reuse,
+                },
+            )
+        });
+        cx.run_until_parked();
+    };
+    request(cx);
+    cx.update_window(handle, |_, window, cx| window.click("unsaved-cancel", cx))
+        .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.reader.read(cx).path(), Some(source.as_path()));
+        assert!(document.reader.read(cx).is_dirty(cx));
+    });
+    request(cx);
+    cx.update_window(handle, |_, window, cx| window.click("unsaved-discard", cx))
+        .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, cx| {
+        assert_eq!(document.reader.read(cx).path(), Some(next.as_path()));
+        assert!(!document.reader.read(cx).is_dirty(cx));
+    });
+    assert_eq!(cx.update(|cx| cx.windows().len()), 1);
+}
+
+#[gpui_kit::test]
 fn unsaved_title_follows_save_and_save_as_across_participants(cx: &mut TestAppContext) {
     setup(cx);
     let directory = tempfile::tempdir().unwrap();

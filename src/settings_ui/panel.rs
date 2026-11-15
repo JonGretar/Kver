@@ -12,6 +12,7 @@ pub(super) struct SettingsView {
     appearance_focus: FocusHandle,
     preset_focus: FocusHandle,
     zoom_focus: FocusHandle,
+    open_files_focus: FocusHandle,
     settings: Entity<SettingsState>,
     author: Entity<InputState>,
     clearing: bool,
@@ -55,12 +56,14 @@ impl SettingsView {
         let appearance_focus = cx.focus_handle().tab_stop(true);
         let preset_focus = cx.focus_handle().tab_stop(true);
         let zoom_focus = cx.focus_handle().tab_stop(true);
+        let open_files_focus = cx.focus_handle().tab_stop(true);
         window.focus(&focus, cx);
         Self {
             focus,
             appearance_focus,
             preset_focus,
             zoom_focus,
+            open_files_focus,
             settings,
             author,
             clearing: false,
@@ -366,6 +369,17 @@ impl Render for SettingsView {
                         SettingGroup::new()
                             .title("Windows")
                             .items([
+                                choice(Choice {
+                                    title: "Open files in",
+                                    description: "Applies to Open PDF, Open Recent, and files opened from outside Kver.",
+                                    id: "open-files-choice",
+                                    values: &[OpenFiles::Reuse, OpenFiles::NewWindow],
+                                    label: OpenFiles::label,
+                                    current: SettingsState::open_files,
+                                    change: SettingsChange::OpenFiles,
+                                    reset: None,
+                                    focus: Some(self.open_files_focus.clone()),
+                                }),
                                 toggle("Quit when last window closes", "When off, Kver stays open without a window on macOS. Use New Window or open a PDF to continue.", "quit-on-last-close", SettingsState::quit_when_last_window_closes, SettingsChange::QuitWhenLastWindowCloses),
                                 toggle("Reopen last windows on startup", "Saved for a future release. Restoring windows is not implemented yet.", "reopen-last-windows", |settings| settings.settings.reopen_last_windows_on_startup(), SettingsChange::ReopenLastWindowsOnStartup),
                             ]),

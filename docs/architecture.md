@@ -13,7 +13,8 @@ domain terms.
 
 | Area | Source entry points |
 | --- | --- |
-| Startup and OS entry points | [`main.rs`](../src/main.rs), [`app.rs`](../src/app.rs) |
+| Startup and OS entry points | [`main.rs`](../src/main.rs), [`app.rs`](../src/app.rs), [`app/cli.rs`](../src/app/cli.rs) |
+| Instance election and local CLI handoff | [`app/instance.rs`](../src/app/instance.rs) |
 | Window lifecycle and native menus | [`app/windows.rs`](../src/app/windows.rs), [`app/menu.rs`](../src/app/menu.rs) |
 | Keybinding policy and command contexts | [`app/keymap.rs`](../src/app/keymap.rs), [`app/keymap/config.rs`](../src/app/keymap/config.rs), [`key_context.rs`](../src/key_context.rs) |
 | Window composition, chrome, sidebar, palette, and file prompts | [`app/document_window.rs`](../src/app/document_window.rs) and its child modules |

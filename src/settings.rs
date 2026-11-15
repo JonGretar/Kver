@@ -152,6 +152,40 @@ impl ReadingView {
     }
 }
 
+/// Default destination for file-open commands, independent of their entry point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpenFiles {
+    #[default]
+    Reuse,
+    NewWindow,
+}
+
+impl OpenFiles {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Reuse => "Existing window",
+            Self::NewWindow => "New window",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Reuse => "reuse",
+            Self::NewWindow => "new_window",
+        }
+    }
+
+    fn parse(key: &str) -> Result<Self, String> {
+        match key {
+            "reuse" => Ok(Self::Reuse),
+            "new_window" => Ok(Self::NewWindow),
+            _ => Err(format!(
+                "Unknown open-files behavior {key:?}; use reuse or new_window"
+            )),
+        }
+    }
+}
+
 /// The complete set of preferences understood by this version of Kver.
 /// Unknown TOML entries remain in the file, but are not applied as settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,9 +203,19 @@ pub struct AppSettings {
     reading_view: ReadingView,
     keyboard_preset: Preset,
     annotation_author: String,
+    open_files: OpenFiles,
 }
 
 impl AppSettings {
+    pub fn open_files(&self) -> OpenFiles {
+        self.open_files
+    }
+
+    pub fn with_open_files(mut self, behavior: OpenFiles) -> Self {
+        self.open_files = behavior;
+        self
+    }
+
     pub fn pdf_dark_mode(&self) -> bool {
         self.pdf_dark_mode
     }
@@ -295,6 +339,14 @@ impl AppSettings {
         let reader = table_in(document, "reader")?;
         let keyboard = table_in(document, "keyboard")?;
         Ok(Self {
+            open_files: match application.and_then(|table| table.get("open_files")) {
+                None => OpenFiles::default(),
+                Some(value) => OpenFiles::parse(
+                    value
+                        .as_str()
+                        .ok_or("Settings [application].open_files must be a string")?,
+                )?,
+            },
             annotation_author: match application.and_then(|table| table.get("annotation_author")) {
                 None => String::new(),
                 Some(value) => value
@@ -374,6 +426,7 @@ impl Default for AppSettings {
             reading_view: ReadingView::default(),
             keyboard_preset: Preset::default(),
             annotation_author: String::new(),
+            open_files: OpenFiles::default(),
         }
     }
 }
@@ -394,6 +447,7 @@ pub enum SettingsChange {
     ReadingView(ReadingView),
     KeyboardPreset(Preset),
     AnnotationAuthor(String),
+    OpenFiles(OpenFiles),
 }
 
 impl SettingsChange {
@@ -422,6 +476,7 @@ impl SettingsChange {
             Self::ReadingView(view) => ("reader", "reading_view", value(view.key())),
             Self::KeyboardPreset(preset) => ("keyboard", "preset", value(preset.key())),
             Self::AnnotationAuthor(author) => ("application", "annotation_author", value(author)),
+            Self::OpenFiles(behavior) => ("application", "open_files", value(behavior.key())),
         };
         if document.get(section).is_none() {
             document[section] = Item::Table(Table::new());
@@ -700,6 +755,36 @@ pub(crate) fn save_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_files_defaults_to_reuse_round_trips_and_rejects_invalid_values() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        assert_eq!(super::load(&path).unwrap().open_files(), OpenFiles::Reuse);
+        fs::write(
+            &path,
+            "# keep\n[application]\nopen_files = 'reuse' # choice\n[other]\nvalue = 7\n",
+        )
+        .unwrap();
+        for behavior in [OpenFiles::NewWindow, OpenFiles::Reuse] {
+            let updated = super::save(&path, SettingsChange::OpenFiles(behavior)).unwrap();
+            assert_eq!(updated.open_files(), behavior);
+            assert_eq!(super::load(&path).unwrap().open_files(), behavior);
+            let content = fs::read_to_string(&path).unwrap();
+            assert!(content.contains("# keep"));
+            assert!(content.contains("# choice"));
+            assert!(content.contains("[other]\nvalue = 7"));
+        }
+        for invalid in [
+            "[application]\nopen_files = 'sometimes'\n",
+            "[application]\nopen_files = true\n",
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert!(super::load(&path).is_err());
+            assert!(super::save(&path, SettingsChange::OpenFiles(OpenFiles::Reuse)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+        }
+    }
 
     #[test]
     fn pdf_dark_mode_defaults_off_round_trips_and_preserves_config() {

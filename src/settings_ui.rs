@@ -28,7 +28,10 @@ use crate::{
     },
     reader_windows::CloseWindow,
     recent,
-    settings::{self, AppPaths, AppSettings, Appearance, InitialZoom, ReadingView, SettingsChange},
+    settings::{
+        self, AppPaths, AppSettings, Appearance, InitialZoom, OpenFiles, ReadingView,
+        SettingsChange,
+    },
 };
 
 gpui::actions!(kver, [ShowSettings, CloseSettings]);
@@ -90,6 +93,10 @@ impl SettingsState {
         self.settings.quit_when_last_window_closes()
     }
 
+    pub fn open_files(&self) -> OpenFiles {
+        self.settings.open_files()
+    }
+
     pub fn initial_zoom(&self) -> InitialZoom {
         self.settings.initial_zoom()
     }
@@ -125,6 +132,7 @@ impl SettingsState {
             SettingsChange::ReadingView(choice) => current.with_reading_view(choice),
             SettingsChange::KeyboardPreset(choice) => current.with_keyboard_preset(choice),
             SettingsChange::AnnotationAuthor(author) => current.with_annotation_author(author),
+            SettingsChange::OpenFiles(behavior) => current.with_open_files(behavior),
             SettingsChange::ReopenLastWindowsOnStartup(reopen) => {
                 current.with_reopen_last_windows_on_startup(reopen)
             }
@@ -2112,6 +2120,81 @@ mod tests {
             .unwrap();
             assert_eq!(state(cx).read(cx).appearance(), Appearance::Dark);
             assert!(cx.global::<Theme>().is_dark());
+        });
+    }
+
+    #[gpui_kit::test]
+    fn open_files_choice_is_keyboard_operable_persistent_and_follows_file_edits(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install_with_paths(
+                cx,
+                Some(AppPaths::for_locations(
+                    config.clone(),
+                    root.path().join("data"),
+                )),
+            );
+            cx.dispatch_action(&ShowSettings);
+        });
+        cx.run_until_parked();
+        let handle = cx.update(|cx| cx.windows()[0]);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.within("settings-sidebar").click("input-state", cx);
+            window.input("Open files in", cx);
+            assert_eq!(
+                window.find("open-files-choice").label(),
+                Some("Open files in: Existing window")
+            );
+            for _ in 0..8 {
+                if window.find("open-files-choice").focused() == Some(true) {
+                    break;
+                }
+                window.press("tab", cx);
+            }
+            assert_eq!(window.find("open-files-choice").focused(), Some(true));
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.press("down", cx);
+            window.press("down", cx);
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            settings::load(&config).unwrap().open_files(),
+            OpenFiles::NewWindow
+        );
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("open-files-choice").label(),
+                Some("Open files in: New window")
+            );
+        })
+        .unwrap();
+        std::fs::write(&config, "[application]\nopen_files = 'reuse'\n").unwrap();
+        poll(cx);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("open-files-choice").label(),
+                Some("Open files in: Existing window")
+            );
+        })
+        .unwrap();
+        std::fs::write(&config, "[application]\nopen_files = 'invalid'\n").unwrap();
+        poll(cx);
+        cx.update(|cx| {
+            assert_eq!(state(cx).read(cx).open_files(), OpenFiles::Reuse);
+            assert!(state(cx).read(cx).error().is_some());
         });
     }
 

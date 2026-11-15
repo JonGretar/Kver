@@ -81,6 +81,25 @@ struct PendingRecentOpen {
     path: PathBuf,
     picker: gpui_kit::WeakEntity<RecentPicker>,
     request: u64,
+    window: AnyWindowHandle,
+}
+
+impl PendingRecentOpen {
+    fn finish(self, result: Result<(), String>, window: &mut Window, cx: &mut App) {
+        let origin = self.window;
+        let finish = move |window: &mut Window, cx: &mut App| {
+            let _ = self.picker.update(cx, |picker, cx| {
+                picker.finish_open(self.request, result, window, cx);
+            });
+        };
+        if window.window_handle() == origin {
+            finish(window, cx);
+        } else {
+            // A new reader reports back to the picker in the invoking window,
+            // not to a dialog (if any) in the destination window.
+            let _ = cx.update_window(origin, |_, window, cx| finish(window, cx));
+        }
+    }
 }
 
 struct LinkedOpen {
@@ -102,6 +121,14 @@ impl DocumentWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        cx.on_release(|document, cx| {
+            if let Some(pending) = document.recent_open.take() {
+                let _ = pending.picker.update(cx, |picker, cx| {
+                    picker.cancel_open(pending.request, cx);
+                });
+            }
+        })
+        .detach();
         let appearance_subscription = cx.observe_window_appearance(window, |_, window, cx| {
             if settings_ui::state(cx).read(cx).appearance() == Appearance::System {
                 Theme::sync_system_appearance(Some(window), cx);
@@ -109,6 +136,9 @@ impl DocumentWindow {
             cx.notify();
         });
         let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                windows::note_activation(window.window_handle(), cx);
+            }
             this.refresh_navigation_menu(window, cx);
             if window.is_window_active()
                 && let Some(session) = this.reader.read(cx).session()
@@ -519,6 +549,21 @@ impl DocumentWindow {
         self.replace_path(path, cx);
     }
 
+    /// File-open commands use the shared preference, but reuse this invoking
+    /// reader rather than whichever window happens to be active at completion.
+    fn open_file(
+        &mut self,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Result<Option<Entity<Self>>, String> {
+        if windows::OpenMode::Default.resolve(cx) == crate::settings::OpenFiles::Reuse {
+            self.open_path(path, cx);
+            Ok(None)
+        } else {
+            windows::open(cx, Some(path)).map(Some)
+        }
+    }
+
     fn replace_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.file_picker = None;
         self.save_picker = None;
@@ -640,8 +685,15 @@ impl DocumentWindow {
         if self.reader.read(cx).document_generation() != generation {
             return;
         }
-        if let Some(path) = path {
-            self.open_path(path, cx);
+        if let Some(path) = path
+            && let Err(error) = self.open_file(path, cx)
+        {
+            let handle = self.window;
+            cx.defer(move |cx| {
+                let _ = cx.update_window(handle, |_, window, cx| {
+                    window.push_notification(Notification::warning(error), cx);
+                });
+            });
         }
     }
 
@@ -659,13 +711,24 @@ impl DocumentWindow {
                 }
                 match event {
                     RecentPickerEvent::Open { path, request } => {
-                        this.open_path(path.clone(), cx);
-                        this.recent_open = Some(PendingRecentOpen {
+                        let destination = this.open_file(path.clone(), cx);
+                        let pending = PendingRecentOpen {
                             generation: this.reader.read(cx).document_generation(),
                             path: path.clone(),
                             picker: picker.downgrade(),
                             request: *request,
-                        });
+                            window: window.window_handle(),
+                        };
+                        match destination {
+                            Ok(None) => this.recent_open = Some(pending),
+                            Ok(Some(destination)) => destination.update(cx, |document, cx| {
+                                document.recent_open = Some(PendingRecentOpen {
+                                    generation: document.reader.read(cx).document_generation(),
+                                    ..pending
+                                });
+                            }),
+                            Err(error) => pending.finish(Err(error), window, cx),
+                        }
                     }
                     RecentPickerEvent::Closed => {
                         this.recent = None;
@@ -757,9 +820,7 @@ impl DocumentWindow {
         {
             // Reply to the initiating picker, never to whichever modal happens
             // to be open now. A reopened dialog has a different entity identity.
-            let _ = pending.picker.update(cx, |picker, cx| {
-                picker.finish_open(pending.request, result.clone(), window, cx);
-            });
+            pending.finish(result.clone(), window, cx);
         }
     }
 }

@@ -80,6 +80,15 @@ These shortcuts use the Standard preset on macOS. Choose **Vim** in
 shortcuts. See [Customize keyboard shortcuts](docs/keybindings.md) for
 configuration examples.
 
+### Opening from the terminal
+
+Run `kver some.pdf` to open a PDF in the most recently active reader, even
+when Kver is already running. Use `kver --new-window some.pdf` to open
+another window instead.
+
+See [Command-line usage](docs/cli.md) for macOS setup, window preferences,
+and available options.
+
 ### Remembering your reading
 
 Use **Open Recent** to find previously opened PDFs. Settings lets you choose

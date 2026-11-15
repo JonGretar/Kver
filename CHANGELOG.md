@@ -7,6 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- **CLI handoff:** `kver some.pdf` opens files in the running app instead of
+  starting a separate instance, with options to reuse a reader or open a new window.
+- **File-opening preference:** Open PDF, Open Recent, Finder, and CLI requests
+  share the “Open files in” application setting. Existing window is the default;
+  choose New window to keep documents in separate readers.
+
 ## [0.6.0] - 2026-11-14
 
 Keep your place with a reading ruler, read PDFs in dark mode, and select text

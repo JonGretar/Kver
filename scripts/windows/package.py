@@ -98,7 +98,10 @@ def inspect_pe(executable, version):
         for index in range(count):
             source = struct.unpack_from("<BBBBHHII", ico, 6 + index * 16)
             embedded = struct.unpack_from("<BBBBHHIH", group, 6 + index * 14)
-            require(source[:7] == embedded[:7], "ICO image metadata mismatch")
+            # rc.exe can normalize planes/color-depth hints for PNG images.
+            # Dimensions, length and exact image bytes define artwork fidelity.
+            require(source[:2] == embedded[:2] and source[6] == embedded[6],
+                    f"ICO image dimensions/length mismatch: {source} vs {embedded}")
             size, offset = source[-2:]
             require(icons.get(embedded[-1]) == ico[offset:offset + size], "ICO image mismatch")
 

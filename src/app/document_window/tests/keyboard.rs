@@ -14,6 +14,173 @@ fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &str) {
 }
 
 #[gpui_kit::test]
+fn embedded_presets_switch_and_recover_live_filters_in_an_open_document(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let paths = crate::settings::AppPaths::for_locations(config.clone(), root.path().join("data"));
+    let store = crate::reading_history::RecentStore::new(&paths);
+    let pdf = crate::reading_history::RecentStore::normalize(std::path::Path::new(
+        "examples/readme-sample.pdf",
+    ))
+    .unwrap();
+    let content = |preset: &str, filter: &str, command: &str| {
+        format!(
+            "[keyboard]\npreset = '{preset}'\n[[keyboard.bindings]]\nkeys = 'ctrl-e'\ncontext = 'reader'\ncommand = '{command}'\nplatform = {filter}\n"
+        )
+    };
+    std::fs::write(
+        &config,
+        content("standard", "['mac', 'linux', 'windows']", "next-page"),
+    )
+    .unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        keymap::install_with_paths(cx, Preset::Standard, Some(paths.clone()));
+        crate::reading_history::install(cx, Some(paths.clone()));
+        settings_ui::install_with_paths(cx, Some(paths));
+        menu::install(cx);
+    });
+    let (handle, document) = open(cx, Some(pdf.clone()));
+    cx.run_until_parked();
+    let reader = document.read_with(cx, |d, _| d.reader().clone());
+    let page = |cx: &TestAppContext| reader.read_with(cx, |r, _| r.page_index());
+    let poll = |cx: &mut TestAppContext| {
+        cx.background_executor
+            .advance_clock(std::time::Duration::from_millis(400));
+        cx.run_until_parked();
+    };
+    press(cx, handle, "ctrl-e");
+    assert_eq!(page(cx), 1);
+
+    // Atomic editor replacement also changes the selected embedded preset.
+    let replacement = root.path().join("replacement.toml");
+    std::fs::write(
+        &replacement,
+        content("vim", "['mac', 'linux', 'windows']", "previous-page"),
+    )
+    .unwrap();
+    std::fs::rename(&replacement, &config).unwrap();
+    poll(cx);
+    cx.update(|cx| assert_eq!(keymap::active_preset(cx), Preset::Vim));
+    press(cx, handle, "ctrl-e");
+    assert_eq!(page(cx), 0);
+    press(cx, handle, "shift-j");
+    assert_eq!(page(cx), 1);
+    press(cx, handle, "m s");
+    assert_eq!(store.marks(&pdf).unwrap()[&'s'].position.page, 1);
+    press(cx, handle, "g g");
+    assert_eq!(page(cx), 0);
+    press(cx, handle, "' s");
+    assert_eq!(page(cx), 1);
+    press(cx, handle, "d m s");
+    assert!(!store.marks(&pdf).unwrap().contains_key(&'s'));
+    press(cx, handle, "g g");
+    assert_eq!(page(cx), 0);
+
+    // Invalid new filter syntax cannot partially replace either preset or overrides.
+    std::fs::write(&config, content("standard", "[]", "next-page")).unwrap();
+    poll(cx);
+    cx.update(|cx| assert_eq!(keymap::active_preset(cx), Preset::Vim));
+    press(cx, handle, "shift-j ctrl-e");
+    assert_eq!(page(cx), 0);
+    cx.update(|cx| {
+        assert_eq!(
+            keymap::active_map(cx)
+                .unwrap()
+                .shortcuts(&crate::reader::PreviousPage, keymap::Context::Reader)
+                .last(),
+            Some(&"ctrl-e"),
+        );
+    });
+
+    // Recovery keeps the legacy single-string form and removes Vim-only sequences.
+    let os = cx.update(|cx| match keymap::platform(cx) {
+        keymap::Platform::Mac => "mac",
+        keymap::Platform::Linux => "linux",
+        keymap::Platform::Windows => "windows",
+    });
+    std::fs::write(
+        &config,
+        content("standard", &format!("'{os}'"), "next-page"),
+    )
+    .unwrap();
+    poll(cx);
+    cx.update(|cx| assert_eq!(keymap::active_preset(cx), Preset::Standard));
+    press(cx, handle, "ctrl-e");
+    assert_eq!(page(cx), 1);
+    press(cx, handle, "g g");
+    assert_eq!(page(cx), 1);
+    press(cx, handle, "cmd-f");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.input("ggma", cx);
+        window.press("ctrl-e", cx);
+        assert_eq!(window.find("find-query").value(), Some("ggma"));
+    })
+    .unwrap();
+    assert_eq!(page(cx), 1);
+    press(cx, handle, "escape");
+
+    // Omitting filters still works; deleting the override file restores the preset.
+    std::fs::write(&config, "[keyboard]\npreset = 'vim'\n").unwrap();
+    poll(cx);
+    press(cx, handle, "shift-j");
+    assert_eq!(page(cx), 2);
+    std::fs::remove_file(&config).unwrap();
+    poll(cx);
+    cx.update(|cx| assert_eq!(keymap::active_preset(cx), Preset::Standard));
+    press(cx, handle, "ctrl-e");
+    assert_eq!(page(cx), 2);
+    press(cx, handle, "right");
+    assert_eq!(page(cx), 3);
+}
+
+#[gpui_kit::test]
+fn embedded_presets_keep_annotation_save_and_save_as_shortcuts(cx: &mut TestAppContext) {
+    setup(cx);
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().canonicalize().unwrap();
+    for preset in [Preset::Standard, Preset::Vim] {
+        cx.update(|cx| keymap::select_preset(cx, preset).unwrap());
+        let source = directory.join(format!("{}.pdf", preset.key()));
+        let copy = directory.join(format!("{}-copy.pdf", preset.key()));
+        std::fs::copy("examples/selection-sample.pdf", &source).unwrap();
+        let original = std::fs::read(&source).unwrap();
+        let (handle, document) = open(cx, Some(source.clone()));
+        cx.run_until_parked();
+        super::saving::select_text(cx, handle, &document);
+        press(
+            cx,
+            handle,
+            if preset == Preset::Standard {
+                "secondary-shift-h"
+            } else {
+                "a h"
+            },
+        );
+        document.read_with(cx, |d, cx| assert!(d.reader.read(cx).is_dirty(cx)));
+        press(cx, handle, "cmd-s");
+        document.read_with(cx, |d, cx| assert!(!d.reader.read(cx).is_dirty(cx)));
+        let saved = std::fs::read(&source).unwrap();
+        assert_ne!(saved, original);
+        press(cx, handle, "cmd-shift-s");
+        assert!(cx.did_prompt_for_new_path());
+        cx.simulate_new_path_selection(|_| Some(copy.clone()));
+        cx.run_until_parked();
+        document.read_with(cx, |d, cx| {
+            assert_eq!(d.reader.read(cx).path(), Some(copy.as_path()));
+            assert!(!d.reader.read(cx).is_dirty(cx));
+        });
+        assert_eq!(std::fs::read(&source).unwrap(), saved);
+        assert!(copy.exists());
+        cx.update_window(handle, |_, window, _| window.remove_window())
+            .unwrap();
+        drop(document);
+        cx.run_until_parked();
+    }
+}
+
+#[gpui_kit::test]
 fn vim_contents_j_k_match_arrow_selection(cx: &mut TestAppContext) {
     setup(cx);
     cx.update(|cx| keymap::select_preset(cx, Preset::Vim).unwrap());

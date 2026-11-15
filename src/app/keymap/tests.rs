@@ -4,6 +4,8 @@ use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
+mod presets;
+
 #[test]
 fn pdf_dark_mode_is_available_for_custom_bindings_without_a_default_key() {
     for platform in [Platform::Mac, Platform::Linux, Platform::Windows] {

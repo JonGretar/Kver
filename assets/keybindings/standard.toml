@@ -1,0 +1,257 @@
+# Complete Standard preset. Entries are ordered for shortcut/menu presentation.
+# Platform filters select entries within this preset, not another policy layer.
+
+[[keyboard.bindings]]
+keys = "cmd-o"
+command = "open-pdf"
+[[keyboard.bindings]]
+keys = "cmd-shift-o"
+command = "show-recent"
+[[keyboard.bindings]]
+keys = "cmd-n"
+command = "new-window"
+[[keyboard.bindings]]
+keys = "cmd-shift-p"
+command = "command-palette"
+[[keyboard.bindings]]
+keys = "cmd-shift-m"
+command = "show-marks"
+[[keyboard.bindings]]
+keys = "cmd-z"
+context = "reader"
+command = "undo-annotation"
+[[keyboard.bindings]]
+keys = "cmd-shift-z"
+context = "reader"
+command = "redo-annotation"
+[[keyboard.bindings]]
+keys = "cmd-z"
+context = "annotations"
+command = "undo-annotation"
+[[keyboard.bindings]]
+keys = "cmd-shift-z"
+context = "annotations"
+command = "redo-annotation"
+[[keyboard.bindings]]
+keys = "backspace"
+context = "reader"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "delete"
+context = "reader"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "backspace"
+context = "annotations"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "delete"
+context = "annotations"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "cmd-shift-s"
+command = "save-as"
+[[keyboard.bindings]]
+keys = "cmd-s"
+command = "save"
+[[keyboard.bindings]]
+keys = "escape"
+context = "sidebar"
+command = "toggle-sidebar"
+[[keyboard.bindings]]
+keys = "enter"
+context = "contents"
+command = "activate-outline"
+[[keyboard.bindings]]
+keys = "cmd-c"
+context = "annotations"
+command = "copy"
+
+# Keep modified page shortcuts ahead of reader aliases: native menus snapshot
+# their first binding, and must not intercept arrows in text controls.
+[[keyboard.bindings]]
+keys = "cmd-alt-right"
+context = "reader"
+command = "next-page"
+[[keyboard.bindings]]
+keys = "cmd-alt-left"
+context = "reader"
+command = "previous-page"
+[[keyboard.bindings]]
+keys = "cmd-c"
+context = "reader"
+command = "copy"
+[[keyboard.bindings]]
+keys = "down"
+context = "reader"
+command = "read-down"
+[[keyboard.bindings]]
+keys = "up"
+context = "reader"
+command = "read-up"
+[[keyboard.bindings]]
+keys = "ctrl-o"
+context = "reader"
+command = "navigate-back"
+[[keyboard.bindings]]
+keys = "ctrl-i"
+context = "reader"
+command = "navigate-forward"
+[[keyboard.bindings]]
+keys = "ctrl-o"
+context = "contents"
+command = "navigate-back"
+[[keyboard.bindings]]
+keys = "ctrl-i"
+context = "contents"
+command = "navigate-forward"
+[[keyboard.bindings]]
+keys = "cmd-w"
+command = "close-window"
+[[keyboard.bindings]]
+keys = "cmd-,"
+command = "show-settings"
+[[keyboard.bindings]]
+keys = "escape"
+context = "settings"
+command = "close-settings"
+[[keyboard.bindings]]
+keys = "escape"
+context = "about"
+command = "close-about"
+
+[[keyboard.bindings]]
+keys = "cmd-`"
+command = "next-window"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "cmd-shift-`"
+command = "previous-window"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-f6"
+command = "next-window"
+platform = ["linux", "windows"]
+[[keyboard.bindings]]
+keys = "ctrl-shift-f6"
+command = "previous-window"
+platform = ["linux", "windows"]
+[[keyboard.bindings]]
+keys = "cmd-q"
+command = "quit"
+platform = ["mac", "linux"]
+
+[[keyboard.bindings]]
+keys = "cmd-f"
+command = "show-find"
+[[keyboard.bindings]]
+keys = "cmd-b"
+command = "toggle-sidebar"
+[[keyboard.bindings]]
+keys = "cmd-g"
+command = "next-match"
+[[keyboard.bindings]]
+keys = "cmd-shift-g"
+command = "previous-match"
+[[keyboard.bindings]]
+keys = "cmd-t"
+command = "show-contents"
+[[keyboard.bindings]]
+keys = "secondary-enter"
+context = "reader"
+command = "apply-markup"
+[[keyboard.bindings]]
+keys = "secondary-shift-h"
+context = "reader"
+command = "highlight"
+[[keyboard.bindings]]
+keys = "secondary-shift-u"
+context = "reader"
+command = "underline"
+[[keyboard.bindings]]
+keys = "secondary-shift-x"
+context = "reader"
+command = "strikethrough"
+[[keyboard.bindings]]
+keys = "secondary-alt-u"
+context = "reader"
+command = "squiggly-underline"
+[[keyboard.bindings]]
+keys = "secondary-shift-a"
+command = "show-annotations"
+[[keyboard.bindings]]
+keys = "secondary-shift-r"
+context = "reader"
+command = "toggle-reading-ruler"
+[[keyboard.bindings]]
+keys = "right"
+context = "reader"
+command = "next-page"
+[[keyboard.bindings]]
+keys = "left"
+context = "reader"
+command = "previous-page"
+[[keyboard.bindings]]
+keys = "pagedown"
+context = "reader"
+command = "scroll-screen-down"
+[[keyboard.bindings]]
+keys = "pageup"
+context = "reader"
+command = "scroll-screen-up"
+[[keyboard.bindings]]
+keys = "cmd-="
+context = "reader"
+command = "zoom-in"
+[[keyboard.bindings]]
+keys = "cmd-shift-="
+context = "reader"
+command = "zoom-in"
+[[keyboard.bindings]]
+keys = "cmd--"
+context = "reader"
+command = "zoom-out"
+[[keyboard.bindings]]
+keys = "cmd-alt-w"
+context = "reader"
+command = "fit-width"
+[[keyboard.bindings]]
+keys = "cmd-alt-f"
+context = "reader"
+command = "fit-page"
+[[keyboard.bindings]]
+keys = "alt-down"
+context = "reader"
+command = "next-page"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "alt-up"
+context = "reader"
+command = "previous-page"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-pagedown"
+context = "reader"
+command = "next-page"
+platform = ["linux", "windows"]
+[[keyboard.bindings]]
+keys = "ctrl-pageup"
+context = "reader"
+command = "previous-page"
+platform = ["linux", "windows"]
+[[keyboard.bindings]]
+keys = "alt-left"
+context = "reader"
+command = "navigate-back"
+[[keyboard.bindings]]
+keys = "alt-right"
+context = "reader"
+command = "navigate-forward"
+[[keyboard.bindings]]
+keys = "alt-left"
+context = "contents"
+command = "navigate-back"
+[[keyboard.bindings]]
+keys = "alt-right"
+context = "contents"
+command = "navigate-forward"

@@ -7,15 +7,23 @@ verification does not establish clean-PC launch or native GUI usability.
 ## Requirements
 
 - x86-64 Windows 10/11 is the initial candidate baseline, not certification of
-  every Windows version or configuration. ARM64 is not a native target.
+  every Windows version or configuration. The inspected executable imports
+  Windows' `icuuc.dll`, available starting with Windows 10 version 1703;
+  earlier Windows versions cannot supply that requirement. See
+  [Microsoft's ICU availability](https://learn.microsoft.com/en-us/windows/win32/intl/international-components-for-unicode--icu-).
+  This is a dependency floor, not a tested minimum OS. Use a maintained Windows
+  installation. ARM64 is not a native target.
 - A working Direct3D 11 graphics environment and current vendor graphics drivers.
   Remote sessions, virtual GPUs and unusual DPI configurations need native testing.
 - Windows supplies the system DLLs and Universal CRT. `PE-DEPENDENCIES.json`
   records the actual normal and delay-load imports for this executable.
-  If `vc_redist_imports` lists DLLs, install/update the **Microsoft Visual C++
-  v14 x64 Redistributable** from
+  The inspected build imports `vcruntime140.dll`. Install/update the
+  **Microsoft Visual C++ v14 x64 Redistributable** from
   <https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist>.
-  Its supported OS requirements also apply. Do not download individual DLLs
+  Use a version at least as recent as the `msvc_build_tools_version` recorded
+  in `PE-DEPENDENCIES.json`; Microsoft's latest x64 package is recommended.
+  Future builds record their actual CRT imports in `vc_redist_imports`.
+  The redistributable's supported OS requirements also apply. Do not download individual DLLs
   from DLL websites or copy DLLs out of a developer machine.
 
 The archive contains no runtime DLL sidecars. GPUI's optional NVIDIA/AMD

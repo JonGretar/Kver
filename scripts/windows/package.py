@@ -21,12 +21,12 @@ SYSTEM_DLLS = set("""
 advapi32.dll avrt.dll bcrypt.dll bcryptprimitives.dll cabinet.dll cfgmgr32.dll
 combase.dll comctl32.dll comdlg32.dll crypt32.dll cryptbase.dll cryptnet.dll cryptui.dll
 d2d1.dll d3d11.dll d3d12.dll d3dcompiler_47.dll dcomp.dll dbghelp.dll
-dnsapi.dll dwmapi.dll dwrite.dll dxgi.dll dxguid.dll gdi32.dll hid.dll
-imm32.dll iphlpapi.dll kernel32.dll kernelbase.dll msimg32.dll
+dnsapi.dll dwmapi.dll dwrite.dll dxgi.dll dxguid.dll gdi32.dll gdiplus.dll hid.dll
+icuuc.dll imm32.dll iphlpapi.dll kernel32.dll kernelbase.dll msimg32.dll
 msvcrt.dll ncrypt.dll netapi32.dll normaliz.dll ntdll.dll ole32.dll oleaut32.dll
 opengl32.dll powrprof.dll propsys.dll psapi.dll rasapi32.dll rpcrt4.dll
 secur32.dll setupapi.dll shcore.dll shell32.dll shlwapi.dll user32.dll
-userenv.dll usp10.dll ucrtbase.dll uxtheme.dll version.dll win32u.dll
+uiautomationcore.dll userenv.dll usp10.dll ucrtbase.dll uxtheme.dll version.dll win32u.dll
 windowscodecs.dll winhttp.dll wininet.dll winmm.dll winspool.drv
 wintrust.dll wldap32.dll ws2_32.dll wtsapi32.dll
 """.split())
@@ -143,7 +143,10 @@ def inspect_pe(executable, version):
             "identity": strings,
             "imports_including_delay_load": imports,
             "vc_redist_imports": crt,
-            "deployment": "Windows OS DLLs; install Microsoft x64 v14 Redistributable if listed CRT imports require it. No DLL sidecars.",
+            "msvc_build_tools_version": os.environ.get("VCToolsVersion", "not recorded"),
+            "deployment": "Windows OS DLLs (ICU requires Windows 10 1703+); "
+                          "when CRT imports are listed, install Microsoft x64 v14 Redistributable "
+                          "at least as recent as the MSVC build tools. No DLL sidecars.",
             "dynamic_load_review": {
                 "nvapi64.dll": "Optional GPUI NVIDIA driver-version query; failure becomes Unknown Driver.",
                 "amd_ags_x64.dll": "Optional GPUI AMD driver-version query; failure becomes Unknown Driver.",

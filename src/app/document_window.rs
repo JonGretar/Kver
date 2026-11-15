@@ -829,7 +829,23 @@ impl Render for DocumentWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = settings_ui::state(cx);
         let reader = self.reader.read(cx);
-        let title = chrome::title_bar(reader.path(), reader.is_dirty(cx), window, cx);
+        let in_window_menu = matches!(
+            super::keymap::platform(cx),
+            super::keymap::Platform::Linux | super::keymap::Platform::Windows
+        );
+        let title = chrome::title_bar(
+            reader.path(),
+            reader.is_dirty(cx),
+            in_window_menu.then(|| {
+                chrome::application_menu(
+                    &self.reader,
+                    window.viewport_size().width < window.rem_size() * 40.,
+                )
+                .into_any_element()
+            }),
+            window,
+            cx,
+        );
         let marks = reader.marks_overlay();
         let toolbar = settings.read(cx).show_toolbar().then(|| {
             let sidebar_rems = self

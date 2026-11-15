@@ -4,6 +4,7 @@ use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 mod annotation_history;
 mod annotation_shortcuts;
 mod annotations;
+mod application_menu;
 mod chrome;
 mod contents;
 mod external;

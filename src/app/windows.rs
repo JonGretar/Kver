@@ -210,6 +210,8 @@ fn open_with_page(
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
     let (handle, reader) = gpui_kit::open_window(
         WindowOptions {
+            #[cfg(target_os = "linux")]
+            app_id: Some(crate::app::LINUX_APP_ID.into()),
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(360.0), px(240.0))),
             ..TitleBar::window_options()

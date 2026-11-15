@@ -21,6 +21,8 @@ pub(crate) fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
     let bounds = Bounds::centered(None, size(px(440.0), px(400.0)), cx);
     let (handle, _) = gpui_kit::open_window(
         WindowOptions {
+            #[cfg(target_os = "linux")]
+            app_id: Some(crate::app::LINUX_APP_ID.into()),
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             is_resizable: false,
             is_minimizable: false,

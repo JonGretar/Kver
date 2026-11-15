@@ -421,6 +421,8 @@ fn open(cx: &mut App) -> gpui_kit::Result<AnyWindowHandle> {
     let bounds = Bounds::centered(None, size(px(850.), px(680.)), cx);
     let (handle, _) = gpui_kit::open_window(
         WindowOptions {
+            #[cfg(target_os = "linux")]
+            app_id: Some(crate::app::LINUX_APP_ID.into()),
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(350.))),
             ..TitleBar::window_options()

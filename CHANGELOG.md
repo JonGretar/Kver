@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Linux desktop installation:** optionally install or remove the experimental
+  archive for your user, with a one-PDF launcher and icon, without changing
+  your default reader or deleting documents, settings or reading history.
 - **Experimental Linux archive:** a versioned Ubuntu x86-64 tarball with
   checksums and runtime/manual-update guidance, generated as a non-publishing
   CI artifact rather than a supported Linux release.

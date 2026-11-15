@@ -61,6 +61,11 @@ Windows and Linux are targets, but supported downloads are not available
 yet. Packaging and native testing need contributors—if you would like to
 help, [open an issue](https://github.com/JonGretar/Kver/issues).
 
+Windows testers can build an [experimental x86-64 ZIP](docs/development.md#build-an-experimental-windows-archive)
+or obtain one from the non-publishing **Experimental Windows archive** Actions
+workflow. Read the [runtime, extraction and security guidance](docs/windows.md)
+first; a successful package job is not clean-PC or native GUI certification.
+
 ## Get started
 
 1. **Open a PDF.** Use **Open PDF**, Command-O, or Finder's Open With.

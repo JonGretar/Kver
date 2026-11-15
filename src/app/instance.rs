@@ -135,7 +135,7 @@ fn connect(endpoint: &str) -> io::Result<Stream> {
     )?;
     let handle = OwnedHandle::try_from(pipe)
         .map_err(|_| io::Error::other("cannot take ownership of CLI pipe"))?;
-    let stream = local_socket::Stream::try_from(handle).map_err(io::Error::other)?;
+    let stream = local_socket::Stream::try_from(handle)?;
     Ok(Stream::NamedPipe(stream))
 }
 

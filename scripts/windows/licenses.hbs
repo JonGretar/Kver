@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Kver third-party licenses</title>
+<h1>Kver third-party licenses</h1>
+{{#each licenses}}
+<h2>{{name}}</h2>
+<ul>{{#each used_by}}<li>{{crate.name}} {{crate.version}} —
+<a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">Corresponding source</a>
+</li>{{/each}}</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</html>

@@ -36,7 +36,7 @@ versions, resolved linkage and dynamic-loader probes. Consult that report
 before attempting another distribution; building on Ubuntu does not establish
 an older glibc baseline.
 
-Use a graphical desktop with X11 or Wayland, system fonts/Fontconfig,
+Use a graphical desktop with X11 or Wayland, system fonts/fontconfig configuration,
 xkbcommon (including X11 support), and the linked libraries listed in the
 report. The package does not bundle system libraries or graphics drivers.
 On Ubuntu, the packaging environment supplies `libfontconfig1`,

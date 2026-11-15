@@ -75,7 +75,9 @@ def inspect_elf(executable):
             "wayland": "gpui-pre-linux uses wayland-backend client_system + dlopen.",
             "vulkan": "wgpu/ash loads libvulkan.so.1; a working Vulkan ICD/driver is also required.",
             "egl": "wgpu GLES fallback loads libEGL.so.1; an appropriate GL/EGL driver is also required.",
-            "fontconfig_xkb_xcb": "Fontconfig, xkbcommon/X11 and XCB linkage is recorded by readelf/ldd.",
+            "xkb_xcb": "Retained xkbcommon/X11 and XCB linkage is recorded by readelf/ldd.",
+            "fonts": "GPUI WGPU uses cosmic-text/fontdb for system fonts and fontconfig configuration. "
+                     "Build-time font-kit dependencies need not survive linking; consult actual ELF imports.",
             "services": "Session D-Bus and xdg-desktop-portal with a desktop backend are needed "
                         "for rfd/ashpd file dialogs; services are not ELF libraries.",
             "unresolved": "Driver/ICD transitive loads, compositor/portal compatibility, "

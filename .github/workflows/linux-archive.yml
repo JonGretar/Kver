@@ -1,0 +1,59 @@
+name: Experimental Linux archive
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - src/**
+      - assets/**
+      - scripts/package-linux.sh
+      - scripts/linux/**
+      - scripts/test_linux_package.py
+      - scripts/release-metadata.py
+      - scripts/windows/licenses.hbs
+      - docs/linux.md
+      - docs/cli.md
+      - LICENSE
+      - .github/workflows/linux-archive.yml
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    name: Experimental Ubuntu x86-64 tarball (not native GUI acceptance)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Ubuntu build and loader-inspection requirements
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libvulkan1 mesa-vulkan-drivers libwayland-client0 libegl1 binutils
+      - name: Install stable native Rust and license tool
+        run: |
+          rustup toolchain install stable --profile minimal --component rust-docs
+          cargo +stable install cargo-about --locked --version 0.9.3 --features cli
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+      - name: Test archive rejection checks
+        run: python3 -m unittest discover -s scripts -p test_linux_package.py
+      - name: Build, package and verify clean extraction
+        run: sh scripts/package-linux.sh
+      - name: Upload experimental archive and checksum (no release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kver-experimental-linux-x86_64-${{ github.sha }}
+          path: |
+            target/x86_64-unknown-linux-gnu/release/Kver-v*-experimental-linux-x86_64.tar.gz
+            target/x86_64-unknown-linux-gnu/release/Kver-v*-experimental-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14

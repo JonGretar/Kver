@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Experimental Linux archive:** a versioned Ubuntu x86-64 tarball with
+  checksums and runtime/manual-update guidance, generated as a non-publishing
+  CI artifact rather than a supported Linux release.
 - **Linux and Windows application menu:** access window, file, Settings, About
   and Quit commands from the title bar, with current keyboard shortcuts and
   the same unsaved-work protection as keyboard commands.

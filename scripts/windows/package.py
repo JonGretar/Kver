@@ -155,11 +155,12 @@ def verify_archive(archive, version, expected_hashes):
         with zipfile.ZipFile(archive) as zipped:
             names = zipped.namelist()
             require(len(names) == len(set(names)), "Duplicate ZIP paths")
+            require(all(not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts
+                        and "\\" not in name and ":" not in name
+                        for name in names + list(expected_hashes)),
+                    "Unsafe ZIP paths")
             require(set(names) == set(expected_hashes) | {"SHA256SUMS"},
                     "Missing or unexpected ZIP content")
-            require(all(not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts
-                        and "\\" not in name and ":" not in name for name in names),
-                    "Unsafe ZIP paths")
             zipped.extractall(clean)
         sums = "".join(f"{checksum}  {name}\n" for name, checksum in sorted(expected_hashes.items()))
         require((clean / "SHA256SUMS").read_text() == sums, "Incorrect checksum inventory")

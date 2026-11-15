@@ -26,11 +26,7 @@ class ArchiveRejectionTests(unittest.TestCase):
     def write(self, entries):
         with zipfile.ZipFile(self.archive, "w") as zipped:
             for name, content in entries:
-                # Preserve malicious names verbatim: ZipInfo's constructor
-                # normalizes backslashes on Windows before the verifier sees them.
-                info = zipfile.ZipInfo("placeholder")
-                info.filename = name
-                zipped.writestr(info, content)
+                zipped.writestr(name, content)
 
     def reject(self, message):
         with self.assertRaisesRegex(ValueError, message):

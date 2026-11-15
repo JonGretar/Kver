@@ -23,6 +23,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   share the “Open files in” application setting. Existing window is the default;
   choose New window to keep documents in separate readers.
 
+### Changed
+
+- Keyboard presets use conventional Ctrl application shortcuts on Linux and
+  Windows while preserving macOS Command shortcuts. Standard Ctrl-O opens a
+  PDF; Vim keeps Ctrl-O/Ctrl-I history navigation in Reader and Contents and
+  `o` for Open. Windows annotation redo uses Ctrl-Y.
+
 ## [0.6.0] - 2026-11-14
 
 Keep your place with a reading ruler, read PDFs in dark mode, and select text

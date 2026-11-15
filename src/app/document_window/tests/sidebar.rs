@@ -12,7 +12,7 @@ fn sidebar_spans_the_reading_chrome_but_not_the_title_bar(cx: &mut TestAppContex
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-f", cx);
+        frame.press("secondary-f", cx);
         frame.render_frame(cx);
         let workspace = frame.find("reader-workspace").bounds();
         let sidebar = frame.find("reader-sidebar").bounds();
@@ -41,7 +41,7 @@ fn resizing_sidebar_refits_pdf_and_preserves_panel_across_documents(cx: &mut Tes
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-f", cx);
+        window.press("secondary-f", cx);
     })
     .unwrap();
     cx.update_window(handle, |_, window, cx| {
@@ -118,7 +118,7 @@ fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -187,7 +187,7 @@ fn toolbar_keeps_controls_inside_the_pane_and_overflows_into_a_working_menu(
     );
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-,", cx);
+        window.press("secondary-,", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -201,7 +201,7 @@ fn sidebar_tabs_preserve_pointer_keyboard_and_panel_focus(cx: &mut TestAppContex
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -221,7 +221,7 @@ fn sidebar_tabs_preserve_pointer_keyboard_and_panel_focus(cx: &mut TestAppContex
         window.render_frame(cx);
         assert_eq!(window.find("find-query").focused(), Some(true));
         window.input("page", cx);
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();

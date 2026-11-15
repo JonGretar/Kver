@@ -29,7 +29,7 @@ fn drag_title(
     });
     cx.update_window(window, |_, window, cx| {
         window.drag(start, end, cx);
-        window.press("cmd-c", cx);
+        window.press("secondary-c", cx);
     })
     .unwrap();
 }
@@ -68,7 +68,7 @@ fn repeated_opens_keep_navigation_selection_mode_zoom_and_focus_window_local(
     });
 
     cx.update_window(first_window, |_, window, cx| {
-        window.press("cmd-f", cx);
+        window.press("secondary-f", cx);
         window.input("This is page", cx);
     })
     .unwrap();
@@ -76,10 +76,10 @@ fn repeated_opens_keep_navigation_selection_mode_zoom_and_focus_window_local(
     // Focusing and navigating in the other window cannot steal Find's focus
     // or query, and its own selection remains available for copy.
     cx.update_window(second_window, |_, window, cx| {
-        window.press("cmd-c", cx);
+        window.press("secondary-c", cx);
         window.dispatch_action(Box::new(SinglePage), cx);
         window.press("right", cx);
-        window.press("cmd-=", cx);
+        window.press("secondary-=", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -136,7 +136,7 @@ fn repeated_opens_use_one_baseline_until_the_last_window_closes(cx: &mut TestApp
         assert_eq!(reader.page_count(), Some(fresh_pages))
     });
     cx.update_window(second_window, |_, window, cx| {
-        window.press("cmd-t", cx);
+        window.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -144,7 +144,7 @@ fn repeated_opens_use_one_baseline_until_the_last_window_closes(cx: &mut TestApp
         window.render_frame(cx);
         assert!(window.find("contents-empty").visible());
         window.press("escape", cx);
-        window.press("cmd-f", cx);
+        window.press("secondary-f", cx);
         window.input("This is page 100 of 100", cx);
         window.press("enter", cx);
     })
@@ -164,13 +164,13 @@ fn repeated_opens_use_one_baseline_until_the_last_window_closes(cx: &mut TestApp
     });
     let closed = first.downgrade();
     drop(first);
-    cx.simulate_keystrokes(first_window, "cmd-w");
+    cx.simulate_keystrokes(first_window, "secondary-w");
     cx.run_until_parked();
     assert!(closed.upgrade().is_none());
     second.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 99));
     let closed = second.downgrade();
     drop(second);
-    cx.simulate_keystrokes(second_window, "cmd-w");
+    cx.simulate_keystrokes(second_window, "secondary-w");
     cx.run_until_parked();
     assert!(closed.upgrade().is_none());
 
@@ -212,8 +212,8 @@ fn replacement_detaches_only_its_window_and_rejects_pending_old_work(cx: &mut Te
     // Start new raster/text/link work and Find/Contents extraction, then replace
     // without draining the executor. Late replies must not restore old state.
     cx.update_window(first_window, |_, window, cx| {
-        window.press("cmd-t", cx);
-        window.press("cmd-f", cx);
+        window.press("secondary-t", cx);
+        window.press("secondary-f", cx);
         window.input("Landscape", cx);
     })
     .unwrap();
@@ -235,7 +235,7 @@ fn replacement_detaches_only_its_window_and_rejects_pending_old_work(cx: &mut Te
         assert_eq!(reader.selected_text().as_deref(), Some("KVER"))
     });
     cx.update_window(first_window, |_, window, cx| {
-        window.press("cmd-f", cx);
+        window.press("secondary-f", cx);
         assert_eq!(window.find("find-query").value(), Some(""));
         window.input("This is page 2", cx);
         window.press("enter", cx);

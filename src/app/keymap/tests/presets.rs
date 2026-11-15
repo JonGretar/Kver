@@ -10,15 +10,19 @@ fn complete_presets_keep_save_marks_and_platform_modifier_semantics() {
         for preset in PRESETS {
             let map = resolve_config("", platform, preset).unwrap();
             for context in [Context::Reader, Context::Annotations, Context::Settings] {
-                assert_eq!(map.action("cmd-s", context), Some(Save.name()));
-                assert_eq!(map.action("cmd-shift-s", context), Some(SaveAs.name()));
+                assert_eq!(map.action("secondary-s", context), Some(Save.name()));
+                assert_eq!(
+                    map.action("secondary-shift-s", context),
+                    Some(SaveAs.name())
+                );
             }
-            // Preserve literal cmd policy on non-Mac platforms for #178.
-            assert_eq!(map.action("ctrl-s", Context::Reader), None);
-            assert_eq!(map.action("cmd-o", Context::Reader), Some(OpenPdf.name()));
             assert_eq!(
                 map.action("ctrl-o", Context::Reader),
-                Some(NavigateBack.name())
+                Some(if platform == Platform::Mac || preset == Preset::Vim {
+                    NavigateBack.name()
+                } else {
+                    OpenPdf.name()
+                })
             );
             let window_key = if platform == Platform::Mac {
                 "cmd-`"
@@ -31,7 +35,11 @@ fn complete_presets_keep_save_marks_and_platform_modifier_semantics() {
             );
             assert_eq!(
                 map.action("cmd-q", Context::Global),
-                (platform != Platform::Windows).then_some(Quit.name())
+                (platform == Platform::Mac).then_some(Quit.name())
+            );
+            assert_eq!(
+                map.action("ctrl-q", Context::Global),
+                (platform == Platform::Linux).then_some(Quit.name())
             );
             if preset == Preset::Standard {
                 let annotation_key = if platform == Platform::Mac {
@@ -121,7 +129,14 @@ platform = "mac"
                     })
                 );
                 assert_eq!(
-                    map.action("cmd-alt-right", Context::Reader),
+                    map.action(
+                        if platform == Platform::Mac {
+                            "cmd-alt-right"
+                        } else {
+                            "ctrl-pagedown"
+                        },
+                        Context::Reader,
+                    ),
                     Some(NextPage.name())
                 );
                 assert_eq!(map.action("ctrl-e", Context::Settings), None);
@@ -150,6 +165,287 @@ platform = "mac"
                     );
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn application_shortcuts_use_actual_command_or_control_without_meta_leakage() {
+    for platform in PLATFORMS {
+        for preset in PRESETS {
+            let map = resolve_config("", platform, preset).unwrap();
+            for (suffix, action) in [
+                ("o", &OpenPdf as &dyn Action),
+                ("shift-o", &ShowRecent),
+                ("n", &NewWindow),
+                ("w", &CloseWindow),
+                (",", &ShowSettings),
+                ("shift-p", &ShowCommandPalette),
+                ("shift-m", &ShowMarks),
+                ("s", &Save),
+                ("shift-s", &SaveAs),
+            ] {
+                let modifier = if platform == Platform::Mac {
+                    "cmd"
+                } else {
+                    "ctrl"
+                };
+                let keys = format!("{modifier}-{suffix}");
+                assert_eq!(map.action(&keys, Context::Global), Some(action.name()));
+                let slot = config::menu_binding_for(&map, action).unwrap();
+                let modifiers = slot.sequence[0].modifiers;
+                assert_eq!(
+                    modifiers.platform,
+                    platform == Platform::Mac,
+                    "{platform:?}/{preset:?}/{keys}"
+                );
+                assert_eq!(
+                    modifiers.control,
+                    platform != Platform::Mac,
+                    "{platform:?}/{preset:?}/{keys}"
+                );
+                assert!(!modifiers.alt && !modifiers.function);
+                assert_eq!(modifiers.shift, suffix.starts_with("shift-"));
+                let other = if platform == Platform::Mac {
+                    "ctrl"
+                } else {
+                    "cmd"
+                };
+                assert_eq!(
+                    map.action(&format!("{other}-{suffix}"), Context::Global),
+                    None
+                );
+            }
+            // No shipped shortcut on Linux/Windows may require Super/Windows.
+            if platform != Platform::Mac {
+                assert!(map.slots.iter().all(|slot| {
+                    slot.sequence
+                        .iter()
+                        .all(|stroke| !stroke.modifiers.platform)
+                }));
+            }
+        }
+    }
+}
+
+#[test]
+fn contextual_open_navigation_and_find_policy_is_deliberate() {
+    for platform in PLATFORMS {
+        for preset in PRESETS {
+            let map = resolve_config("", platform, preset).unwrap();
+            for context in [Context::Reader, Context::Contents] {
+                let history = platform == Platform::Mac || preset == Preset::Vim;
+                assert_eq!(
+                    map.action("ctrl-o", context),
+                    Some(if history {
+                        NavigateBack.name()
+                    } else {
+                        OpenPdf.name()
+                    })
+                );
+                assert_eq!(
+                    map.action("ctrl-i", context),
+                    history.then_some(NavigateForward.name())
+                );
+                if preset == Preset::Standard {
+                    assert_eq!(map.action("alt-left", context), Some(NavigateBack.name()));
+                    assert_eq!(
+                        map.action("alt-right", context),
+                        Some(NavigateForward.name())
+                    );
+                }
+                let open_hints = map.shortcuts(&OpenPdf, context);
+                if platform != Platform::Mac && preset == Preset::Vim {
+                    assert!(
+                        !open_hints.contains(&"ctrl-o"),
+                        "shadowed Open must not be advertised"
+                    );
+                }
+            }
+            for context in [
+                Context::Global,
+                Context::Sidebar,
+                Context::Annotations,
+                Context::Settings,
+                Context::About,
+            ] {
+                assert_eq!(
+                    map.action("ctrl-o", context),
+                    (platform != Platform::Mac).then_some(OpenPdf.name())
+                );
+                assert_eq!(map.action("ctrl-i", context), None);
+            }
+            if preset == Preset::Vim {
+                assert_eq!(map.action("o", Context::Reader), Some(OpenPdf.name()));
+                assert_eq!(
+                    map.action("shift-o", Context::Reader),
+                    Some(ShowRecent.name())
+                );
+                assert_eq!(
+                    map.action("ctrl-f", Context::Reader),
+                    Some(ScrollScreenDown.name())
+                );
+                assert_eq!(
+                    map.action("ctrl-b", Context::Reader),
+                    Some(ScrollScreenUp.name())
+                );
+                for context in [Context::Sidebar, Context::Settings, Context::Global] {
+                    for key in ["o", "/", "ctrl-f", "ctrl-b", "g c"] {
+                        assert_eq!(map.action(key, context), None);
+                    }
+                }
+                assert_eq!(
+                    map.action("secondary-f", Context::Reader),
+                    (platform != Platform::Mac).then_some(ScrollScreenDown.name())
+                );
+                assert_eq!(
+                    map.action("g c", Context::Reader),
+                    Some(ShowContents.name())
+                );
+            } else {
+                for context in [
+                    Context::Reader,
+                    Context::Sidebar,
+                    Context::Contents,
+                    Context::Settings,
+                ] {
+                    for (key, command) in [
+                        ("secondary-f", "kver::ShowFind"),
+                        ("secondary-b", "kver::ToggleSidebar"),
+                        ("secondary-g", "kver::NextMatch"),
+                        ("secondary-shift-g", "kver::PreviousMatch"),
+                        ("secondary-t", "kver::ShowContents"),
+                    ] {
+                        assert_eq!(map.action(key, context), Some(command));
+                    }
+                    assert_eq!(
+                        map.action("f3", context),
+                        (platform != Platform::Mac).then_some(NextMatch.name())
+                    );
+                    assert_eq!(
+                        map.action("shift-f3", context),
+                        (platform != Platform::Mac).then_some(PreviousMatch.name())
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn reading_and_annotation_shortcuts_filter_genuine_os_differences() {
+    for platform in PLATFORMS {
+        for preset in PRESETS {
+            let map = resolve_config("", platform, preset).unwrap();
+            for context in [Context::Reader, Context::Annotations] {
+                assert_eq!(
+                    map.action("secondary-z", context),
+                    Some("kver::UndoAnnotation")
+                );
+                let redo = match platform {
+                    Platform::Mac => "cmd-shift-z",
+                    Platform::Linux => "ctrl-shift-z",
+                    Platform::Windows => "ctrl-y",
+                };
+                assert_eq!(map.action(redo, context), Some("kver::RedoAnnotation"));
+                assert_eq!(
+                    map.action("ctrl-y", context),
+                    (platform == Platform::Windows).then_some("kver::RedoAnnotation")
+                );
+                assert_eq!(
+                    map.action("ctrl-shift-z", context),
+                    (platform == Platform::Linux).then_some("kver::RedoAnnotation")
+                );
+                assert_eq!(map.action("secondary-c", context), Some(Copy.name()));
+                for key in ["backspace", "delete"] {
+                    assert_eq!(map.action(key, context), Some(DeleteHighlight.name()));
+                    assert_eq!(map.action(key, Context::Settings), None);
+                }
+                assert_eq!(map.action("secondary-z", Context::Settings), None);
+            }
+            let next = if platform == Platform::Mac {
+                "cmd-alt-right"
+            } else {
+                "ctrl-pagedown"
+            };
+            let previous = if platform == Platform::Mac {
+                "cmd-alt-left"
+            } else {
+                "ctrl-pageup"
+            };
+            assert_eq!(map.action(next, Context::Reader), Some(NextPage.name()));
+            assert_eq!(
+                map.action(previous, Context::Reader),
+                Some(PreviousPage.name())
+            );
+            assert_eq!(map.action(next, Context::Sidebar), None);
+            assert_eq!(
+                map.shortcuts(&NextPage, Context::Reader).first(),
+                Some(&next)
+            );
+            if platform != Platform::Mac {
+                // Avoid Linux workspace shortcuts; do not translate Cmd-Option arrows.
+                assert_eq!(map.action("ctrl-alt-right", Context::Reader), None);
+                assert_eq!(map.action("cmd-alt-right", Context::Reader), None);
+            }
+            if preset == Preset::Standard {
+                assert_eq!(
+                    map.action("secondary-=", Context::Reader),
+                    Some(ZoomIn.name())
+                );
+                assert_eq!(
+                    map.action("secondary--", Context::Reader),
+                    Some(ZoomOut.name())
+                );
+                assert_eq!(
+                    map.action(
+                        if platform == Platform::Mac {
+                            "cmd-alt-f"
+                        } else {
+                            "ctrl-0"
+                        },
+                        Context::Reader
+                    ),
+                    Some(FitPage.name())
+                );
+                for (key, command) in [
+                    ("secondary-enter", "kver::ApplyMarkup"),
+                    ("secondary-shift-h", "kver::Highlight"),
+                    ("secondary-shift-u", "kver::Underline"),
+                    ("secondary-shift-x", "kver::StrikeOut"),
+                    ("secondary-alt-u", "kver::Squiggly"),
+                ] {
+                    assert_eq!(map.action(key, Context::Reader), Some(command));
+                    assert_eq!(map.action(key, Context::Sidebar), None);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn overrides_replace_contextual_slots_and_refresh_effective_hints_on_every_os() {
+    for platform in PLATFORMS {
+        for preset in PRESETS {
+            let map = resolve_config(
+                "[[keyboard.bindings]]\nkeys = 'secondary-o'\ncontext = 'reader'\ncommand = 'next-page'\n\
+                 [[keyboard.bindings]]\nkeys = 'ctrl-e'\ncontext = 'reader'\ncommand = 'open-pdf'\nplatform = ['mac', 'linux', 'windows']",
+                platform, preset,
+            ).unwrap();
+            assert_eq!(
+                map.action("secondary-o", Context::Reader),
+                Some(NextPage.name())
+            );
+            assert_eq!(
+                map.action("secondary-o", Context::Settings),
+                Some(OpenPdf.name())
+            );
+            assert_eq!(map.action("ctrl-e", Context::Reader), Some(OpenPdf.name()));
+            assert_eq!(map.action("ctrl-e", Context::Settings), None);
+            let hints = map.shortcuts(&OpenPdf, Context::Reader);
+            assert!(!hints.contains(&"cmd-o") && !hints.contains(&"ctrl-o"));
+            assert!(hints.contains(&"ctrl-e"));
+            assert_eq!(hints.contains(&"o"), preset == Preset::Vim);
         }
     }
 }

@@ -190,7 +190,7 @@ fn clean_reload_refreshes_identifiers_and_preserves_each_windows_position(cx: &m
     })
     .unwrap();
     cx.run_until_parked();
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     let readback = crate::pdf::Document::open(&source)
         .unwrap()
         .page_annotations(target.page(), 99)
@@ -218,7 +218,7 @@ fn dirty_conflict_cancel_picker_failure_and_discard_keep_both_versions_safe(
     std::fs::copy("examples/field-guide.pdf", &source).unwrap();
     let external = std::fs::read(&source).unwrap();
     // Save's commit boundary remains protective even before the polling deadline.
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     let position = document.read_with(cx, |document, cx| {
         document.reader.read(cx).reading_position()
     });
@@ -240,7 +240,7 @@ fn dirty_conflict_cancel_picker_failure_and_discard_keep_both_versions_safe(
     });
     click(cx, first, "save-conflict-cancel");
     assert_eq!(catalog(&other, cx), local);
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     click(cx, first, "save-conflict-copy");
     assert!(cx.did_prompt_for_new_path());
     cx.simulate_new_path_selection(|_| None);
@@ -251,14 +251,14 @@ fn dirty_conflict_cancel_picker_failure_and_discard_keep_both_versions_safe(
     std::fs::copy("examples/selection-sample.pdf", &occupied).unwrap();
     let (_, _unrelated) = open(cx, Some(occupied.clone()));
     cx.run_until_parked();
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     click(cx, first, "save-conflict-copy");
     cx.simulate_new_path_selection(|_| Some(occupied.clone()));
     cx.run_until_parked();
     click(cx, first, "overwrite-confirm");
     assert_eq!(catalog(&other, cx), local);
     assert_eq!(std::fs::read(&source).unwrap(), external);
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     click(cx, first, "save-conflict-reload");
     for document in [&document, &other] {
         document.read_with(cx, |document, cx| {
@@ -270,7 +270,7 @@ fn dirty_conflict_cancel_picker_failure_and_discard_keep_both_versions_safe(
     }
     assert_eq!(std::fs::read(&source).unwrap(), external);
     assert!(catalog(&other, cx).is_empty());
-    press(cx, second, "cmd-z");
+    press(cx, second, "secondary-z");
     assert!(catalog(&other, cx).is_empty());
 }
 
@@ -287,7 +287,7 @@ fn conflict_save_as_moves_all_windows_without_overwriting_external_pdf(cx: &mut 
     saving::highlight(cx, first, &document);
     std::fs::copy("examples/field-guide.pdf", &source).unwrap();
     let external = std::fs::read(&source).unwrap();
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     click(cx, first, "save-conflict-copy");
     cx.simulate_new_path_selection(|_| Some(destination.clone()));
     cx.run_until_parked();
@@ -346,7 +346,7 @@ fn polling_offers_one_conflict_and_failed_reload_preserves_edits(cx: &mut TestAp
     }
     assert_eq!(std::fs::read(&source).unwrap(), b"unfinished external PDF");
     std::fs::copy("examples/field-guide.pdf", &source).unwrap();
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     click(cx, first, "save-conflict-reload");
     assert!(!other.read_with(cx, |document, cx| document.reader.read(cx).is_dirty(cx)));
 }
@@ -386,7 +386,7 @@ fn queued_reload_cannot_discard_newer_edits_or_replace_another_document(cx: &mut
             "reload must not clear newer history"
         );
     });
-    press(cx, first, "cmd-shift-z");
+    press(cx, first, REDO_KEY);
     assert_eq!(catalog(&other, cx), local);
     cx.update(|cx| {
         session.update(cx, |session, cx| session.check_external(true, false, cx));
@@ -495,7 +495,7 @@ fn reload_resets_all_markup_history_but_retains_per_type_colors_across_shared_sa
     assert_eq!(before.len(), 4);
     assert_eq!(catalog(&other, cx), before);
     rewrite(&source);
-    press(cx, first, "cmd-s");
+    press(cx, first, "secondary-s");
     click(cx, first, "save-conflict-reload");
     for participant in [&document, &other] {
         participant.read_with(cx, |document, cx| {
@@ -515,16 +515,16 @@ fn reload_resets_all_markup_history_but_retains_per_type_colors_across_shared_sa
         assert!(before.iter().all(|old| old.id() != created.id()));
     }
     let recreated = catalog(&other, cx);
-    press(cx, first, "cmd-z");
+    press(cx, first, "secondary-z");
     assert_eq!(catalog(&other, cx).len(), 3);
-    press(cx, second, "cmd-shift-z");
+    press(cx, second, REDO_KEY);
     assert_eq!(catalog(&document, cx), recreated);
 
     // The conflict-copy pipeline must serialize all kinds against the fresh
     // editing source and move every participant only after commit succeeds.
     rewrite(&source);
     let external_bytes = std::fs::read(&source).unwrap();
-    press(cx, second, "cmd-s");
+    press(cx, second, "secondary-s");
     click(cx, second, "save-conflict-copy");
     cx.simulate_new_path_selection(|_| Some(destination.clone()));
     cx.run_until_parked();

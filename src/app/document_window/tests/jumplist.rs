@@ -141,7 +141,7 @@ fn contents_and_find_record_in_only_their_window(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-t", cx);
+        frame.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -161,7 +161,7 @@ fn contents_and_find_record_in_only_their_window(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update_window(find_window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-f", cx);
+        frame.press("secondary-f", cx);
         frame.render_frame(cx);
         frame.input("This is page", cx);
     })
@@ -374,7 +374,7 @@ fn new_jump_after_back_discards_forward_branch(cx: &mut TestAppContext) {
     .unwrap();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("ctrl-o", cx);
+        frame.press("alt-left", cx);
     })
     .unwrap();
     document.read_with(cx, |document, _| assert!(document.jumplist.can_forward()));
@@ -393,7 +393,7 @@ fn new_jump_after_back_discards_forward_branch(cx: &mut TestAppContext) {
             document.jumplist.entries.len() - 1
         );
     });
-    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("alt-right", cx))
         .unwrap();
     reader.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 1));
 }
@@ -411,7 +411,7 @@ fn invalid_entries_are_removed_and_obsolete_generation_cannot_restore(cx: &mut T
     document.update(cx, |document, _| {
         document.jumplist.entries[0] = old.clone().with_page(usize::MAX);
     });
-    cx.update_window(window, |_, frame, cx| frame.press("ctrl-o", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("alt-left", cx))
         .unwrap();
     document.read_with(cx, |document, _| {
         assert_eq!(document.jumplist.entries.len(), 1);
@@ -484,7 +484,7 @@ fn back_works_after_a_contents_jump_while_sidebar_keeps_focus(cx: &mut TestAppCo
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-t", cx);
+        frame.press("secondary-t", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -498,11 +498,11 @@ fn back_works_after_a_contents_jump_while_sidebar_keeps_focus(cx: &mut TestAppCo
     });
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("ctrl-o", cx);
+        frame.press("alt-left", cx);
     })
     .unwrap();
     document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 0));
-    cx.update_window(window, |_, frame, cx| frame.press("ctrl-i", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("alt-right", cx))
         .unwrap();
     document.read_with(cx, |document, _| assert_eq!(document.jumplist.cursor, 1));
 }
@@ -517,8 +517,8 @@ fn forward_shortcut_does_not_steal_find_input_focus(cx: &mut TestAppContext) {
     .unwrap();
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("ctrl-o", cx);
-        frame.press("cmd-f", cx);
+        frame.press("alt-left", cx);
+        frame.press("secondary-f", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -537,7 +537,7 @@ fn palette_traversal_tracks_boundaries_and_dispatches_window_actions(cx: &mut Te
     let (_root, window, document) = linked_window(cx);
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-shift-p", cx);
+        frame.press("secondary-shift-p", cx);
         frame.render_frame(cx);
         frame.input("Back", cx);
     })
@@ -565,7 +565,7 @@ fn palette_traversal_tracks_boundaries_and_dispatches_window_actions(cx: &mut Te
         assert_eq!(document.jumplist.entries.len(), 2)
     });
     cx.update_window(window, |_, frame, cx| {
-        frame.press("cmd-shift-p", cx);
+        frame.press("secondary-shift-p", cx);
         frame.render_frame(cx);
         frame.input("Back", cx);
     })
@@ -581,7 +581,7 @@ fn palette_traversal_tracks_boundaries_and_dispatches_window_actions(cx: &mut Te
     });
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
-        frame.press("cmd-shift-p", cx);
+        frame.press("secondary-shift-p", cx);
         frame.render_frame(cx);
         frame.input("Forward", cx);
     })
@@ -634,10 +634,10 @@ fn native_navigate_menu_follows_active_window_and_find_focus(cx: &mut TestAppCon
     })
     .unwrap();
     assert_eq!(navigation(cx), (false, true));
-    cx.update_window(window, |_, frame, cx| frame.press("ctrl-o", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("alt-left", cx))
         .unwrap();
     assert_eq!(navigation(cx), (true, false));
-    cx.update_window(window, |_, frame, cx| frame.press("cmd-f", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("secondary-f", cx))
         .unwrap();
     cx.run_until_parked();
     cx.update_window(window, |_, frame, cx| {
@@ -655,7 +655,7 @@ fn native_navigate_menu_follows_active_window_and_find_focus(cx: &mut TestAppCon
     })
     .unwrap();
     assert_eq!(navigation(cx), (true, false));
-    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-m", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("secondary-shift-m", cx))
         .unwrap();
     cx.run_until_parked();
     assert_eq!(navigation(cx), (true, true));
@@ -667,7 +667,7 @@ fn native_navigate_menu_follows_active_window_and_find_focus(cx: &mut TestAppCon
     cx.run_until_parked();
     assert_eq!(navigation(cx), (true, false));
     cx.update(|cx| crate::reading_history::install(cx, None));
-    cx.update_window(window, |_, frame, cx| frame.press("cmd-shift-o", cx))
+    cx.update_window(window, |_, frame, cx| frame.press("secondary-shift-o", cx))
         .unwrap();
     cx.run_until_parked();
     assert_eq!(navigation(cx), (true, true));

@@ -125,11 +125,46 @@ For example, `command = "jump-local-mark"` with `letter = "a"` jumps directly
 to local mark `a`. The Vim preset supplies its letter-specific sequences
 using this same field.
 
-## Find and navigation presets
+## Platform and preset defaults
 
-The Standard preset owns Command-F for Find, Command-B for the sidebar,
-Command-G / Command-Shift-G for Find matches, and Command-T for Contents.
-These shortcuts are not installed by Vim.
+Both presets use Command on macOS and Ctrl on Linux/Windows for application
+commands: Open, Open Recent, New/Close Window, Save/Save As, Settings, the
+command palette, and the marks popup. `cmd` means the actual platform/meta key
+(Command, Super, or Windows), not Control; use `ctrl` for Control in overrides.
+`secondary` selects Command on macOS and Ctrl on Linux/Windows.
+
+Some assignments deliberately differ rather than translating modifiers:
+
+| Task | macOS | Linux / Windows |
+| --- | --- | --- |
+| Cycle Kver windows | Command-` / Command-Shift-` | Ctrl-F6 / Ctrl-Shift-F6 |
+| Modified next / previous page, both presets | Command-Option-Right / Left | Ctrl-PageDown / PageUp |
+| Standard Fit Page | Command-Option-F | Ctrl-0 |
+| Standard Fit Width | Command-Option-W | Ctrl-Alt-W |
+| Annotation redo, both presets | Command-Shift-Z | Ctrl-Shift-Z on Linux; Ctrl-Y on Windows |
+| Quit application | Command-Q | Ctrl-Q on Linux; no default on Windows |
+
+Windows retains the OS's Alt-F4 window-close behavior; Ctrl-W closes a Kver
+window in either preset. Kver does not bind Super/Windows shortcuts by default.
+Ctrl-Alt arrows are not page shortcuts: Linux desktops may reserve them for
+workspace switching.
+
+Standard uses Command-F for Find, Command-B for the sidebar,
+Command-G / Command-Shift-G for Find matches, and Command-T for Contents on
+macOS. Linux/Windows use Ctrl for these commands and also F3 / Shift-F3 for
+Find matches. Vim does not install these Standard commands: Ctrl-F / Ctrl-B
+remain reader scrolling, not Find/sidebar.
+
+Standard history uses Alt-Left / Alt-Right in Reader and Contents. macOS also
+retains Control-O / Control-I. On Linux/Windows, Standard Ctrl-O opens a PDF,
+including from Contents; it never means Back.
+
+Vim retains Control-O / Control-I for Back / Forward in Reader and Contents on
+every OS. Use `o` to open a PDF or `O` for Open Recent from the reader. On
+Linux/Windows, Ctrl-O opens a PDF elsewhere, but the more-specific
+Reader/Contents history binding takes precedence there. On macOS, Command-O
+continues to open from either context. Effective shortcut lists omit a
+shadowed Open assignment.
 
 Vim distinguishes PDF pages from viewport-sized scrolling:
 
@@ -196,9 +231,10 @@ In Vim, `a` is a sequence prefix, not a mode; Escape cancels a pending sequence.
 Both presets also expose creation through the toolbar, selection context menu,
 Edit > Annotation menu, and command palette.
 
-Both presets retain Command-Z / Command-Shift-Z for annotation undo/redo and
-Backspace/Delete for deletion in the reader or Annotations list. Vim additionally
-uses `u` / Ctrl-R for annotation undo/redo and `x` for deletion. These commands
+Both presets use Command-Z for annotation undo on macOS and Ctrl-Z on
+Linux/Windows. Redo uses Command-Shift-Z on macOS, Ctrl-Shift-Z on Linux, and
+Ctrl-Y on Windows. Backspace/Delete removes markup in the reader or Annotations
+list. Vim additionally uses `u` / Ctrl-R for annotation undo/redo and `x` for deletion. These commands
 operate only in their reader/list contexts; text inputs keep their own editing.
 List deletion targets the selected list entry, not a previous page target.
 

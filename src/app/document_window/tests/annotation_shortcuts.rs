@@ -54,7 +54,7 @@ fn both_presets_create_and_repeat_markup_without_leaking_into_inputs(cx: &mut Te
         super::saving::select_text(cx, handle, &document);
         press(cx, handle, apply);
         assert_eq!(entries(&document, cx)[0].kind(), MarkupKind::Highlight);
-        press(cx, handle, "cmd-z");
+        press(cx, handle, "secondary-z");
         assert!(entries(&document, cx).is_empty());
         for (kind, key) in MarkupKind::ALL.into_iter().zip(keys) {
             press(cx, handle, key);
@@ -76,7 +76,11 @@ fn both_presets_create_and_repeat_markup_without_leaking_into_inputs(cx: &mut Te
         press(
             cx,
             handle,
-            if preset == Preset::Vim { "/" } else { "cmd-f" },
+            if preset == Preset::Vim {
+                "/"
+            } else {
+                "secondary-f"
+            },
         );
         cx.update_window(handle, |_, window, cx| window.input("aahuux", cx))
             .unwrap();
@@ -94,7 +98,7 @@ fn both_presets_create_and_repeat_markup_without_leaking_into_inputs(cx: &mut Te
             press(cx, handle, "escape");
             assert_eq!(entries(&document, cx).len(), 4);
         }
-        press(cx, handle, "cmd-shift-p");
+        press(cx, handle, "secondary-shift-p");
         cx.update_window(handle, |_, window, cx| window.input("aahux", cx))
             .unwrap();
         document.read_with(cx, |d, cx| {
@@ -120,8 +124,8 @@ fn list_shortcuts_delete_the_list_target_and_keep_focus_after_the_final_row(
             "secondary-shift-u",
             "secondary-shift-a",
             "backspace",
-            "cmd-z",
-            "cmd-shift-z",
+            "secondary-z",
+            REDO_KEY,
         ),
         (Preset::Vim, "a h", "a u", "g a", "x", "u", "ctrl-r"),
     ] {

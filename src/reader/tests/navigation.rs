@@ -25,7 +25,7 @@ fn scroll_actions_share_keybindings_without_intercepting_find_input(cx: &mut Tes
         (0, 0.0)
     );
 
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     cx.update_window(window, |_, window, cx| {
         window.render_frame(cx);
         window.input("jk", cx);
@@ -79,7 +79,7 @@ fn reading_keys_navigate_and_zoom_without_screenshots(cx: &mut TestAppContext) {
         cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
             .unwrap();
     });
-    cx.simulate_keystrokes(window.into(), "right cmd-=");
+    cx.simulate_keystrokes(window.into(), "right secondary-=");
     window
         .read_with(cx, |reader, _| {
             assert_eq!(reader.page_index(), 1);
@@ -109,7 +109,7 @@ fn standard_screen_scroll_respects_reader_focus_and_find_input(cx: &mut TestAppC
     });
     cx.simulate_keystrokes(window, "pageup");
     reader.read_with(cx, |reader, _| assert_eq!(reader.viewport().0, 0.0));
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     cx.update_window(window, |_, frame, cx| {
         frame.render_frame(cx);
         frame.input("j n f", cx);
@@ -144,7 +144,7 @@ fn reader_navigation_is_window_local(cx: &mut TestAppContext) {
         cx.update_window(second.into(), |_, frame, cx| frame.render_frame(cx))
             .unwrap();
     });
-    cx.simulate_keystrokes(first.into(), "right cmd-=");
+    cx.simulate_keystrokes(first.into(), "right secondary-=");
     first
         .read_with(cx, |reader, _| {
             assert_eq!(reader.page_index(), 1);

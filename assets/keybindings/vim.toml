@@ -4,34 +4,95 @@
 [[keyboard.bindings]]
 keys = "cmd-o"
 command = "open-pdf"
+platform = "mac"
+# Reader/Contents deliberately override Ctrl-O with history navigation.
+# Elsewhere Ctrl-O opens a PDF; bare o remains Open in the reader.
+[[keyboard.bindings]]
+keys = "ctrl-o"
+command = "open-pdf"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-shift-o"
 command = "show-recent"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-shift-o"
+command = "show-recent"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-n"
 command = "new-window"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-n"
+command = "new-window"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-shift-p"
 command = "command-palette"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-shift-p"
+command = "command-palette"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-shift-m"
 command = "show-marks"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-shift-m"
+command = "show-marks"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-z"
 context = "reader"
 command = "undo-annotation"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-z"
+context = "reader"
+command = "undo-annotation"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-shift-z"
 context = "reader"
 command = "redo-annotation"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-shift-z"
+context = "reader"
+command = "redo-annotation"
+platform = "linux"
+[[keyboard.bindings]]
+keys = "ctrl-y"
+context = "reader"
+command = "redo-annotation"
+platform = "windows"
 [[keyboard.bindings]]
 keys = "cmd-z"
 context = "annotations"
 command = "undo-annotation"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-z"
+context = "annotations"
+command = "undo-annotation"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-shift-z"
 context = "annotations"
 command = "redo-annotation"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-shift-z"
+context = "annotations"
+command = "redo-annotation"
+platform = "linux"
+[[keyboard.bindings]]
+keys = "ctrl-y"
+context = "annotations"
+command = "redo-annotation"
+platform = "windows"
 [[keyboard.bindings]]
 keys = "backspace"
 context = "reader"
@@ -51,9 +112,19 @@ command = "delete-highlight"
 [[keyboard.bindings]]
 keys = "cmd-shift-s"
 command = "save-as"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-shift-s"
+command = "save-as"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-s"
 command = "save"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-s"
+command = "save"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "escape"
 context = "sidebar"
@@ -66,6 +137,12 @@ command = "activate-outline"
 keys = "cmd-c"
 context = "annotations"
 command = "copy"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-c"
+context = "annotations"
+command = "copy"
+platform = ["linux", "windows"]
 
 # Keep modified page shortcuts ahead of reader aliases: native menus snapshot
 # their first binding, and must not intercept typing keys in text controls.
@@ -73,14 +150,32 @@ command = "copy"
 keys = "cmd-alt-right"
 context = "reader"
 command = "next-page"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-pagedown"
+context = "reader"
+command = "next-page"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-alt-left"
 context = "reader"
 command = "previous-page"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-pageup"
+context = "reader"
+command = "previous-page"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-c"
 context = "reader"
 command = "copy"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-c"
+context = "reader"
+command = "copy"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "down"
 context = "reader"
@@ -108,9 +203,19 @@ command = "navigate-forward"
 [[keyboard.bindings]]
 keys = "cmd-w"
 command = "close-window"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-w"
+command = "close-window"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-,"
 command = "show-settings"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-,"
+command = "show-settings"
+platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "escape"
 context = "settings"
@@ -139,7 +244,11 @@ platform = ["linux", "windows"]
 [[keyboard.bindings]]
 keys = "cmd-q"
 command = "quit"
-platform = ["mac", "linux"]
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-q"
+command = "quit"
+platform = "linux"
 
 # Bare reader keys stay in Reader, never in text controls.
 [[keyboard.bindings]]

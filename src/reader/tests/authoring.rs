@@ -565,8 +565,10 @@ fn selection_context_menu_and_palette_reuse_highlight_without_clearing_text(
             1
         );
     });
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-p", cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-shift-p", cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.input("Highlight", cx);

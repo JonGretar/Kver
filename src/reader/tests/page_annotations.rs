@@ -23,8 +23,10 @@ fn mixed_type_overlap_requires_an_explicit_target_and_preserves_text_dragging(
         "Strikethrough",
         "Squiggly underline",
     ] {
-        cx.update_window(handle, |_, window, cx| window.press("cmd-shift-p", cx))
-            .unwrap();
+        cx.update_window(handle, |_, window, cx| {
+            window.press("secondary-shift-p", cx)
+        })
+        .unwrap();
         cx.run_until_parked();
         cx.update_window(handle, |_, window, cx| {
             window.input(label, cx);
@@ -795,7 +797,7 @@ fn text_drag_over_a_highlight_clears_annotation_target_and_duplicate_ignores_las
     });
     cx.update_window(handle, |_, window, cx| {
         window.press("backspace", cx);
-        window.press("cmd-c", cx);
+        window.press("secondary-c", cx);
         window.press("secondary-shift-h", cx);
     })
     .unwrap();

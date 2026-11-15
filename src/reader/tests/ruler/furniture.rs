@@ -168,7 +168,7 @@ fn furniture_window_preserves_explicit_placement_and_cross_page_continuation(
             "{page:?} {start:?} {end:?}"
         );
         frame.drag(start, end, cx);
-        frame.press("cmd-c", cx);
+        frame.press("secondary-c", cx);
     })
     .unwrap();
     assert_eq!(

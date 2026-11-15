@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn cmd_w_and_close_window_action_close_only_the_active_window(cx: &mut TestAppContext) {
+    fn primary_w_and_close_window_action_close_only_the_active_window(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             crate::app::keymap::install(cx);
@@ -410,7 +410,7 @@ mod tests {
                 .unwrap();
             assert_eq!(cx.active_window(), Some(about));
         });
-        cx.simulate_keystrokes(about, "cmd-w");
+        cx.simulate_keystrokes(about, "secondary-w");
         cx.run_until_parked();
         assert_eq!(cx.update(|cx| cx.windows()), vec![reader.into()]);
 
@@ -442,7 +442,7 @@ mod tests {
             })
             .unwrap();
         });
-        cx.simulate_keystrokes(reader.into(), "cmd-w");
+        cx.simulate_keystrokes(reader.into(), "secondary-w");
         cx.run_until_parked();
         assert!(cx.update(|cx| cx.windows().is_empty()));
     }

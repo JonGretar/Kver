@@ -238,7 +238,7 @@ fn ruler_standard_commands_and_find_input_have_separate_ownership(cx: &mut TestA
             context = "reader"
             command = "previous-ruler-line"
         "#;
-        let map = keymap::resolve_config(config, keymap::Platform::Mac, Preset::Standard).unwrap();
+        let map = keymap::resolve_config(config, keymap::platform(cx), Preset::Standard).unwrap();
         cx.bind_keys(map.bindings(cx));
     });
     cx.simulate_keystrokes(window, "ctrl-alt-r");
@@ -247,7 +247,7 @@ fn ruler_standard_commands_and_find_input_have_separate_ownership(cx: &mut TestA
     assert_eq!(target(&reader, cx), (0, initial.1 + 1));
     cx.simulate_keystrokes(window, "ctrl-alt-k");
     assert_eq!(target(&reader, cx), initial);
-    cx.simulate_keystrokes(window, "cmd-f");
+    cx.simulate_keystrokes(window, "secondary-f");
     cx.update_window(window, |_, frame, cx| {
         frame.input("rjk", cx);
         frame.press("ctrl-alt-r", cx);

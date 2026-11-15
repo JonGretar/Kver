@@ -99,7 +99,7 @@ fn ruler_shortcuts_leave_find_palette_and_dialog_navigation_alone(cx: &mut TestA
         assert_eq!(target(&reader, cx), initial);
         reader.read_with(cx, |reader, _| assert!(reader.ruler.enabled));
         press(cx, window, "escape");
-        press(cx, window, "cmd-shift-p");
+        press(cx, window, "secondary-shift-p");
         cx.update_window(window, |_, frame, cx| {
             frame.press("down", cx);
             frame.press("up", cx);
@@ -168,7 +168,7 @@ fn ruler_shortcuts_leave_focused_contents_and_annotations_navigation_alone(
         .unwrap();
         settle(cx, window);
         let copy = |cx: &mut TestAppContext| {
-            press(cx, window, "cmd-c");
+            press(cx, window, "secondary-c");
             cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap())
         };
         press(cx, window, "down");

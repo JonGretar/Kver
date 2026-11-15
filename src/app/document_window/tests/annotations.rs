@@ -105,7 +105,7 @@ fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut
             );
         });
         // Undo in the other window; redo and visible updates remain shared.
-        cx.update_window(second, |_, window, cx| window.press("cmd-z", cx))
+        cx.update_window(second, |_, window, cx| window.press("secondary-z", cx))
             .unwrap();
         cx.run_until_parked();
         reader.read_with(cx, |r, cx| {
@@ -120,7 +120,7 @@ fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut
             let before = original.iter().find(|a| a.id().serial() == serial).unwrap();
             assert_eq!(restored.color(), before.color());
         });
-        cx.update_window(handle, |_, window, cx| window.press("cmd-shift-z", cx))
+        cx.update_window(handle, |_, window, cx| window.press(REDO_KEY, cx))
             .unwrap();
         cx.run_until_parked();
         cx.update_window(second, |_, window, cx| {
@@ -148,7 +148,7 @@ fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut
         assert_eq!(d.reader.read(cx).page_index(), 0);
         assert!(d.reader.read(cx).is_dirty(cx));
     });
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     let saved = pdf::Document::open(&source)
@@ -207,7 +207,7 @@ fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut
     })
     .unwrap();
     cx.run_until_parked();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     let saved = pdf::Document::open(&source)
@@ -226,7 +226,7 @@ fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut
         assert!(window.try_find(row(epoch, 4)).is_none());
     })
     .unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-z", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-z", cx))
         .unwrap();
     cx.run_until_parked();
     cx.update_window(second, |_, window, cx| {
@@ -241,10 +241,10 @@ fn list_row_controls_share_history_save_and_repair_focus_across_windows(cx: &mut
         );
     })
     .unwrap();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-shift-z", cx))
+    cx.update_window(handle, |_, window, cx| window.press(REDO_KEY, cx))
         .unwrap();
     cx.run_until_parked();
-    cx.update_window(handle, |_, window, cx| window.press("cmd-s", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-s", cx))
         .unwrap();
     cx.run_until_parked();
     let saved = pdf::Document::open(&source).unwrap();
@@ -298,7 +298,7 @@ fn deleting_final_list_row_repairs_focus_and_replacement_rejects_open_color_menu
         window.input("nGjk", cx);
         window.press("down", cx);
         window.press("enter", cx);
-        window.press("cmd-s", cx);
+        window.press("secondary-s", cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -312,7 +312,7 @@ fn deleting_final_list_row_repairs_focus_and_replacement_rejects_open_color_menu
     reader.read_with(cx, |r, _| assert_eq!(r.page_index(), 0));
     // Save retains deletion history. Undo restores an unselected row without
     // moving List focus; normal arrows can select it again.
-    cx.update_window(handle, |_, window, cx| window.press("cmd-z", cx))
+    cx.update_window(handle, |_, window, cx| window.press("secondary-z", cx))
         .unwrap();
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
@@ -329,7 +329,7 @@ fn deleting_final_list_row_repairs_focus_and_replacement_rejects_open_color_menu
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find("annotation-identification").visible());
-        window.press("cmd-shift-z", cx);
+        window.press(REDO_KEY, cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -440,7 +440,7 @@ fn deleting_an_unselected_row_elsewhere_repairs_its_focused_button_without_chang
         window.render_frame(cx);
         assert!(window.try_find(row(epoch, 1)).is_none());
         assert_eq!(window.find("annotations-panel").focused(), Some(true));
-        window.press("cmd-c", cx);
+        window.press("secondary-c", cx);
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
             Some("Squiggly passage")
@@ -494,7 +494,7 @@ fn imported_annotations_browse_copy_and_identify_all_four_types(cx: &mut TestApp
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             assert!(window.find("annotation-identification").visible());
-            window.press("cmd-c", cx);
+            window.press("secondary-c", cx);
             let text = cx.read_from_clipboard().unwrap().text().unwrap();
             assert!(!text.contains("Attached comment"));
             assert_eq!(text, prefix.split(';').next().unwrap());
@@ -517,7 +517,7 @@ fn imported_annotations_browse_copy_and_identify_all_four_types(cx: &mut TestApp
         );
         assert!(window.try_find("copy-annotation").is_none());
         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("untouched".into()));
-        window.press("cmd-c", cx);
+        window.press("secondary-c", cx);
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
             Some("untouched")
@@ -626,7 +626,7 @@ fn a_growing_annotation_list_virtualizes_rows_and_navigates_offscreen_entries(
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("copy-annotation").is_none());
-        window.press("cmd-c", cx);
+        window.press("secondary-c", cx);
         assert_eq!(
             cx.read_from_clipboard().unwrap().text().as_deref(),
             Some("Highlight passage")
@@ -663,7 +663,7 @@ fn rotated_annotation_navigation_and_copy_remain_window_local(cx: &mut TestAppCo
             window.render_frame(cx);
             assert!(window.find("annotation-identification").visible());
             let before = window.find("annotation-identification").bounds();
-            window.press("cmd-c", cx);
+            window.press("secondary-c", cx);
             assert_eq!(
                 cx.read_from_clipboard().unwrap().text().as_deref(),
                 Some("Rotated passage")

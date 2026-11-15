@@ -1,5 +1,5 @@
-//! User keyboard entries are parsed independently from the rest of the settings
-//! document; preset selection and Settings UI remain their respective owners.
+//! Presets and user keyboard entries share one schema and command registry;
+//! preset selection and Settings UI remain their respective owners.
 
 use super::*;
 use toml_edit::DocumentMut;
@@ -10,11 +10,20 @@ pub fn resolve_config(
     platform: Platform,
     preset: Preset,
 ) -> Result<ResolvedKeymap, String> {
+    let entries = parse_entries(content)?;
+    let resolved = resolve_with(platform, preset, entries)
+        .map_err(|error| format!("Invalid [keyboard] keymap: {error}"))?;
+    validate_menu_shortcuts(&resolved, platform, preset)?;
+    Ok(resolved)
+}
+
+/// Both embedded presets and user overrides use this schema and registry.
+pub(super) fn parse_entries(content: &str) -> Result<Vec<Entry>, String> {
     let document: DocumentMut = content
         .parse()
         .map_err(|error| format!("Invalid settings TOML: {error}"))?;
     let Some(keyboard) = document.get("keyboard") else {
-        return resolve(platform, preset).map_err(|error| error.to_string());
+        return Ok(Vec::new());
     };
     let keyboard = keyboard.as_table().ok_or("[keyboard] must be a table")?;
     if keyboard.contains_key("unbind") {
@@ -28,7 +37,7 @@ pub fn resolve_config(
         for (index, table) in array.iter().enumerate() {
             let where_ = format!("[[keyboard.bindings]] entry {}", index + 1);
             for (name, _) in table.iter() {
-                if !matches!(name, "keys" | "context" | "command" | "platform") {
+                if !matches!(name, "keys" | "context" | "command" | "platform" | "letter") {
                     return Err(format!("{where_}: unknown field {name:?}"));
                 }
             }
@@ -56,47 +65,100 @@ pub fn resolve_config(
                     ));
                 }
             };
-            let platform = match string("platform")? {
-                None => None,
-                Some("mac") => Some(Platform::Mac),
-                Some("linux") => Some(Platform::Linux),
-                Some("windows") => Some(Platform::Windows),
-                Some(name) => {
-                    return Err(format!(
-                        "{where_}: unknown platform {name:?}; use mac, linux, or windows"
-                    ));
-                }
-            };
+            let platforms = parse_platforms(table.get("platform"), &where_)?;
             let command =
                 string("command")?.ok_or_else(|| format!("{where_}.command is required"))?;
-            let mut entry = Entry {
-                keys: keys.into(),
-                context,
-                action: Some(command_action(command).ok_or_else(|| {
+            let letter = string("letter")?
+                .map(|letter| {
+                    letter
+                        .chars()
+                        .next()
+                        .filter(|letter| letter.is_ascii_lowercase())
+                        .filter(|_| letter.len() == 1)
+                        .ok_or_else(|| format!("{where_}.letter must be one lowercase letter a-z"))
+                })
+                .transpose()?;
+            let action = command_action(command, letter).ok_or_else(|| {
+                if letter.is_some() && command_names().contains(&command) {
+                    format!("{where_}.letter is only supported for local-mark commands")
+                } else {
                     format!(
                         "{where_}: unknown command {command:?}; use one of: {}",
                         command_names().join(", ")
                     )
-                })?),
-                platform: None,
+                }
+            })?;
+            let entry = Entry {
+                keys: keys.into(),
+                context,
+                action: Some(action),
+                platforms,
             };
-            entry.platform = platform;
             // Validate even inactive platform entries so a typo isn't hidden
             // until the file is opened on another machine.
-            parse(keys, platform.unwrap_or(Platform::Mac).os()).map_err(|_| {
+            parse(keys, Platform::Mac.os()).map_err(|_| {
                 format!("{where_}: invalid keys {keys:?}; use GPUI keys such as cmd-o or g g")
             })?;
             entries.push(entry);
         }
     }
-    let resolved = resolve_with(platform, preset, entries)
-        .map_err(|error| format!("Invalid [keyboard] keymap: {error}"))?;
+    Ok(entries)
+}
+
+fn parse_platforms(
+    item: Option<&toml_edit::Item>,
+    where_: &str,
+) -> Result<Option<Vec<Platform>>, String> {
+    let Some(item) = item else { return Ok(None) };
+    let name = |name: &str| match name {
+        "mac" => Ok(Platform::Mac),
+        "linux" => Ok(Platform::Linux),
+        "windows" => Ok(Platform::Windows),
+        _ => Err(format!(
+            "{where_}.platform: unknown platform {name:?}; use mac, linux, or windows"
+        )),
+    };
+    if let Some(single) = item.as_str() {
+        return Ok(Some(vec![name(single)?]));
+    }
+    let invalid_type = || {
+        format!(
+            "{where_}.platform must be a platform string or a nonempty array of platform strings (mac, linux, windows)"
+        )
+    };
+    let array = item.as_array().ok_or_else(invalid_type)?;
+    if array.is_empty() {
+        return Err(format!(
+            "{where_}.platform must not be empty; omit it to match all platforms"
+        ));
+    }
+    array
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let value = value.as_str().ok_or_else(|| {
+                format!(
+                    "{where_}.platform[{}] must be a platform string (mac, linux, windows)",
+                    index + 1
+                )
+            })?;
+            name(value)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn validate_menu_shortcuts(
+    resolved: &ResolvedKeymap,
+    platform: Platform,
+    preset: Preset,
+) -> Result<(), String> {
     if platform == Platform::Mac {
         let defaults = resolve(platform, preset).expect("embedded keyboard defaults are valid");
         for command in super::super::menu::ACCELERATOR_COMMANDS {
-            let action = command_action(command).expect("native menu command is registered");
+            let action = command_action(command, None).expect("native menu command is registered");
             let default = menu_binding_for(&defaults, action.as_ref());
-            let Some(current) = menu_binding_for(&resolved, action.as_ref()) else {
+            let Some(current) = menu_binding_for(resolved, action.as_ref()) else {
                 continue;
             };
             // Shift alone still types into a text field. Only Command,
@@ -119,7 +181,7 @@ pub fn resolve_config(
             }
         }
     }
-    Ok(resolved)
+    Ok(())
 }
 
 pub(super) fn menu_binding_for<'a>(
@@ -142,10 +204,13 @@ pub(super) fn menu_binding_for<'a>(
 }
 
 macro_rules! commands {
-    ($($key:literal => $action:expr),* $(,)?) => {
-        fn command_action(name: &str) -> Option<Box<dyn Action>> {
-            match name {
-                $($key => Some(Box::new($action)),)*
+    ($($key:literal => $action:expr $(=> $letter_action:path)?),* $(,)?) => {
+        fn command_action(name: &str, letter: Option<char>) -> Option<Box<dyn Action>> {
+            match (name, letter) {
+                $(
+                    ($key, None) => Some(Box::new($action)),
+                    $(($key, Some(letter)) => Some(Box::new($letter_action(letter))),)?
+                )*
                 _ => None,
             }
         }
@@ -187,6 +252,8 @@ commands! {
         "toggle-sidebar" => ToggleSidebar, "activate-outline" => ActivateOutline,
         "next-page" => NextPage, "previous-page" => PreviousPage,
         "scroll-down" => ScrollDown, "scroll-up" => ScrollUp,
+        "read-down" => crate::reader::ReadDown, "read-up" => crate::reader::ReadUp,
+        "select-down" => SelectDown, "select-up" => SelectUp,
         "scroll-left" => ScrollLeft, "scroll-right" => ScrollRight,
         "scroll-screen-down" => ScrollScreenDown, "scroll-screen-up" => ScrollScreenUp,
         "scroll-half-screen-down" => ScrollHalfScreenDown,
@@ -198,6 +265,7 @@ commands! {
         "use-default-reading-mode" => UseDefaultReadingMode,
         "copy" => Copy, "next-match" => NextMatch, "previous-match" => PreviousMatch,
         "navigate-back" => NavigateBack, "navigate-forward" => NavigateForward,
-        "show-marks" => ShowMarks, "set-local-mark" => ShowSetMark,
-        "jump-local-mark" => ShowJumpMark, "delete-local-mark" => ShowDeleteMark
+        "show-marks" => ShowMarks, "set-local-mark" => ShowSetMark => SetLocalMark,
+        "jump-local-mark" => ShowJumpMark => JumpLocalMark,
+        "delete-local-mark" => ShowDeleteMark => DeleteLocalMark
 }

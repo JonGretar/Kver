@@ -49,6 +49,8 @@ jobs:
           cargo +stable install cargo-about --locked --version 0.9.3 --features cli
           if ($LASTEXITCODE -ne 0) { throw 'License tool installation failed' }
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
       - name: Test archive rejection checks
         shell: pwsh
         run: python -m unittest discover -s scripts -p test_windows_package.py

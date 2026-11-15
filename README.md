@@ -85,6 +85,10 @@ These shortcuts use the Standard preset on macOS. Choose **Vim** in
 shortcuts. See [Customize keyboard shortcuts](docs/keybindings.md) for
 configuration examples.
 
+On Linux and Windows, open the **Kver** menu in the title bar for file and
+window commands, Settings, About, and Quit. Its shortcut hints follow your
+current keyboard configuration.
+
 ### Opening from the terminal
 
 Run `kver some.pdf` to open a PDF in the most recently active reader, even

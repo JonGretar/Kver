@@ -1,6 +1,6 @@
 //! Window chrome is value-like presentation of the active document's identity.
 
-use gpui_kit::{App, SharedString, Window, div, prelude::*, px};
+use gpui_kit::{App, Entity, SharedString, Window, div, prelude::*, px};
 use gpui_kit::{
     assets::IconName,
     base::{Disableable, TestSupportExt as _},
@@ -24,6 +24,114 @@ use crate::{
         ZoomIn, ZoomMode, ZoomOut,
     },
 };
+
+pub(super) fn application_menu(reader: &Entity<ReaderView>) -> impl IntoElement + use<> {
+    let reader = reader.downgrade();
+    Button::new("application-menu")
+        .label("Kver")
+        .icon(IconName::Menu)
+        .accessibility_label("Application menu")
+        .ghost()
+        .small()
+        .dropdown_menu(move |menu, _, cx| {
+            let Some(reader) = reader.upgrade() else {
+                return menu;
+            };
+            let reader = reader.read(cx);
+            menu.item(application_menu_item(
+                "New Window",
+                crate::app::windows::NewWindow,
+                true,
+            ))
+            .item(application_menu_item("Open PDF…", OpenPdf, true))
+            .item(application_menu_item(
+                "Open Recent…",
+                crate::reading_history::ShowRecent,
+                true,
+            ))
+            .separator()
+            .item(application_menu_item(
+                "Save",
+                Save,
+                reader.save_available(cx),
+            ))
+            .item(application_menu_item(
+                "Save As…",
+                SaveAs,
+                reader.save_as_available(cx),
+            ))
+            .item(application_menu_item(
+                "Close Window",
+                crate::app::windows::CloseWindow,
+                true,
+            ))
+            .separator()
+            .item(application_menu_item(
+                "Settings…",
+                crate::settings_ui::ShowSettings,
+                true,
+            ))
+            .item(application_menu_item(
+                "About Kver",
+                crate::app::menu::AboutKver,
+                true,
+            ))
+            .separator()
+            .item(application_menu_item(
+                "Quit Kver",
+                crate::app::menu::Quit,
+                true,
+            ))
+        })
+}
+
+fn application_menu_item(
+    label: &'static str,
+    action: impl gpui_kit::Action,
+    enabled: bool,
+) -> PopupMenuItem {
+    let dispatch = action.boxed_clone();
+    // Reader-context hints must not put the popup in Reader's key context:
+    // doing that also activates bare navigation keys inside the menu. Kit's
+    // item renderer lets presentation use the effective map without changing
+    // dispatch, dismissal, keyboard navigation or focus restoration.
+    PopupMenuItem::element(move |_, cx| {
+        let shortcut = crate::app::keymap::active_map(cx)
+            .and_then(|map| {
+                map.shortcuts(&action, crate::app::keymap::Context::Reader)
+                    .last()
+                    .copied()
+            })
+            .map(|keys| crate::app::shortcut_label::format(keys, cx));
+        div()
+            .id(SharedString::from(action.name()))
+            .test_support()
+            .role(gpui_kit::Role::MenuItem)
+            .aria_label(label)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .w_full()
+            .child(label)
+            .when_some(shortcut, |row, shortcut| {
+                row.child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "application-menu-shortcut:{}",
+                            action.name()
+                        )))
+                        .test_support()
+                        .aria_label(shortcut.clone())
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(shortcut),
+                )
+            })
+    })
+    .action(dispatch)
+    .disabled(!enabled)
+}
 
 pub(super) fn reading_toolbar(
     reader: &ReaderView,
@@ -442,9 +550,11 @@ pub(super) fn sync_window_identity(reader: &ReaderView, window: &mut Window, cx:
 pub(super) fn title_bar(
     path: Option<&Path>,
     unsaved: bool,
+    application_menu: Option<gpui_kit::AnyElement>,
     window: &Window,
     cx: &App,
 ) -> impl IntoElement + use<> {
+    let has_application_menu = application_menu.is_some();
     let filename = path.map(document_name).map(SharedString::from);
     let title = filename
         .clone()
@@ -474,7 +584,7 @@ pub(super) fn title_bar(
     // At narrow widths, native controls can consume most of one edge.
     // Give the unsaved title the available lane instead of reserving that
     // occupied space a second time on the opposite edge.
-    let leading_inset = if unsaved && compact_open {
+    let leading_inset = if unsaved && compact_open && !has_application_menu {
         native_inset
     } else {
         inset
@@ -483,6 +593,8 @@ pub(super) fn title_bar(
         .relative()
         .pl_0()
         .pr_3()
+        .when(has_application_menu, |bar| bar.pl_3())
+        .children(application_menu)
         .child(div().flex_1())
         .child(
             div()

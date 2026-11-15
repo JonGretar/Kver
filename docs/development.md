@@ -97,7 +97,7 @@ Rust and the build-only inspection/license tools:
 ```powershell
 rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rust-docs
 python -m pip install -r scripts/windows/requirements.txt
-cargo +stable install cargo-about --locked --version 0.9.3
+cargo +stable install cargo-about --locked --version 0.9.3 --features cli
 ./scripts/package-windows.ps1
 ```
 

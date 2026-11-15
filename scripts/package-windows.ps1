@@ -20,7 +20,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Install scripts/windows/requirements.txt first.' }
     $aboutVersion = & cargo-about --version
     if ($LASTEXITCODE -ne 0 -or $aboutVersion -ne 'cargo-about 0.9.3') {
-        throw 'Install cargo-about 0.9.3 (cargo +stable install cargo-about --locked --version 0.9.3).'
+        throw 'Install cargo-about 0.9.3 (cargo +stable install cargo-about --locked --version 0.9.3 --features cli).'
     }
     & cargo +stable build --locked --release --target x86_64-pc-windows-msvc --bin kver
     if ($LASTEXITCODE -ne 0) { throw 'Native MSVC release build failed.' }

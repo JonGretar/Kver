@@ -11,6 +11,7 @@ mod find;
 mod jumplist;
 mod keyboard;
 mod links;
+mod opening;
 mod palette;
 mod recent_history;
 mod recent_picker;

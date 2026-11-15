@@ -3,8 +3,10 @@
 //! Features own actions and behavior. Startup installs the application keymap
 //! before native menus snapshot its shortcuts.
 
+pub mod cli;
 pub mod commands;
 pub mod document_window;
+mod instance;
 pub mod keymap;
 pub mod menu;
 mod onboarding;
@@ -19,15 +21,21 @@ use gpui_kit::{App, AppContext as _, platform};
 
 use crate::{assets::ReaderAssets, reading_history, settings::AppPaths, settings_ui};
 
-/// Launch Kver with an optional initial PDF.
-pub fn run(path: Option<PathBuf>) {
+/// Only the elected primary initializes GPUI; requests queue during onboarding.
+fn run_primary(request: windows::OpenRequest, primary: instance::Primary) -> Result<(), String> {
     // Register before launching so Finder's initial open event is not lost.
     let (requests, incoming) = async_channel::unbounded();
+    let _server = primary
+        .start(requests.clone())
+        .map_err(|error| format!("Cannot listen for CLI requests: {error}"))?;
     let application = platform::application().with_assets(ReaderAssets);
     application.on_open_urls(move |urls| {
         for url in urls {
             if let Some(path) = local_path(&url) {
-                let _ = requests.try_send(path);
+                let _ = requests.try_send(windows::OpenRequest {
+                    path: Some(path),
+                    mode: windows::OpenMode::Default,
+                });
             }
         }
     });
@@ -65,15 +73,23 @@ pub fn run(path: Option<PathBuf>) {
                 (Err(error), _) => startup_error = Some(error),
                 _ => {}
             }
-            let initial = cx.update(|cx| start_reader(cx, paths, path, startup_error));
+            let initial = cx.update(|cx| start_reader(cx, paths, request.path, startup_error));
             let Some(initial) = initial else { return };
-            while let Ok(path) = incoming.recv().await {
-                cx.update(|cx| windows::open_requested_path(cx, &initial, path));
+            // Requests received during startup must see the configured window
+            // policy, not the temporary defaults used while settings load.
+            while !cx.update(|cx| settings_ui::state(cx).read(cx).ready()) {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(10))
+                    .await;
+            }
+            while let Ok(request) = incoming.recv().await {
+                cx.update(|cx| windows::open_request(cx, &initial, request));
             }
         })
         .detach();
         cx.activate(true);
     });
+    Ok(())
 }
 
 fn start_reader(

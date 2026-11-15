@@ -10,9 +10,33 @@ use gpui_kit::{
 };
 
 use super::document_window::DocumentWindow;
-use crate::settings_ui;
+use crate::{settings::OpenFiles, settings_ui};
 
 gpui::actions!(kver, [CloseWindow, NewWindow, NextWindow, PreviousWindow]);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum OpenMode {
+    #[default]
+    Default,
+    New,
+    Reuse,
+}
+
+impl OpenMode {
+    pub(crate) fn resolve(self, cx: &mut App) -> OpenFiles {
+        match self {
+            Self::Default => settings_ui::state(cx).read(cx).open_files(),
+            Self::New => OpenFiles::NewWindow,
+            Self::Reuse => OpenFiles::Reuse,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct OpenRequest {
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) mode: OpenMode,
+}
 
 #[derive(Default)]
 struct DocumentWindows(Vec<(AnyWindowHandle, WeakEntity<DocumentWindow>)>);
@@ -29,6 +53,59 @@ pub(crate) fn register_document(
     let windows = &mut cx.global_mut::<DocumentWindows>().0;
     windows.retain(|(_, document)| document.upgrade().is_some());
     windows.push((handle, document));
+}
+
+pub(crate) fn note_activation(handle: AnyWindowHandle, cx: &mut App) {
+    if !cx.has_global::<DocumentWindows>() {
+        return;
+    }
+    let windows = cx.global_mut::<DocumentWindows>();
+    if let Some(ix) = windows.0.iter().position(|(window, _)| *window == handle) {
+        let document = windows.0.remove(ix);
+        windows.0.push(document);
+    }
+}
+
+fn most_recent(cx: &App) -> Option<(AnyWindowHandle, Entity<DocumentWindow>)> {
+    cx.try_global::<DocumentWindows>()?
+        .0
+        .iter()
+        .rev()
+        .filter(|(handle, _)| cx.windows().contains(handle))
+        .find_map(|(handle, document)| document.upgrade().map(|document| (*handle, document)))
+}
+
+pub(crate) fn open_request(
+    cx: &mut App,
+    initial: &WeakEntity<DocumentWindow>,
+    request: OpenRequest,
+) {
+    let reuse = request.mode.resolve(cx) == OpenFiles::Reuse;
+    if let Some(path) = request.path {
+        if reuse && let Some((handle, document)) = most_recent(cx) {
+            if let Err(error) = cx.update_window(handle, |_, window, cx| {
+                window.activate_window();
+                document.update(cx, |document, cx| document.open_path(path, cx));
+            }) {
+                eprintln!("Cannot reuse window: {error}");
+            }
+        } else if request.mode == OpenMode::New {
+            if let Err(error) = open(cx, Some(path)) {
+                eprintln!("Cannot open window: {error}");
+            }
+        } else {
+            open_in_new_window(cx, initial, path);
+        }
+    } else if request.mode != OpenMode::New
+        && let Some((handle, _)) = most_recent(cx)
+    {
+        if let Err(error) = cx.update_window(handle, |_, window, _| window.activate_window()) {
+            eprintln!("Cannot activate window: {error}");
+        }
+    } else if let Err(error) = open(cx, None) {
+        eprintln!("Cannot open window: {error}");
+    }
+    cx.activate(true);
 }
 
 pub(crate) fn request_quit(cx: &mut App) {
@@ -83,6 +160,17 @@ fn should_quit(remaining_windows: usize, quit_when_last_window_closes: bool) -> 
 
 /// Platform file-open requests can arrive after the launch window has closed.
 pub fn open_requested_path(cx: &mut App, initial: &WeakEntity<DocumentWindow>, path: PathBuf) {
+    open_request(
+        cx,
+        initial,
+        OpenRequest {
+            path: Some(path),
+            mode: OpenMode::Default,
+        },
+    );
+}
+
+fn open_in_new_window(cx: &mut App, initial: &WeakEntity<DocumentWindow>, path: PathBuf) {
     if let Some(document) = initial.upgrade()
         && document.read(cx).reader().read(cx).path().is_none()
     {
@@ -158,6 +246,152 @@ mod tests {
     use super::*;
     use gpui_kit::TestAppContext;
 
+    #[gpui_kit::test]
+    fn cli_reuses_most_recent_reader_even_when_an_auxiliary_window_is_active(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(gpui_kit::init);
+        let first = cx.update(|cx| open(cx, Some("examples/readme-sample.pdf".into())).unwrap());
+        let first_handle = cx.update(|cx| cx.windows()[0]);
+        let second = cx.update(|cx| open(cx, Some("examples/field-guide.pdf".into())).unwrap());
+        cx.run_until_parked();
+        cx.update_window(first_handle, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| {
+            crate::settings_ui::install_with_paths(cx, None);
+            cx.dispatch_action(&crate::settings_ui::ShowSettings);
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_ne!(cx.active_window(), Some(first_handle));
+            open_request(
+                cx,
+                &first.downgrade(),
+                OpenRequest {
+                    path: Some("examples/selection-sample.pdf".into()),
+                    mode: OpenMode::Reuse,
+                },
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_eq!(cx.windows().len(), 3);
+            assert_eq!(
+                first.read(cx).reader().read(cx).path(),
+                Some(PathBuf::from("examples/selection-sample.pdf").as_path())
+            );
+            assert_eq!(
+                second.read(cx).reader().read(cx).path(),
+                Some(PathBuf::from("examples/field-guide.pdf").as_path())
+            );
+        });
+    }
+
+    #[gpui_kit::test]
+    fn external_opens_follow_new_window_preference_and_allow_explicit_reuse(
+        cx: &mut TestAppContext,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let paths = crate::settings::AppPaths::for_locations(
+            root.path().join("config.toml"),
+            root.path().join("data"),
+        );
+        crate::settings::save(
+            paths.config(),
+            crate::settings::SettingsChange::OpenFiles(OpenFiles::NewWindow),
+        )
+        .unwrap();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::settings_ui::install_with_paths(cx, Some(paths));
+        });
+        cx.run_until_parked();
+        let initial = cx.update(|cx| open(cx, Some("examples/readme-sample.pdf".into())).unwrap());
+        cx.update(|cx| {
+            open_request(
+                cx,
+                &initial.downgrade(),
+                OpenRequest {
+                    path: Some("examples/field-guide.pdf".into()),
+                    mode: OpenMode::Default,
+                },
+            )
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_eq!(cx.windows().len(), 2);
+            assert_eq!(
+                initial.read(cx).reader().read(cx).path(),
+                Some(PathBuf::from("examples/readme-sample.pdf").as_path())
+            );
+            open_request(
+                cx,
+                &initial.downgrade(),
+                OpenRequest {
+                    path: Some("examples/readme-sample.pdf".into()),
+                    mode: OpenMode::New,
+                },
+            );
+            assert_eq!(cx.windows().len(), 3);
+            open_request(
+                cx,
+                &initial.downgrade(),
+                OpenRequest {
+                    path: Some("examples/selection-sample.pdf".into()),
+                    mode: OpenMode::Reuse,
+                },
+            );
+            assert_eq!(cx.windows().len(), 3);
+            assert_eq!(
+                most_recent(cx).unwrap().1.read(cx).reader().read(cx).path(),
+                Some(PathBuf::from("examples/selection-sample.pdf").as_path())
+            );
+        });
+    }
+
+    #[gpui_kit::test]
+    fn cli_no_path_activates_reader_and_reuse_recovers_after_it_closes(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let initial = cx.update(|cx| open(cx, None).unwrap().downgrade());
+        cx.update(|cx| {
+            open_request(
+                cx,
+                &initial,
+                OpenRequest {
+                    path: None,
+                    mode: OpenMode::Default,
+                },
+            );
+            assert_eq!(cx.windows().len(), 1);
+            open_request(
+                cx,
+                &initial,
+                OpenRequest {
+                    path: None,
+                    mode: OpenMode::New,
+                },
+            );
+            assert_eq!(cx.windows().len(), 2);
+            for handle in cx.windows() {
+                cx.update_window(handle, |_, window, _| window.remove_window())
+                    .unwrap();
+            }
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            open_request(
+                cx,
+                &initial,
+                OpenRequest {
+                    path: Some("examples/readme-sample.pdf".into()),
+                    mode: OpenMode::Reuse,
+                },
+            );
+            assert_eq!(cx.windows().len(), 1);
+        });
+    }
+
     #[test]
     fn last_close_policy_distinguishes_multiple_windows_and_platform_reopen() {
         assert!(!should_quit(2, true));
@@ -181,7 +415,7 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn platform_opens_reuse_only_the_empty_initial_document_window(cx: &mut TestAppContext) {
+    fn platform_opens_reuse_the_most_recent_reader_by_default(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let initial = cx.update(|cx| open(cx, None).unwrap());
         let reader = initial.read_with(cx, |document, _| document.reader().clone());
@@ -199,10 +433,13 @@ mod tests {
             );
         });
         cx.run_until_parked();
-        assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+        assert_eq!(cx.update(|cx| cx.windows().len()), 1);
         reader.read_with(cx, |reader, _| {
-            assert_eq!(reader.path(), Some(first.as_path()));
-            assert_eq!(reader.page_count(), Some(100));
+            assert_eq!(
+                reader.path(),
+                Some(PathBuf::from("examples/missing.pdf").as_path())
+            );
+            assert_eq!(reader.page_count(), None);
         });
     }
 

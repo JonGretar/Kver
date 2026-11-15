@@ -7,7 +7,7 @@ license = "MIT"
 
 [features]
 default = ["gui"]
-gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:url", "dep:objc2", "dep:objc2-foundation"]
+gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:url", "dep:interprocess", "dep:objc2", "dep:objc2-foundation"]
 screenshot = ["gui", "gpui-kit/test-support"]
 
 [[bin]]
@@ -40,6 +40,7 @@ image = { version = "0.25", default-features = false, optional = true }
 rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }
 url = { version = "2", optional = true }
+interprocess = { version = "2.4.8", default-features = false, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Native Sparkle/quit bridges; these versions are already used by the GUI stack.

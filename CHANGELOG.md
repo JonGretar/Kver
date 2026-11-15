@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Linux and Windows application menu:** access window, file, Settings, About
+  and Quit commands from the title bar, with current keyboard shortcuts and
+  the same unsaved-work protection as keyboard commands.
 - **Experimental Windows archive:** a native x86-64 MSVC ZIP build with the
   Kver icon, version identity, checksums and manual-update/runtime guidance,
   available as a non-publishing CI artifact rather than a supported release.

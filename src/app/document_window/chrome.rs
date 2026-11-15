@@ -1,6 +1,6 @@
 //! Window chrome is value-like presentation of the active document's identity.
 
-use gpui_kit::{App, SharedString, Window, div, prelude::*, px};
+use gpui_kit::{App, Entity, SharedString, Window, div, prelude::*, px};
 use gpui_kit::{
     assets::IconName,
     base::{Disableable, TestSupportExt as _},
@@ -24,6 +24,118 @@ use crate::{
         ZoomIn, ZoomMode, ZoomOut,
     },
 };
+
+pub(super) fn application_menu(
+    reader: &Entity<ReaderView>,
+    compact: bool,
+) -> impl IntoElement + use<> {
+    let reader = reader.downgrade();
+    Button::new("application-menu")
+        .when(!compact, |button| button.label("Kver"))
+        .icon(IconName::Menu)
+        .accessibility_label("Application menu")
+        .when(compact, |button| button.tooltip("Application menu"))
+        .ghost()
+        .small()
+        .dropdown_menu(move |menu, _, cx| {
+            let Some(reader) = reader.upgrade() else {
+                return menu;
+            };
+            let reader = reader.read(cx);
+            menu.item(application_menu_item(
+                "New Window",
+                crate::app::windows::NewWindow,
+                true,
+            ))
+            .item(application_menu_item("Open PDF…", OpenPdf, true))
+            .item(application_menu_item(
+                "Open Recent…",
+                crate::reading_history::ShowRecent,
+                true,
+            ))
+            .separator()
+            .item(application_menu_item(
+                "Save",
+                Save,
+                reader.save_available(cx),
+            ))
+            .item(application_menu_item(
+                "Save As…",
+                SaveAs,
+                reader.save_as_available(cx),
+            ))
+            .item(application_menu_item(
+                "Close Window",
+                crate::app::windows::CloseWindow,
+                true,
+            ))
+            .separator()
+            .item(application_menu_item(
+                "Settings…",
+                crate::settings_ui::ShowSettings,
+                true,
+            ))
+            .item(application_menu_item(
+                "About Kver",
+                crate::app::menu::AboutKver,
+                true,
+            ))
+            .separator()
+            .item(application_menu_item(
+                "Quit Kver",
+                crate::app::menu::Quit,
+                true,
+            ))
+        })
+}
+
+fn application_menu_item(
+    label: &'static str,
+    action: impl gpui_kit::Action,
+    enabled: bool,
+) -> PopupMenuItem {
+    let dispatch = action.boxed_clone();
+    // Reader-context hints must not put the popup in Reader's key context:
+    // doing that also activates bare navigation keys inside the menu. Kit's
+    // item renderer lets presentation use the effective map without changing
+    // dispatch, dismissal, keyboard navigation or focus restoration.
+    PopupMenuItem::element(move |_, cx| {
+        let shortcut = crate::app::keymap::active_map(cx)
+            .and_then(|map| {
+                map.shortcuts(&action, crate::app::keymap::Context::Reader)
+                    .last()
+                    .copied()
+            })
+            .map(|keys| crate::app::shortcut_label::format(keys, cx));
+        div()
+            .id(SharedString::from(action.name()))
+            .test_support()
+            .role(gpui_kit::Role::MenuItem)
+            .aria_label(label)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .w_full()
+            .child(label)
+            .when_some(shortcut, |row, shortcut| {
+                row.child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "application-menu-shortcut:{}",
+                            action.name()
+                        )))
+                        .test_support()
+                        .aria_label(shortcut.clone())
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(shortcut),
+                )
+            })
+    })
+    .action(dispatch)
+    .disabled(!enabled)
+}
 
 pub(super) fn reading_toolbar(
     reader: &ReaderView,
@@ -442,20 +554,19 @@ pub(super) fn sync_window_identity(reader: &ReaderView, window: &mut Window, cx:
 pub(super) fn title_bar(
     path: Option<&Path>,
     unsaved: bool,
+    application_menu: Option<gpui_kit::AnyElement>,
     window: &Window,
     cx: &App,
 ) -> impl IntoElement + use<> {
+    let has_application_menu = application_menu.is_some();
     let filename = path.map(document_name).map(SharedString::from);
     let title = filename
         .clone()
         .unwrap_or_else(|| "A quiet place to read".into());
     // Kit's native title-bar inset is physical, not part of interface zoom.
     // Own it here so the title's coordinate space starts at the window edge.
-    let native_inset = if cfg!(target_os = "macos") {
-        px(80.)
-    } else {
-        px(12.)
-    };
+    let macos = crate::app::keymap::platform(cx) == crate::app::keymap::Platform::Mac;
+    let native_inset = if macos { px(80.) } else { px(12.) };
     let rem = window.rem_size();
     let width = window.viewport_size().width;
     let compact_open = width < rem * 40.;
@@ -465,7 +576,7 @@ pub(super) fn title_bar(
         "— Unsaved changes"
     };
     // Leave room for all three Kit window controls on platforms that draw them.
-    let window_controls = if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
+    let window_controls = if macos || cfg!(target_family = "wasm") {
         px(0.)
     } else {
         TITLE_BAR_HEIGHT * 3.
@@ -476,6 +587,11 @@ pub(super) fn title_bar(
     // occupied space a second time on the opposite edge.
     let leading_inset = if unsaved && compact_open {
         native_inset
+            + if has_application_menu {
+                rem * 3.
+            } else {
+                px(0.)
+            }
     } else {
         inset
     };
@@ -483,6 +599,8 @@ pub(super) fn title_bar(
         .relative()
         .pl_0()
         .pr_3()
+        // Keep menu padding out of the absolute title's coordinate space.
+        .children(application_menu.map(|menu| div().pl_3().child(menu)))
         .child(div().flex_1())
         .child(
             div()

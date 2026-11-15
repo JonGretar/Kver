@@ -836,7 +836,13 @@ impl Render for DocumentWindow {
         let title = chrome::title_bar(
             reader.path(),
             reader.is_dirty(cx),
-            in_window_menu.then(|| chrome::application_menu(&self.reader).into_any_element()),
+            in_window_menu.then(|| {
+                chrome::application_menu(
+                    &self.reader,
+                    window.viewport_size().width < window.rem_size() * 40.,
+                )
+                .into_any_element()
+            }),
             window,
             cx,
         );

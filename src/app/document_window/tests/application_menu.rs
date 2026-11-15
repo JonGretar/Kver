@@ -287,6 +287,49 @@ fn windows_menu_preserves_find_focus_and_contains_incidental_input(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn menu_title_geometry_preserves_center_and_unsaved_space_at_interface_scales(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{component::theme::Theme, px, size};
+    setup_menu(cx);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory
+        .path()
+        .join(format!("{}.pdf", "long-filename-".repeat(12)));
+    std::fs::copy("examples/selection-sample.pdf", &path).unwrap();
+    let (handle, document) = open(cx, Some(path));
+    cx.run_until_parked();
+    for dirty in [false, true] {
+        if dirty {
+            super::saving::highlight(cx, handle, &document);
+        }
+        for font_size in [12., 16., 20.] {
+            cx.update(|cx| Theme::update(cx, |theme| theme.font_size = px(font_size)));
+            for width in [360., 600., 920., 1200.] {
+                cx.simulate_window_resize(handle, size(px(width), px(800.)));
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    let menu = window.find("application-menu").bounds();
+                    let name = window.find("document-name").bounds();
+                    let title = window.find("document-title").bounds();
+                    let open = window.find("open-pdf").bounds();
+                    assert!(name.size.width > px(0.), "width={width}, font={font_size}, dirty={dirty}, name={name:?}, title={title:?}");
+                    assert!(menu.right() < name.left(), "menu={menu:?}, name={name:?}");
+                    if dirty {
+                        let status = window.find("document-unsaved").bounds();
+                        assert!(status.left() > name.right());
+                        assert!(status.right() < open.left());
+                    } else {
+                        assert!((name.center().x - px(width / 2.)).abs() <= px(0.5), "width={width}, font={font_size}, name={name:?}, title={title:?}");
+                    }
+                    assert!(name.right() < open.left());
+                }).unwrap();
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn mac_keeps_only_the_native_application_menu(cx: &mut TestAppContext) {
     let mut info = cx.update(|cx| cx.platform_info());
     info.os = gpui_kit::OperatingSystem::Mac;

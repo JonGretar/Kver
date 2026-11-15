@@ -25,12 +25,16 @@ use crate::{
     },
 };
 
-pub(super) fn application_menu(reader: &Entity<ReaderView>) -> impl IntoElement + use<> {
+pub(super) fn application_menu(
+    reader: &Entity<ReaderView>,
+    compact: bool,
+) -> impl IntoElement + use<> {
     let reader = reader.downgrade();
     Button::new("application-menu")
-        .label("Kver")
+        .when(!compact, |button| button.label("Kver"))
         .icon(IconName::Menu)
         .accessibility_label("Application menu")
+        .when(compact, |button| button.tooltip("Application menu"))
         .ghost()
         .small()
         .dropdown_menu(move |menu, _, cx| {
@@ -561,11 +565,8 @@ pub(super) fn title_bar(
         .unwrap_or_else(|| "A quiet place to read".into());
     // Kit's native title-bar inset is physical, not part of interface zoom.
     // Own it here so the title's coordinate space starts at the window edge.
-    let native_inset = if cfg!(target_os = "macos") {
-        px(80.)
-    } else {
-        px(12.)
-    };
+    let macos = crate::app::keymap::platform(cx) == crate::app::keymap::Platform::Mac;
+    let native_inset = if macos { px(80.) } else { px(12.) };
     let rem = window.rem_size();
     let width = window.viewport_size().width;
     let compact_open = width < rem * 40.;
@@ -575,7 +576,7 @@ pub(super) fn title_bar(
         "— Unsaved changes"
     };
     // Leave room for all three Kit window controls on platforms that draw them.
-    let window_controls = if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
+    let window_controls = if macos || cfg!(target_family = "wasm") {
         px(0.)
     } else {
         TITLE_BAR_HEIGHT * 3.
@@ -584,8 +585,13 @@ pub(super) fn title_bar(
     // At narrow widths, native controls can consume most of one edge.
     // Give the unsaved title the available lane instead of reserving that
     // occupied space a second time on the opposite edge.
-    let leading_inset = if unsaved && compact_open && !has_application_menu {
+    let leading_inset = if unsaved && compact_open {
         native_inset
+            + if has_application_menu {
+                rem * 3.
+            } else {
+                px(0.)
+            }
     } else {
         inset
     };
@@ -593,8 +599,8 @@ pub(super) fn title_bar(
         .relative()
         .pl_0()
         .pr_3()
-        .when(has_application_menu, |bar| bar.pl_3())
-        .children(application_menu)
+        // Keep menu padding out of the absolute title's coordinate space.
+        .children(application_menu.map(|menu| div().pl_3().child(menu)))
         .child(div().flex_1())
         .child(
             div()

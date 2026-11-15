@@ -19,7 +19,7 @@ TARGET = "x86_64-pc-windows-msvc"
 # development runner happens to have installed. Unknown imports fail closed.
 SYSTEM_DLLS = set("""
 advapi32.dll avrt.dll bcrypt.dll bcryptprimitives.dll cabinet.dll cfgmgr32.dll
-comctl32.dll comdlg32.dll crypt32.dll cryptbase.dll cryptnet.dll cryptui.dll
+combase.dll comctl32.dll comdlg32.dll crypt32.dll cryptbase.dll cryptnet.dll cryptui.dll
 d2d1.dll d3d11.dll d3d12.dll d3dcompiler_47.dll dcomp.dll dbghelp.dll
 dnsapi.dll dwmapi.dll dwrite.dll dxgi.dll dxguid.dll gdi32.dll hid.dll
 imm32.dll iphlpapi.dll kernel32.dll kernelbase.dll msimg32.dll
@@ -130,12 +130,14 @@ def inspect_pe(executable, version):
         })
         require(imports, "No PE imports found")
         crt = []
+        unknown = []
         for dll in imports:
             if CRT_DLL.fullmatch(dll):
                 crt.append(dll)
-            else:
-                require(dll in SYSTEM_DLLS or re.fullmatch(r"(?:api|ext)-ms-[a-z0-9-]+\.dll", dll),
-                        f"Unreviewed DLL import: {dll}; determine deployment/license obligations")
+            elif dll not in SYSTEM_DLLS and not re.fullmatch(r"(?:api|ext)-ms-[a-z0-9-]+\.dll", dll):
+                unknown.append(dll)
+        require(not unknown, f"Unreviewed DLL imports: {unknown}; determine deployment/license obligations. "
+                f"Full normal/delay import inventory: {imports}")
         return {
             "architecture": "AMD64/PE32+",
             "identity": strings,

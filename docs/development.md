@@ -87,6 +87,35 @@ The builder uses Corgi when available and falls back to Cargo.
 Maintainers: see [macOS packaging and releases](releasing.md) for candidate
 archives, update signing, release checks, and native quit upgrade checks.
 
+## Build an experimental Linux archive
+
+Use native x86-64 Ubuntu 24.04 and Python 3.11 or newer. Install the same
+Fontconfig/xkbcommon build libraries as Linux CI, plus dynamic loaders and
+ELF inspection tools:
+
+```sh
+sudo apt-get install --no-install-recommends \
+  libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+  libvulkan1 mesa-vulkan-drivers libwayland-client0 libegl1 binutils
+rustup toolchain install stable --profile minimal --component rust-docs
+cargo +stable install cargo-about --locked --version 0.9.3 --features cli
+sh scripts/package-linux.sh
+```
+
+The entrypoint resolves the checkout from its script path, builds the locked
+release binary for `x86_64-unknown-linux-gnu`, generates dependency/runtime
+license notices, and verifies the actual tarball after clean extraction.
+Output is under `target/x86_64-unknown-linux-gnu/release` (or
+`CARGO_TARGET_DIR`). `readelf`/`ldd` inspect linked dependencies; explicit loader
+probes cover Wayland, Vulkan and EGL. Missing required contents, notices or
+loaders fail packaging rather than silently omitting them.
+
+The **Experimental Linux archive** workflow uses `ubuntu-24.04` and uploads
+the versioned tarball/checksum without publishing a release. It runs on
+packaging-related PR changes or manual dispatch. See [Linux tester
+guidance](linux.md), also shipped inside the archive, for runtime limits,
+manual updates and the separate native desktop checklist.
+
 ## Build an experimental Windows archive
 
 Use native x86-64 Windows, PowerShell 7, Visual Studio's **Desktop development

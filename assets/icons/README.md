@@ -19,28 +19,11 @@ executable is not an app bundle.
 
 ## Windows
 
-Add to Cargo.toml:
-
-```toml
-[build-dependencies]
-winresource = "0.1"
-```
-
-Merge into build.rs (preserve any existing build steps):
-
-```rust
-fn main() {
-    println!("cargo:rerun-if-changed=assets/icons/kver.ico");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        winresource::WindowsResource::new()
-            .set_icon("assets/icons/kver.ico")
-            .compile()
-            .expect("could not compile Kver Windows icon resource");
-    }
-}
-```
-
-Requires the Windows resource compiler supplied by the Windows SDK or the appropriate MinGW toolchain. Embeds the executable icon; window/taskbar integration can additionally depend on your GPUI version and application identity configuration.
+The root `build.rs` uses the MSVC Windows SDK resource compiler to embed
+`kver.ico` and executable version identity, without replacing GPUI's manifest.
+See the [Windows archive build](../../docs/development.md#build-an-experimental-windows-archive)
+for prerequisites and the packaging entrypoint. Native window/taskbar behavior
+needs separate Windows validation.
 
 ## Linux
 

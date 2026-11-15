@@ -86,3 +86,35 @@ it; binaries are architecture-specific.
 The builder uses Corgi when available and falls back to Cargo.
 Maintainers: see [macOS packaging and releases](releasing.md) for candidate
 archives, update signing, release checks, and native quit upgrade checks.
+
+## Build an experimental Windows archive
+
+Use native x86-64 Windows, PowerShell 7, Visual Studio's **Desktop development
+with C++** tools, and the Windows SDK (including `rc.exe` and `fxc.exe`).
+Run from an **x64 Native Tools** developer environment. Install stable MSVC
+Rust and the build-only inspection/license tools:
+
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rust-docs
+python -m pip install -r scripts/windows/requirements.txt
+cargo +stable install cargo-about --locked --version 0.9.3
+./scripts/package-windows.ps1
+```
+
+Python 3.11 or newer is required. The entrypoint resolves the repository from
+its script path, builds with `cargo +stable build --locked --release --target
+x86_64-pc-windows-msvc --bin kver`, generates dependency license notices, and
+packages under `target/x86_64-pc-windows-msvc/release` (or `CARGO_TARGET_DIR`).
+`pefile` inspects the produced PE resources/imports; `cargo-about` collects
+license texts from the locked Windows dependency graph. Neither ships as an
+application dependency. Rust documentation supplies the Rust runtime notices.
+Unknown imports or unsatisfied licenses fail the job rather than silently
+shipping incomplete requirements.
+
+The **Experimental Windows archive** workflow runs the same entrypoint on
+`windows-2025` and uploads a versioned experimental ZIP and checksum, without
+publishing a release. It also supports manual dispatch. The ZIP is extracted
+into a fresh temporary directory and rechecked, including the landed CLI's
+`--version` from an unrelated working directory. No native GUI acceptance is
+implied. See [Windows tester guidance](windows.md), also included in the ZIP,
+for extraction, runtime/security requirements, manual updates and native checks.

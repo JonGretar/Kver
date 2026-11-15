@@ -1,0 +1,2 @@
+# Build/package inspection only; not shipped or used by Kver.
+pefile==2024.8.26

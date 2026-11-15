@@ -238,7 +238,7 @@ fn ruler_standard_commands_and_find_input_have_separate_ownership(cx: &mut TestA
             context = "reader"
             command = "previous-ruler-line"
         "#;
-        let map = keymap::resolve_config(config, keymap::Platform::Mac, Preset::Standard).unwrap();
+        let map = keymap::resolve_config(config, keymap::platform(cx), Preset::Standard).unwrap();
         cx.bind_keys(map.bindings(cx));
     });
     cx.simulate_keystrokes(window, "ctrl-alt-r");

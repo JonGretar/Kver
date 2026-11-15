@@ -18,7 +18,7 @@ fn mark_letter_overrides_reader_page_shortcut(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         let map = crate::app::keymap::resolve(
-            crate::app::keymap::Platform::Mac,
+            crate::app::keymap::platform(cx),
             crate::app::keymap::Preset::Vim,
         )
         .unwrap();

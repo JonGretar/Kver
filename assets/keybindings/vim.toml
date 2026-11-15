@@ -1,0 +1,724 @@
+# Complete Vim preset. Entries are ordered for shortcut/menu presentation.
+# No bindings are inherited from Standard.
+
+[[keyboard.bindings]]
+keys = "cmd-o"
+command = "open-pdf"
+[[keyboard.bindings]]
+keys = "cmd-shift-o"
+command = "show-recent"
+[[keyboard.bindings]]
+keys = "cmd-n"
+command = "new-window"
+[[keyboard.bindings]]
+keys = "cmd-shift-p"
+command = "command-palette"
+[[keyboard.bindings]]
+keys = "cmd-shift-m"
+command = "show-marks"
+[[keyboard.bindings]]
+keys = "cmd-z"
+context = "reader"
+command = "undo-annotation"
+[[keyboard.bindings]]
+keys = "cmd-shift-z"
+context = "reader"
+command = "redo-annotation"
+[[keyboard.bindings]]
+keys = "cmd-z"
+context = "annotations"
+command = "undo-annotation"
+[[keyboard.bindings]]
+keys = "cmd-shift-z"
+context = "annotations"
+command = "redo-annotation"
+[[keyboard.bindings]]
+keys = "backspace"
+context = "reader"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "delete"
+context = "reader"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "backspace"
+context = "annotations"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "delete"
+context = "annotations"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "cmd-shift-s"
+command = "save-as"
+[[keyboard.bindings]]
+keys = "cmd-s"
+command = "save"
+[[keyboard.bindings]]
+keys = "escape"
+context = "sidebar"
+command = "toggle-sidebar"
+[[keyboard.bindings]]
+keys = "enter"
+context = "contents"
+command = "activate-outline"
+[[keyboard.bindings]]
+keys = "cmd-c"
+context = "annotations"
+command = "copy"
+
+# Keep modified page shortcuts ahead of reader aliases: native menus snapshot
+# their first binding, and must not intercept typing keys in text controls.
+[[keyboard.bindings]]
+keys = "cmd-alt-right"
+context = "reader"
+command = "next-page"
+[[keyboard.bindings]]
+keys = "cmd-alt-left"
+context = "reader"
+command = "previous-page"
+[[keyboard.bindings]]
+keys = "cmd-c"
+context = "reader"
+command = "copy"
+[[keyboard.bindings]]
+keys = "down"
+context = "reader"
+command = "read-down"
+[[keyboard.bindings]]
+keys = "up"
+context = "reader"
+command = "read-up"
+[[keyboard.bindings]]
+keys = "ctrl-o"
+context = "reader"
+command = "navigate-back"
+[[keyboard.bindings]]
+keys = "ctrl-i"
+context = "reader"
+command = "navigate-forward"
+[[keyboard.bindings]]
+keys = "ctrl-o"
+context = "contents"
+command = "navigate-back"
+[[keyboard.bindings]]
+keys = "ctrl-i"
+context = "contents"
+command = "navigate-forward"
+[[keyboard.bindings]]
+keys = "cmd-w"
+command = "close-window"
+[[keyboard.bindings]]
+keys = "cmd-,"
+command = "show-settings"
+[[keyboard.bindings]]
+keys = "escape"
+context = "settings"
+command = "close-settings"
+[[keyboard.bindings]]
+keys = "escape"
+context = "about"
+command = "close-about"
+
+[[keyboard.bindings]]
+keys = "cmd-`"
+command = "next-window"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "cmd-shift-`"
+command = "previous-window"
+platform = "mac"
+[[keyboard.bindings]]
+keys = "ctrl-f6"
+command = "next-window"
+platform = ["linux", "windows"]
+[[keyboard.bindings]]
+keys = "ctrl-shift-f6"
+command = "previous-window"
+platform = ["linux", "windows"]
+[[keyboard.bindings]]
+keys = "cmd-q"
+command = "quit"
+platform = ["mac", "linux"]
+
+# Bare reader keys stay in Reader, never in text controls.
+[[keyboard.bindings]]
+keys = "a a"
+context = "reader"
+command = "apply-markup"
+[[keyboard.bindings]]
+keys = "a h"
+context = "reader"
+command = "highlight"
+[[keyboard.bindings]]
+keys = "a u"
+context = "reader"
+command = "underline"
+[[keyboard.bindings]]
+keys = "a s"
+context = "reader"
+command = "strikethrough"
+[[keyboard.bindings]]
+keys = "a w"
+context = "reader"
+command = "squiggly-underline"
+[[keyboard.bindings]]
+keys = "g a"
+context = "reader"
+command = "show-annotations"
+[[keyboard.bindings]]
+keys = "g c"
+context = "reader"
+command = "show-contents"
+[[keyboard.bindings]]
+keys = "j"
+context = "contents"
+command = "select-down"
+[[keyboard.bindings]]
+keys = "k"
+context = "contents"
+command = "select-up"
+[[keyboard.bindings]]
+keys = "j"
+context = "annotations"
+command = "select-down"
+[[keyboard.bindings]]
+keys = "k"
+context = "annotations"
+command = "select-up"
+[[keyboard.bindings]]
+keys = "u"
+context = "reader"
+command = "undo-annotation"
+[[keyboard.bindings]]
+keys = "ctrl-r"
+context = "reader"
+command = "redo-annotation"
+[[keyboard.bindings]]
+keys = "x"
+context = "reader"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "u"
+context = "annotations"
+command = "undo-annotation"
+[[keyboard.bindings]]
+keys = "ctrl-r"
+context = "annotations"
+command = "redo-annotation"
+[[keyboard.bindings]]
+keys = "x"
+context = "annotations"
+command = "delete-highlight"
+[[keyboard.bindings]]
+keys = "right"
+context = "reader"
+command = "scroll-right"
+[[keyboard.bindings]]
+keys = "shift-j"
+context = "reader"
+command = "next-page"
+[[keyboard.bindings]]
+keys = "left"
+context = "reader"
+command = "scroll-left"
+[[keyboard.bindings]]
+keys = "shift-k"
+context = "reader"
+command = "previous-page"
+[[keyboard.bindings]]
+keys = "n"
+context = "reader"
+command = "next-match"
+[[keyboard.bindings]]
+keys = "shift-n"
+context = "reader"
+command = "previous-match"
+[[keyboard.bindings]]
+keys = "ctrl-f"
+context = "reader"
+command = "scroll-screen-down"
+[[keyboard.bindings]]
+keys = "ctrl-b"
+context = "reader"
+command = "scroll-screen-up"
+[[keyboard.bindings]]
+keys = "ctrl-d"
+context = "reader"
+command = "scroll-half-screen-down"
+[[keyboard.bindings]]
+keys = "ctrl-u"
+context = "reader"
+command = "scroll-half-screen-up"
+[[keyboard.bindings]]
+keys = "r"
+context = "reader"
+command = "toggle-reading-ruler"
+[[keyboard.bindings]]
+keys = "j"
+context = "reader"
+command = "read-down"
+[[keyboard.bindings]]
+keys = "k"
+context = "reader"
+command = "read-up"
+[[keyboard.bindings]]
+keys = "h"
+context = "reader"
+command = "scroll-left"
+[[keyboard.bindings]]
+keys = "l"
+context = "reader"
+command = "scroll-right"
+[[keyboard.bindings]]
+keys = "space"
+context = "reader"
+command = "scroll-half-screen-down"
+[[keyboard.bindings]]
+keys = "shift-space"
+context = "reader"
+command = "scroll-half-screen-up"
+[[keyboard.bindings]]
+keys = "g g"
+context = "reader"
+command = "document-start"
+[[keyboard.bindings]]
+keys = "shift-g"
+context = "reader"
+command = "document-end"
+[[keyboard.bindings]]
+keys = "o"
+context = "reader"
+command = "open-pdf"
+[[keyboard.bindings]]
+keys = "shift-o"
+context = "reader"
+command = "show-recent"
+[[keyboard.bindings]]
+keys = "/"
+context = "reader"
+command = "show-find"
+[[keyboard.bindings]]
+keys = ":"
+context = "reader"
+command = "command-palette"
+[[keyboard.bindings]]
+keys = "="
+context = "reader"
+command = "zoom-in"
+[[keyboard.bindings]]
+keys = "shift-="
+context = "reader"
+command = "zoom-in"
+[[keyboard.bindings]]
+keys = "-"
+context = "reader"
+command = "zoom-out"
+[[keyboard.bindings]]
+keys = "w"
+context = "reader"
+command = "fit-width"
+[[keyboard.bindings]]
+keys = "f"
+context = "reader"
+command = "fit-page"
+[[keyboard.bindings]]
+keys = "s"
+context = "reader"
+command = "single-page"
+[[keyboard.bindings]]
+keys = "c"
+context = "reader"
+command = "continuous"
+
+# GPUI resolves pending sequences before one-key shortcuts such as n/s/c.
+[[keyboard.bindings]]
+keys = "m a"
+context = "reader"
+command = "set-local-mark"
+letter = "a"
+[[keyboard.bindings]]
+keys = "' a"
+context = "reader"
+command = "jump-local-mark"
+letter = "a"
+[[keyboard.bindings]]
+keys = "d m a"
+context = "reader"
+command = "delete-local-mark"
+letter = "a"
+[[keyboard.bindings]]
+keys = "m b"
+context = "reader"
+command = "set-local-mark"
+letter = "b"
+[[keyboard.bindings]]
+keys = "' b"
+context = "reader"
+command = "jump-local-mark"
+letter = "b"
+[[keyboard.bindings]]
+keys = "d m b"
+context = "reader"
+command = "delete-local-mark"
+letter = "b"
+[[keyboard.bindings]]
+keys = "m c"
+context = "reader"
+command = "set-local-mark"
+letter = "c"
+[[keyboard.bindings]]
+keys = "' c"
+context = "reader"
+command = "jump-local-mark"
+letter = "c"
+[[keyboard.bindings]]
+keys = "d m c"
+context = "reader"
+command = "delete-local-mark"
+letter = "c"
+[[keyboard.bindings]]
+keys = "m d"
+context = "reader"
+command = "set-local-mark"
+letter = "d"
+[[keyboard.bindings]]
+keys = "' d"
+context = "reader"
+command = "jump-local-mark"
+letter = "d"
+[[keyboard.bindings]]
+keys = "d m d"
+context = "reader"
+command = "delete-local-mark"
+letter = "d"
+[[keyboard.bindings]]
+keys = "m e"
+context = "reader"
+command = "set-local-mark"
+letter = "e"
+[[keyboard.bindings]]
+keys = "' e"
+context = "reader"
+command = "jump-local-mark"
+letter = "e"
+[[keyboard.bindings]]
+keys = "d m e"
+context = "reader"
+command = "delete-local-mark"
+letter = "e"
+[[keyboard.bindings]]
+keys = "m f"
+context = "reader"
+command = "set-local-mark"
+letter = "f"
+[[keyboard.bindings]]
+keys = "' f"
+context = "reader"
+command = "jump-local-mark"
+letter = "f"
+[[keyboard.bindings]]
+keys = "d m f"
+context = "reader"
+command = "delete-local-mark"
+letter = "f"
+[[keyboard.bindings]]
+keys = "m g"
+context = "reader"
+command = "set-local-mark"
+letter = "g"
+[[keyboard.bindings]]
+keys = "' g"
+context = "reader"
+command = "jump-local-mark"
+letter = "g"
+[[keyboard.bindings]]
+keys = "d m g"
+context = "reader"
+command = "delete-local-mark"
+letter = "g"
+[[keyboard.bindings]]
+keys = "m h"
+context = "reader"
+command = "set-local-mark"
+letter = "h"
+[[keyboard.bindings]]
+keys = "' h"
+context = "reader"
+command = "jump-local-mark"
+letter = "h"
+[[keyboard.bindings]]
+keys = "d m h"
+context = "reader"
+command = "delete-local-mark"
+letter = "h"
+[[keyboard.bindings]]
+keys = "m i"
+context = "reader"
+command = "set-local-mark"
+letter = "i"
+[[keyboard.bindings]]
+keys = "' i"
+context = "reader"
+command = "jump-local-mark"
+letter = "i"
+[[keyboard.bindings]]
+keys = "d m i"
+context = "reader"
+command = "delete-local-mark"
+letter = "i"
+[[keyboard.bindings]]
+keys = "m j"
+context = "reader"
+command = "set-local-mark"
+letter = "j"
+[[keyboard.bindings]]
+keys = "' j"
+context = "reader"
+command = "jump-local-mark"
+letter = "j"
+[[keyboard.bindings]]
+keys = "d m j"
+context = "reader"
+command = "delete-local-mark"
+letter = "j"
+[[keyboard.bindings]]
+keys = "m k"
+context = "reader"
+command = "set-local-mark"
+letter = "k"
+[[keyboard.bindings]]
+keys = "' k"
+context = "reader"
+command = "jump-local-mark"
+letter = "k"
+[[keyboard.bindings]]
+keys = "d m k"
+context = "reader"
+command = "delete-local-mark"
+letter = "k"
+[[keyboard.bindings]]
+keys = "m l"
+context = "reader"
+command = "set-local-mark"
+letter = "l"
+[[keyboard.bindings]]
+keys = "' l"
+context = "reader"
+command = "jump-local-mark"
+letter = "l"
+[[keyboard.bindings]]
+keys = "d m l"
+context = "reader"
+command = "delete-local-mark"
+letter = "l"
+[[keyboard.bindings]]
+keys = "m m"
+context = "reader"
+command = "set-local-mark"
+letter = "m"
+[[keyboard.bindings]]
+keys = "' m"
+context = "reader"
+command = "jump-local-mark"
+letter = "m"
+[[keyboard.bindings]]
+keys = "d m m"
+context = "reader"
+command = "delete-local-mark"
+letter = "m"
+[[keyboard.bindings]]
+keys = "m n"
+context = "reader"
+command = "set-local-mark"
+letter = "n"
+[[keyboard.bindings]]
+keys = "' n"
+context = "reader"
+command = "jump-local-mark"
+letter = "n"
+[[keyboard.bindings]]
+keys = "d m n"
+context = "reader"
+command = "delete-local-mark"
+letter = "n"
+[[keyboard.bindings]]
+keys = "m o"
+context = "reader"
+command = "set-local-mark"
+letter = "o"
+[[keyboard.bindings]]
+keys = "' o"
+context = "reader"
+command = "jump-local-mark"
+letter = "o"
+[[keyboard.bindings]]
+keys = "d m o"
+context = "reader"
+command = "delete-local-mark"
+letter = "o"
+[[keyboard.bindings]]
+keys = "m p"
+context = "reader"
+command = "set-local-mark"
+letter = "p"
+[[keyboard.bindings]]
+keys = "' p"
+context = "reader"
+command = "jump-local-mark"
+letter = "p"
+[[keyboard.bindings]]
+keys = "d m p"
+context = "reader"
+command = "delete-local-mark"
+letter = "p"
+[[keyboard.bindings]]
+keys = "m q"
+context = "reader"
+command = "set-local-mark"
+letter = "q"
+[[keyboard.bindings]]
+keys = "' q"
+context = "reader"
+command = "jump-local-mark"
+letter = "q"
+[[keyboard.bindings]]
+keys = "d m q"
+context = "reader"
+command = "delete-local-mark"
+letter = "q"
+[[keyboard.bindings]]
+keys = "m r"
+context = "reader"
+command = "set-local-mark"
+letter = "r"
+[[keyboard.bindings]]
+keys = "' r"
+context = "reader"
+command = "jump-local-mark"
+letter = "r"
+[[keyboard.bindings]]
+keys = "d m r"
+context = "reader"
+command = "delete-local-mark"
+letter = "r"
+[[keyboard.bindings]]
+keys = "m s"
+context = "reader"
+command = "set-local-mark"
+letter = "s"
+[[keyboard.bindings]]
+keys = "' s"
+context = "reader"
+command = "jump-local-mark"
+letter = "s"
+[[keyboard.bindings]]
+keys = "d m s"
+context = "reader"
+command = "delete-local-mark"
+letter = "s"
+[[keyboard.bindings]]
+keys = "m t"
+context = "reader"
+command = "set-local-mark"
+letter = "t"
+[[keyboard.bindings]]
+keys = "' t"
+context = "reader"
+command = "jump-local-mark"
+letter = "t"
+[[keyboard.bindings]]
+keys = "d m t"
+context = "reader"
+command = "delete-local-mark"
+letter = "t"
+[[keyboard.bindings]]
+keys = "m u"
+context = "reader"
+command = "set-local-mark"
+letter = "u"
+[[keyboard.bindings]]
+keys = "' u"
+context = "reader"
+command = "jump-local-mark"
+letter = "u"
+[[keyboard.bindings]]
+keys = "d m u"
+context = "reader"
+command = "delete-local-mark"
+letter = "u"
+[[keyboard.bindings]]
+keys = "m v"
+context = "reader"
+command = "set-local-mark"
+letter = "v"
+[[keyboard.bindings]]
+keys = "' v"
+context = "reader"
+command = "jump-local-mark"
+letter = "v"
+[[keyboard.bindings]]
+keys = "d m v"
+context = "reader"
+command = "delete-local-mark"
+letter = "v"
+[[keyboard.bindings]]
+keys = "m w"
+context = "reader"
+command = "set-local-mark"
+letter = "w"
+[[keyboard.bindings]]
+keys = "' w"
+context = "reader"
+command = "jump-local-mark"
+letter = "w"
+[[keyboard.bindings]]
+keys = "d m w"
+context = "reader"
+command = "delete-local-mark"
+letter = "w"
+[[keyboard.bindings]]
+keys = "m x"
+context = "reader"
+command = "set-local-mark"
+letter = "x"
+[[keyboard.bindings]]
+keys = "' x"
+context = "reader"
+command = "jump-local-mark"
+letter = "x"
+[[keyboard.bindings]]
+keys = "d m x"
+context = "reader"
+command = "delete-local-mark"
+letter = "x"
+[[keyboard.bindings]]
+keys = "m y"
+context = "reader"
+command = "set-local-mark"
+letter = "y"
+[[keyboard.bindings]]
+keys = "' y"
+context = "reader"
+command = "jump-local-mark"
+letter = "y"
+[[keyboard.bindings]]
+keys = "d m y"
+context = "reader"
+command = "delete-local-mark"
+letter = "y"
+[[keyboard.bindings]]
+keys = "m z"
+context = "reader"
+command = "set-local-mark"
+letter = "z"
+[[keyboard.bindings]]
+keys = "' z"
+context = "reader"
+command = "jump-local-mark"
+letter = "z"
+[[keyboard.bindings]]
+keys = "d m z"
+context = "reader"
+command = "delete-local-mark"
+letter = "z"

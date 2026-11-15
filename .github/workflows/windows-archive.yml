@@ -2,8 +2,6 @@ name: Experimental Windows archive
 
 on:
   workflow_dispatch:
-  push:
-    branches: [experimental/windows-180]
   pull_request:
     paths:
       - build.rs

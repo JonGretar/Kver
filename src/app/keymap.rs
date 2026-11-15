@@ -38,36 +38,6 @@ use crate::{
     settings_ui::{CloseSettings, ShowSettings},
 };
 
-// GPUI resolves a pending sequence before one-key shortcuts such as p/n/s/c.
-const MARK_KEY_SEQUENCES: [(char, &str, &str, &str); 26] = [
-    ('a', "m a", "' a", "d m a"),
-    ('b', "m b", "' b", "d m b"),
-    ('c', "m c", "' c", "d m c"),
-    ('d', "m d", "' d", "d m d"),
-    ('e', "m e", "' e", "d m e"),
-    ('f', "m f", "' f", "d m f"),
-    ('g', "m g", "' g", "d m g"),
-    ('h', "m h", "' h", "d m h"),
-    ('i', "m i", "' i", "d m i"),
-    ('j', "m j", "' j", "d m j"),
-    ('k', "m k", "' k", "d m k"),
-    ('l', "m l", "' l", "d m l"),
-    ('m', "m m", "' m", "d m m"),
-    ('n', "m n", "' n", "d m n"),
-    ('o', "m o", "' o", "d m o"),
-    ('p', "m p", "' p", "d m p"),
-    ('q', "m q", "' q", "d m q"),
-    ('r', "m r", "' r", "d m r"),
-    ('s', "m s", "' s", "d m s"),
-    ('t', "m t", "' t", "d m t"),
-    ('u', "m u", "' u", "d m u"),
-    ('v', "m v", "' v", "d m v"),
-    ('w', "m w", "' w", "d m w"),
-    ('x', "m x", "' x", "d m x"),
-    ('y', "m y", "' y", "d m y"),
-    ('z', "m z", "' z", "d m z"),
-];
-
 /// Names in the keyboard configuration model, not GPUI view or widget names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Context {
@@ -148,15 +118,22 @@ impl Preset {
             )),
         }
     }
+
+    fn content(self) -> &'static str {
+        match self {
+            Self::Standard => include_str!("../../assets/keybindings/standard.toml"),
+            Self::Vim => include_str!("../../assets/keybindings/vim.toml"),
+        }
+    }
 }
 
-/// One user-facing key slot. A missing action is an explicit unbind, not an
-/// absent override. A platform qualifier filters the entry before precedence.
+/// One key slot. A missing action is an internal context mask, not an absent
+/// override or user-facing unbind syntax. Platform filters precede replacement.
 pub struct Entry {
     keys: String,
     context: Context,
     action: Option<Box<dyn Action>>,
-    platform: Option<Platform>,
+    platforms: Option<Vec<Platform>>,
 }
 
 impl Entry {
@@ -165,7 +142,7 @@ impl Entry {
             keys: keys.into(),
             context,
             action: Some(Box::new(action)),
-            platform: None,
+            platforms: None,
         }
     }
 
@@ -174,18 +151,22 @@ impl Entry {
             keys: keys.into(),
             context,
             action: None,
-            platform: None,
+            platforms: None,
         }
     }
 
     pub fn on(mut self, platform: Platform) -> Self {
-        self.platform = Some(platform);
+        self.platforms = Some(vec![platform]);
         self
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Diagnostic {
+    InvalidPreset {
+        preset: Preset,
+        message: String,
+    },
     InvalidSequence(String),
     UnmatchedUnbind {
         keys: String,
@@ -205,6 +186,11 @@ pub enum Diagnostic {
 impl std::fmt::Display for Diagnostic {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidPreset { preset, message } => write!(
+                formatter,
+                "Invalid embedded {} preset: {message}",
+                preset.label()
+            ),
             Self::InvalidSequence(keys) => write!(
                 formatter,
                 "invalid keys {keys:?}; check the key spelling and modifiers"
@@ -440,7 +426,11 @@ fn apply_layer(
 ) -> Result<(), Diagnostic> {
     let mut seen = HashSet::new();
     for entry in layer {
-        if entry.platform.is_some_and(|only| only != platform) {
+        if entry
+            .platforms
+            .as_ref()
+            .is_some_and(|only| !only.contains(&platform))
+        {
             continue;
         }
         let sequence = parse(&entry.keys, platform.os())?;
@@ -518,7 +508,7 @@ pub fn resolve(platform: Platform, preset: Preset) -> Result<ResolvedKeymap, Dia
     resolve_with(platform, preset, [])
 }
 
-/// Layers are common, platform, preset, then user overrides. Replacing a
+/// Layers are the selected embedded preset, then user overrides. Replacing a
 /// slot retains its display order, so a modified menu shortcut is not displaced
 /// by a bare reader alias. No stale earlier-layer binding reaches GPUI.
 pub fn resolve_with(
@@ -527,9 +517,9 @@ pub fn resolve_with(
     overrides: impl IntoIterator<Item = Entry>,
 ) -> Result<ResolvedKeymap, Diagnostic> {
     let mut slots = Vec::new();
-    apply_layer(&mut slots, common(), platform)?;
-    apply_layer(&mut slots, platform_defaults(), platform)?;
-    apply_layer(&mut slots, preset_defaults(preset), platform)?;
+    let entries = config::parse_entries(preset.content())
+        .map_err(|message| Diagnostic::InvalidPreset { preset, message })?;
+    apply_layer(&mut slots, entries, platform)?;
     apply_layer(&mut slots, overrides, platform)?;
     validate_prefixes(&slots)?;
     Ok(ResolvedKeymap { slots, platform })
@@ -668,187 +658,6 @@ fn reload_result(cx: &mut App, result: Result<Option<String>, String>) -> Result
     let content = result?;
     let preset = cx.global::<InstalledKeymap>().preset;
     reload(cx, content, preset)
-}
-
-fn common() -> Vec<Entry> {
-    let mut entries = vec![
-        Entry::bind("cmd-o", Context::Global, OpenPdf),
-        Entry::bind("cmd-shift-o", Context::Global, ShowRecent),
-        Entry::bind("cmd-n", Context::Global, NewWindow),
-        Entry::bind("cmd-shift-p", Context::Global, ShowCommandPalette),
-        Entry::bind("cmd-shift-m", Context::Global, ShowMarks),
-        Entry::bind("cmd-z", Context::Reader, crate::reader::UndoAnnotation),
-        Entry::bind(
-            "cmd-shift-z",
-            Context::Reader,
-            crate::reader::RedoAnnotation,
-        ),
-        Entry::bind("cmd-z", Context::Annotations, crate::reader::UndoAnnotation),
-        Entry::bind(
-            "cmd-shift-z",
-            Context::Annotations,
-            crate::reader::RedoAnnotation,
-        ),
-        Entry::bind("backspace", Context::Reader, DeleteHighlight),
-        Entry::bind("delete", Context::Reader, DeleteHighlight),
-        Entry::bind("backspace", Context::Annotations, DeleteHighlight),
-        Entry::bind("delete", Context::Annotations, DeleteHighlight),
-        Entry::bind("cmd-shift-s", Context::Global, SaveAs),
-        Entry::bind("cmd-s", Context::Global, Save),
-        Entry::bind("escape", Context::Sidebar, ToggleSidebar),
-        Entry::bind("enter", Context::Contents, ActivateOutline),
-        Entry::bind("cmd-c", Context::Annotations, Copy),
-        // Native menus snapshot the first binding for an Action. Keep their
-        // page accelerators modified; bare reader arrows must never become
-        // menu key equivalents in a focused text control.
-        Entry::bind("cmd-alt-right", Context::Reader, NextPage),
-        Entry::bind("cmd-alt-left", Context::Reader, PreviousPage),
-        Entry::bind("cmd-c", Context::Reader, Copy),
-        Entry::bind("down", Context::Reader, crate::reader::ReadDown),
-        Entry::bind("up", Context::Reader, crate::reader::ReadUp),
-        Entry::bind("ctrl-o", Context::Reader, NavigateBack),
-        Entry::bind("ctrl-i", Context::Reader, NavigateForward),
-        Entry::bind("ctrl-o", Context::Contents, NavigateBack),
-        Entry::bind("ctrl-i", Context::Contents, NavigateForward),
-    ];
-    entries.extend([
-        Entry::bind("cmd-w", Context::Global, CloseWindow),
-        Entry::bind("cmd-,", Context::Global, ShowSettings),
-        Entry::bind("escape", Context::Settings, CloseSettings),
-        Entry::bind("escape", Context::About, CloseAbout),
-    ]);
-    entries
-}
-
-fn platform_defaults() -> Vec<Entry> {
-    vec![
-        Entry::bind("cmd-`", Context::Global, NextWindow).on(Platform::Mac),
-        Entry::bind("cmd-shift-`", Context::Global, PreviousWindow).on(Platform::Mac),
-        Entry::bind("ctrl-f6", Context::Global, NextWindow).on(Platform::Linux),
-        Entry::bind("ctrl-shift-f6", Context::Global, PreviousWindow).on(Platform::Linux),
-        Entry::bind("ctrl-f6", Context::Global, NextWindow).on(Platform::Windows),
-        Entry::bind("ctrl-shift-f6", Context::Global, PreviousWindow).on(Platform::Windows),
-        Entry::bind("cmd-q", Context::Global, Quit).on(Platform::Mac),
-        Entry::bind("cmd-q", Context::Global, Quit).on(Platform::Linux),
-    ]
-}
-
-fn preset_defaults(preset: Preset) -> Vec<Entry> {
-    match preset {
-        Preset::Standard => vec![
-            Entry::bind("cmd-f", Context::Global, ShowFind),
-            Entry::bind("cmd-b", Context::Global, ToggleSidebar),
-            Entry::bind("cmd-g", Context::Global, NextMatch),
-            Entry::bind("cmd-shift-g", Context::Global, PreviousMatch),
-            Entry::bind("cmd-t", Context::Global, ShowContents),
-            Entry::bind(
-                "secondary-enter",
-                Context::Reader,
-                crate::reader::ApplyMarkup,
-            ),
-            Entry::bind("secondary-shift-h", Context::Reader, Highlight),
-            Entry::bind(
-                "secondary-shift-u",
-                Context::Reader,
-                crate::reader::Underline,
-            ),
-            Entry::bind(
-                "secondary-shift-x",
-                Context::Reader,
-                crate::reader::StrikeOut,
-            ),
-            Entry::bind("secondary-alt-u", Context::Reader, crate::reader::Squiggly),
-            Entry::bind("secondary-shift-a", Context::Global, ShowAnnotations),
-            Entry::bind(
-                "secondary-shift-r",
-                Context::Reader,
-                crate::reader::ToggleReadingRuler,
-            ),
-            Entry::bind("right", Context::Reader, NextPage),
-            Entry::bind("left", Context::Reader, PreviousPage),
-            Entry::bind("pagedown", Context::Reader, ScrollScreenDown),
-            Entry::bind("pageup", Context::Reader, ScrollScreenUp),
-            Entry::bind("cmd-=", Context::Reader, ZoomIn),
-            Entry::bind("cmd-shift-=", Context::Reader, ZoomIn),
-            Entry::bind("cmd--", Context::Reader, ZoomOut),
-            Entry::bind("cmd-alt-w", Context::Reader, FitWidth),
-            Entry::bind("cmd-alt-f", Context::Reader, FitPage),
-            Entry::bind("alt-down", Context::Reader, NextPage).on(Platform::Mac),
-            Entry::bind("alt-up", Context::Reader, PreviousPage).on(Platform::Mac),
-            Entry::bind("ctrl-pagedown", Context::Reader, NextPage).on(Platform::Linux),
-            Entry::bind("ctrl-pageup", Context::Reader, PreviousPage).on(Platform::Linux),
-            Entry::bind("ctrl-pagedown", Context::Reader, NextPage).on(Platform::Windows),
-            Entry::bind("ctrl-pageup", Context::Reader, PreviousPage).on(Platform::Windows),
-            Entry::bind("alt-left", Context::Reader, NavigateBack),
-            Entry::bind("alt-right", Context::Reader, NavigateForward),
-            Entry::bind("alt-left", Context::Contents, NavigateBack),
-            Entry::bind("alt-right", Context::Contents, NavigateForward),
-        ],
-        // Keep bare reader keys inside Reader; app/window commands are inherited.
-        Preset::Vim => {
-            let mut entries = vec![
-                Entry::bind("a a", Context::Reader, crate::reader::ApplyMarkup),
-                Entry::bind("a h", Context::Reader, Highlight),
-                Entry::bind("a u", Context::Reader, crate::reader::Underline),
-                Entry::bind("a s", Context::Reader, crate::reader::StrikeOut),
-                Entry::bind("a w", Context::Reader, crate::reader::Squiggly),
-                Entry::bind("g a", Context::Reader, ShowAnnotations),
-                Entry::bind("g c", Context::Reader, ShowContents),
-                Entry::bind("j", Context::Contents, SelectDown),
-                Entry::bind("k", Context::Contents, SelectUp),
-                Entry::bind("j", Context::Annotations, SelectDown),
-                Entry::bind("k", Context::Annotations, SelectUp),
-                Entry::bind("u", Context::Reader, crate::reader::UndoAnnotation),
-                Entry::bind("ctrl-r", Context::Reader, crate::reader::RedoAnnotation),
-                Entry::bind("x", Context::Reader, DeleteHighlight),
-                Entry::bind("u", Context::Annotations, crate::reader::UndoAnnotation),
-                Entry::bind(
-                    "ctrl-r",
-                    Context::Annotations,
-                    crate::reader::RedoAnnotation,
-                ),
-                Entry::bind("x", Context::Annotations, DeleteHighlight),
-                Entry::bind("right", Context::Reader, ScrollRight),
-                Entry::bind("shift-j", Context::Reader, NextPage),
-                Entry::bind("left", Context::Reader, ScrollLeft),
-                Entry::bind("shift-k", Context::Reader, PreviousPage),
-                Entry::bind("n", Context::Reader, NextMatch),
-                Entry::bind("shift-n", Context::Reader, PreviousMatch),
-                Entry::bind("ctrl-f", Context::Reader, ScrollScreenDown),
-                Entry::bind("ctrl-b", Context::Reader, ScrollScreenUp),
-                Entry::bind("ctrl-d", Context::Reader, ScrollHalfScreenDown),
-                Entry::bind("ctrl-u", Context::Reader, ScrollHalfScreenUp),
-                Entry::bind("r", Context::Reader, crate::reader::ToggleReadingRuler),
-                Entry::bind("j", Context::Reader, crate::reader::ReadDown),
-                Entry::bind("k", Context::Reader, crate::reader::ReadUp),
-                Entry::bind("h", Context::Reader, ScrollLeft),
-                Entry::bind("l", Context::Reader, ScrollRight),
-                Entry::bind("space", Context::Reader, ScrollHalfScreenDown),
-                Entry::bind("shift-space", Context::Reader, ScrollHalfScreenUp),
-                Entry::bind("g g", Context::Reader, GoToDocumentStart),
-                Entry::bind("shift-g", Context::Reader, GoToDocumentEnd),
-                Entry::bind("o", Context::Reader, OpenPdf),
-                Entry::bind("shift-o", Context::Reader, ShowRecent),
-                Entry::bind("/", Context::Reader, ShowFind),
-                Entry::bind(":", Context::Reader, ShowCommandPalette),
-                Entry::bind("=", Context::Reader, ZoomIn),
-                Entry::bind("shift-=", Context::Reader, ZoomIn),
-                Entry::bind("-", Context::Reader, ZoomOut),
-                Entry::bind("w", Context::Reader, FitWidth),
-                Entry::bind("f", Context::Reader, FitPage),
-                Entry::bind("s", Context::Reader, SinglePage),
-                Entry::bind("c", Context::Reader, Continuous),
-            ];
-            for (letter, set, jump, delete) in MARK_KEY_SEQUENCES {
-                entries.extend([
-                    Entry::bind(set, Context::Reader, SetLocalMark(letter)),
-                    Entry::bind(jump, Context::Reader, JumpLocalMark(letter)),
-                    Entry::bind(delete, Context::Reader, DeleteLocalMark(letter)),
-                ]);
-            }
-            entries
-        }
-    }
 }
 
 #[cfg(test)]

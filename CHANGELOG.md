@@ -12,6 +12,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **Experimental Windows archive:** a native x86-64 MSVC ZIP build with the
   Kver icon, version identity, checksums and manual-update/runtime guidance,
   available as a non-publishing CI artifact rather than a supported release.
+- Keyboard platform filters accept a list such as `["linux", "windows"]`
+  as well as a single platform name.
 - **CLI handoff:** `kver some.pdf` opens files in the running app instead of
   starting a separate instance, with options to reuse a reader or open a new window.
 - **File-opening preference:** Open PDF, Open Recent, Finder, and CLI requests

@@ -6,6 +6,11 @@ settings in it. Kver applies valid edits while it runs. Choose Standard or
 Vim in **Kver → Settings → Keyboard**, or set `preset = "vim"` under `[keyboard]`
 in the same file.
 
+Kver embeds two complete TOML presets in the executable. It selects one,
+filters its entries for the current OS, then applies your bindings. These
+are the only two policy layers; Vim does not inherit Standard, and Kver
+does not look up preset files at runtime.
+
 ## Add a key sequence
 
 Add this entry to go to the start of the document by pressing `g`, then `t`
@@ -59,9 +64,26 @@ assignment without choosing another command is not supported yet:
 | `keys` | Required. A key such as `"right"` or `"cmd-shift-p"`, or a space-separated sequence such as `"g t"`. Use `cmd`, `ctrl`, `alt`, and `shift` as modifier names. |
 | `context` | Optional; defaults to `"global"`. Use `"reader"`, `"sidebar"`, `"contents"`, `"annotations"`, `"settings"`, or `"about"` to limit where the shortcut works. Contents and Annotations inherit Sidebar; a reader shortcut does not fire while typing in a dialog or palette. |
 | `command` | Required. Lowercase, hyphenated command name; see the list below. |
-| `platform` | Optional; one of `"mac"`, `"linux"`, or `"windows"`. Without it, the entry applies on every platform. |
+| `platform` | Optional. One of `"mac"`, `"linux"`, or `"windows"`, or a nonempty array of those names. An array matches any listed platform. Omit it to apply on every platform. |
+| `letter` | Optional for `set-local-mark`, `jump-local-mark`, and `delete-local-mark` only. One lowercase letter `"a"`–`"z"` targets that mark directly; without it, the command opens its chooser. |
 
 For example, add `platform = "mac"` to an entry to use that key only on macOS.
+Use `platform = ["linux", "windows"]` to share a binding on Linux and Windows:
+
+```toml
+[[keyboard.bindings]]
+keys = "ctrl-e"
+context = "reader"
+command = "next-page"
+platform = ["linux", "windows"]
+```
+
+The same filter syntax applies to embedded presets and your overrides.
+Empty arrays, unknown names, and non-string values are rejected. Filtering
+happens before duplicate and prefix checks: two entries for the same key
+and context may target disjoint platforms, but must not overlap on the
+current OS. An array's order does not establish precedence.
+
 Use full key sequences: `g` alone conflicts with `g g` in the Vim reader,
 whereas `g t` does not. Invalid keys, duplicate assignments, conflicting
 prefixes, unknown fields, commands, contexts, and platforms are rejected
@@ -89,16 +111,19 @@ by the current keyboard configuration:
 | Task | Commands |
 | --- | --- |
 | Application and windows | `open-pdf`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
-| Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
+| Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `read-down`, `read-up`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
 | Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
-| Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline` |
+| Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline`, `select-down`, `select-up` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
 | Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
 
-The mark commands in this list open the corresponding mark chooser. The Vim
-letter-specific mark sequences are supplied by the Vim preset; the TOML
-command names do not accept a mark letter argument.
+`read-down` and `read-up` follow lines with the reading ruler on and scroll
+with it off. `select-down` and `select-up` move the focused sidebar list's
+selection. The mark commands open their chooser unless `letter` is supplied.
+For example, `command = "jump-local-mark"` with `letter = "a"` jumps directly
+to local mark `a`. The Vim preset supplies its letter-specific sequences
+using this same field.
 
 ## Find and navigation presets
 

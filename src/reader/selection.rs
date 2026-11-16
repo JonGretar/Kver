@@ -13,7 +13,7 @@ use crate::{
 };
 
 mod acquisition;
-pub(super) use acquisition::Acquisition;
+pub(super) use acquisition::{Acquisition, Stage, Targeting};
 
 #[derive(Default)]
 pub(super) struct Selection {
@@ -131,6 +131,36 @@ impl Selection {
 
     pub(super) fn finish(&mut self) {
         self.drag = None;
+    }
+
+    /// Include both complete lines, independent of the visible word anchors.
+    pub(super) fn select_lines(
+        &mut self,
+        page: usize,
+        text: Arc<PageText>,
+        start: usize,
+        end: usize,
+    ) -> bool {
+        let (Some(first), Some(last)) = (
+            text.lines.get(start.min(end)),
+            text.lines.get(start.max(end)),
+        ) else {
+            return false;
+        };
+        self.span = Some(Span {
+            page,
+            start: Anchor {
+                line: start.min(end),
+                boundary: first.start,
+            },
+            end: Anchor {
+                line: start.max(end),
+                boundary: last.end,
+            },
+        });
+        self.text = Some(text);
+        self.drag = None;
+        true
     }
 
     /// Commit both complete words at once, in the same reading order used by

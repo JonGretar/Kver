@@ -42,8 +42,252 @@ fn selected(reader: &Entity<ReaderView>, cx: &TestAppContext) -> Option<String> 
     reader.read_with(cx, |reader, _| reader.selected_text())
 }
 
+fn begin_lines(cx: &mut TestAppContext, handle: AnyWindowHandle) {
+    press(cx, handle, "shift-v");
+    settle(cx, handle);
+    cx.update_window(handle, |_, window, _| {
+        assert_eq!(window.find("hint-input").label(), Some("Choose start: __"));
+        assert_eq!(
+            window.find("cancel-word-hints").label(),
+            Some("Cancel line hints")
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn visual_select_line_copies_complete_forward_reverse_and_same_lines(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
+    let (handle, reader) = reader_window(cx, Some("examples/selection-sample.pdf".into()));
+    settle(cx, handle);
+    for mode in [ReadingMode::Continuous, ReadingMode::SinglePage] {
+        reader.update(cx, |reader, cx| reader.set_reading_mode(mode, cx));
+        settle(cx, handle);
+        for (keys, expected) in [
+            ("a a s a", "Alpha café world\nSecond naïve line"),
+            ("s a a a", "Alpha café world\nSecond naïve line"),
+            ("s a s a", "Second naïve line"),
+            ("s a d a", "Second naïve line\n\nThird Þing ends"),
+        ] {
+            begin_lines(cx, handle);
+            cx.update_window(handle, |_, window, _| {
+                assert!(window.find("hint-da").visible());
+                assert!(window.try_find("hint-fa").is_none(), "one hint per line");
+            })
+            .unwrap();
+            press(cx, handle, keys);
+            assert_eq!(selected(&reader, cx).as_deref(), Some(expected));
+            reader.read_with(cx, |reader, cx| assert!(!reader.is_dirty(cx)));
+            press(cx, handle, "secondary-c");
+            cx.update(|cx| {
+                assert_eq!(
+                    cx.read_from_clipboard()
+                        .and_then(|item| item.text())
+                        .as_deref(),
+                    Some(expected)
+                )
+            });
+            press(cx, handle, "escape");
+            assert_eq!(selected(&reader, cx), None);
+        }
+    }
+    // Word targeting remains available immediately after line targeting.
+    begin(cx, handle);
+    press(cx, handle, "s a s a");
+    assert_eq!(selected(&reader, cx).as_deref(), Some("café"));
+}
+
+#[gpui_kit::test]
+fn visual_select_line_correction_cancellation_and_markup_are_ordinary(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
+    let (handle, document) = open(cx, Some("examples/selection-sample.pdf".into()));
+    settle(cx, handle);
+    super::saving::select_text(cx, handle, &document);
+    let reader = document.read_with(cx, |document, _| document.reader().clone());
+    let before = reader.read_with(cx, |reader, _| reader.reading_position());
+    begin_lines(cx, handle);
+    press(cx, handle, "s a");
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Alpha"));
+    cx.update_window(handle, |_, window, _| {
+        assert_eq!(window.find("hint-sa").label(), Some("Start: sa"));
+    })
+    .unwrap();
+    press(cx, handle, "d backspace backspace z z");
+    cx.update_window(handle, |_, window, _| {
+        assert_eq!(
+            window.find("hint-input").label(),
+            Some("No matching hint. Try again.")
+        );
+        assert_eq!(window.find("hint-sa").label(), Some("sa"));
+    })
+    .unwrap();
+    press(cx, handle, "s a escape");
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Alpha"));
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.reading_position()),
+        before
+    );
+    begin_lines(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        window.click("cancel-word-hints", cx)
+    })
+    .unwrap();
+    settle(cx, handle);
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Alpha"));
+    for (kind, keys) in crate::pdf::annotations::MarkupKind::ALL
+        .into_iter()
+        .zip(["a h", "a u", "a s", "a w"])
+    {
+        begin_lines(cx, handle);
+        press(cx, handle, "a a s a");
+        assert_eq!(
+            selected(&reader, cx).as_deref(),
+            Some("Alpha café world\nSecond naïve line")
+        );
+        press(cx, handle, keys);
+        reader.read_with(cx, |reader, cx| {
+            let annotations = reader
+                .session()
+                .unwrap()
+                .read(cx)
+                .annotations()
+                .unwrap()
+                .unwrap();
+            let annotation = annotations
+                .iter()
+                .find(|annotation| annotation.kind() == kind)
+                .unwrap();
+            assert_eq!(annotation.page(), 0);
+            assert_eq!(annotation.quads().len(), 2);
+        });
+    }
+    super::saving::select_text(cx, handle, &document);
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Alpha"));
+}
+
+#[gpui_kit::test]
+fn visual_select_line_crop_rotation_uses_existing_extracted_text(cx: &mut TestAppContext) {
+    use gpui_kit::{point, px};
+    setup(cx);
+    cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
+    let directory = tempfile::tempdir().unwrap();
+    let source = std::path::Path::new("examples/selection-sample.pdf");
+    let text = crate::pdf::page_text(source, 0).unwrap();
+    let cafe = text.word_units(0)[2].clone();
+    let crop_x = text.glyphs[cafe.start].start.x - 0.5;
+    for rotation in [0, 90, 180, 270] {
+        let path = directory.path().join(format!("clipped-{rotation}.pdf"));
+        let mut pdf = lopdf::Document::load(source).unwrap();
+        let page = *pdf.get_pages().values().next().unwrap();
+        let page = pdf.get_object_mut(page).unwrap().as_dict_mut().unwrap();
+        page.set(
+            "CropBox",
+            lopdf::Object::Array(vec![crop_x.into(), 0.into(), 612.into(), 792.into()]),
+        );
+        page.set("Rotate", rotation);
+        pdf.save(&path).unwrap();
+        let (handle, reader) = reader_window(cx, Some(path.clone()));
+        settle(cx, handle);
+        reader.update(cx, |reader, cx| reader.fit_page(cx));
+        settle(cx, handle);
+        begin_lines(cx, handle);
+        let cropped = crate::pdf::page_text(&path, 0).unwrap();
+        let scale = reader.read_with(cx, |reader, _| reader.scale());
+        cx.update_window(handle, |_, window, _| {
+            let page = window.find("pdf-page-0").bounds();
+            let cafe = cropped.word_units(0)[0].clone();
+            let glyph = &cropped.glyphs[cafe.start];
+            let top = cropped.glyphs[cafe.clone()].iter().map(|g| g.top).fold(f64::NEG_INFINITY, f64::max);
+            let bottom = cropped.glyphs[cafe.clone()].iter().map(|g| g.bottom).fold(f64::INFINITY, f64::min);
+            let corners = [
+                crate::coordinates::Point {
+                    x: glyph.start.x,
+                    y: top,
+                },
+                crate::coordinates::Point {
+                    x: glyph.start.x,
+                    y: bottom,
+                },
+                crate::coordinates::Point {
+                    x: cropped.glyphs[cafe.end - 1].end.x,
+                    y: top,
+                },
+                crate::coordinates::Point {
+                    x: cropped.glyphs[cafe.end - 1].end.x,
+                    y: bottom,
+                },
+            ]
+            .map(|p| cropped.transform.document_to_page(p));
+            let left = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+            let top = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+            let at = page.origin + point(px(left as f32 * scale), px(top as f32 * scale));
+            let label = window.find("hint-aa").bounds();
+            assert!(
+                (f32::from(label.left() - at.x)).abs() < 2.,
+                "rotation {rotation}: anchor is café, not hidden Alpha; label={label:?}, expected={at:?}, scale={scale}, crop={crop_x}"
+            );
+            assert!(page.contains(&label.center()));
+        })
+        .unwrap();
+        press(cx, handle, "a a a a");
+        // PageText deliberately excludes glyphs outside the PDF crop itself.
+        assert_eq!(
+            selected(&reader, cx).as_deref(),
+            Some("café world"),
+            "rotation {rotation}"
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn visual_select_line_uses_first_viewport_eligible_word_but_copies_whole_line(
+    cx: &mut TestAppContext,
+) {
+    setup(cx);
+    cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
+    let (handle, reader) = reader_window(cx, Some("examples/selection-sample.pdf".into()));
+    cx.simulate_window_resize(
+        handle,
+        gpui_kit::size(gpui_kit::px(360.), gpui_kit::px(800.)),
+    );
+    settle(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::reader::ScrollRight), cx)
+    })
+    .unwrap();
+    settle(cx, handle);
+    begin(cx, handle);
+    let anchor = cx
+        .update_window(handle, |_, window, _| window.find("hint-aa").bounds())
+        .unwrap();
+    press(cx, handle, "a a a a");
+    assert_ne!(
+        selected(&reader, cx).as_deref(),
+        Some("Alpha"),
+        "logical first word is clipped"
+    );
+    begin_lines(cx, handle);
+    cx.update_window(handle, |_, window, _| {
+        assert_eq!(window.find("hint-aa").bounds(), anchor)
+    })
+    .unwrap();
+    press(cx, handle, "a a a a");
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Alpha café world"));
+}
+
 #[gpui_kit::test]
 fn visual_select_ribbon_keeps_close_visible_at_interface_scales(cx: &mut TestAppContext) {
+    ribbon_scales(cx, false);
+}
+
+#[gpui_kit::test]
+fn visual_select_line_ribbon_keeps_close_visible_at_interface_scales(cx: &mut TestAppContext) {
+    ribbon_scales(cx, true);
+}
+
+fn ribbon_scales(cx: &mut TestAppContext, lines: bool) {
     use gpui_kit::{component::theme::Theme, px, size};
 
     setup(cx);
@@ -54,7 +298,7 @@ fn visual_select_ribbon_keeps_close_visible_at_interface_scales(cx: &mut TestApp
         for width in [360., 720., 1100.] {
             cx.simulate_window_resize(handle, size(px(width), px(800.)));
             settle(cx, handle);
-            press(cx, handle, "v");
+            press(cx, handle, if lines { "shift-v" } else { "v" });
             settle(cx, handle);
             cx.update_window(handle, |_, window, cx| {
                 let ribbon = window.find("hint-input").bounds();
@@ -243,6 +487,44 @@ fn visual_select_palette_and_custom_command_work_without_standard_bare_letter(
 }
 
 #[gpui_kit::test]
+fn visual_select_line_palette_and_customization_preserve_standard_input(cx: &mut TestAppContext) {
+    setup(cx);
+    let (handle, reader) = reader_window(cx, Some("examples/selection-sample.pdf".into()));
+    settle(cx, handle);
+    press(cx, handle, "v shift-v");
+    cx.update_window(handle, |_, window, cx| {
+        assert!(window.try_find("hint-input").is_none());
+        window.press("secondary-shift-p", cx);
+        window.input("Visual select line", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    press(cx, handle, "enter");
+    settle(cx, handle);
+    press(cx, handle, "s a s a");
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Second naïve line"));
+    cx.update(|cx| keymap::reload(cx, Some(
+        "[[keyboard.bindings]]\nkeys = 'q'\ncontext = 'reader'\ncommand = 'visual-select-line'\n".into()
+    ), Preset::Standard).unwrap());
+    press(cx, handle, "q");
+    settle(cx, handle);
+    press(cx, handle, "a a a a");
+    assert_eq!(selected(&reader, cx).as_deref(), Some("Alpha café world"));
+    press(cx, handle, "secondary-f");
+    cx.update_window(handle, |_, window, cx| {
+        window.input("qVv", cx);
+        assert_eq!(window.find("find-query").value(), Some("qVv"));
+        window.dispatch_action(Box::new(crate::reader::VisualSelectLine), cx);
+    })
+    .unwrap();
+    settle(cx, handle);
+    cx.update_window(handle, |_, window, _| {
+        assert!(window.try_find("hint-input").is_none())
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn visual_select_ranges_feed_every_existing_markup_kind(cx: &mut TestAppContext) {
     use crate::pdf::annotations::MarkupKind;
     setup(cx);
@@ -313,6 +595,17 @@ fn visual_select_ranges_feed_every_existing_markup_kind(cx: &mut TestAppContext)
 fn visual_select_keeps_original_page_local_end_labels_across_visible_pages(
     cx: &mut TestAppContext,
 ) {
+    page_local_endpoints(cx, false);
+}
+
+#[gpui_kit::test]
+fn visual_select_line_keeps_original_page_local_end_labels_across_visible_pages(
+    cx: &mut TestAppContext,
+) {
+    page_local_endpoints(cx, true);
+}
+
+fn page_local_endpoints(cx: &mut TestAppContext, lines: bool) {
     setup(cx);
     cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
     let (handle, reader) = reader_window(cx, Some("examples/readme-sample.pdf".into()));
@@ -322,7 +615,11 @@ fn visual_select_keeps_original_page_local_end_labels_across_visible_pages(
         reader.zoom_out(cx);
     });
     settle(cx, handle);
-    begin(cx, handle);
+    if lines {
+        begin_lines(cx, handle);
+    } else {
+        begin(cx, handle);
+    }
     let (first, second) = cx
         .update_window(handle, |_, window, _| {
             let pages = [
@@ -392,6 +689,16 @@ fn visual_select_keeps_original_page_local_end_labels_across_visible_pages(
 
 #[gpui_kit::test]
 fn visual_select_ruler_focus_invalidation_and_windows_do_not_leak(cx: &mut TestAppContext) {
+    ruler_focus_invalidation(cx, false);
+}
+
+#[gpui_kit::test]
+fn visual_select_line_ruler_focus_invalidation_and_windows_do_not_leak(cx: &mut TestAppContext) {
+    ruler_focus_invalidation(cx, true);
+}
+
+fn ruler_focus_invalidation(cx: &mut TestAppContext, lines: bool) {
+    let begin = if lines { begin_lines } else { begin };
     setup(cx);
     cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
     let (handle, reader) = reader_window(cx, Some("examples/selection-sample.pdf".into()));
@@ -468,7 +775,17 @@ fn visual_select_ruler_focus_invalidation_and_windows_do_not_leak(cx: &mut TestA
 
 #[gpui_kit::test]
 fn visual_select_follows_the_existing_column_order(cx: &mut TestAppContext) {
+    column_order(cx, false);
+}
+
+#[gpui_kit::test]
+fn visual_select_line_follows_the_existing_column_order(cx: &mut TestAppContext) {
+    column_order(cx, true);
+}
+
+fn column_order(cx: &mut TestAppContext, lines: bool) {
     use gpui_kit::{point, px};
+    let begin = if lines { begin_lines } else { begin };
     setup(cx);
     cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
     let (handle, reader) = reader_window(cx, Some("examples/reading-order.pdf".into()));
@@ -533,7 +850,22 @@ fn visual_select_follows_the_existing_column_order(cx: &mut TestAppContext) {
         .join(" ");
     press(cx, handle, &keys);
     let selection = selected(&reader, cx).expect("column range");
-    assert_eq!(selection, "Left column ends.\n\nRight");
+    if lines {
+        let right = text
+            .lines
+            .iter()
+            .map(|range| {
+                text.glyphs[range.clone()]
+                    .iter()
+                    .map(|g| g.text.as_str())
+                    .collect::<String>()
+            })
+            .find(|line| line.starts_with("Right column begins."))
+            .unwrap();
+        assert_eq!(selection, format!("Left column ends.\n\n{right}"));
+    } else {
+        assert_eq!(selection, "Left column ends.\n\nRight");
+    }
 }
 
 #[gpui_kit::test]

@@ -114,7 +114,7 @@ by the current keyboard configuration:
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `read-down`, `read-up`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
 | Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
-| Text selection | `visual-select` |
+| Text selection | `visual-select`, `visual-select-line` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline`, `select-down`, `select-up` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
 | Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
@@ -174,6 +174,7 @@ Vim distinguishes PDF pages from viewport-sized scrolling:
 | Scroll down / up (follow lines in ruler mode) | `j` / `k` |
 | Toggle reading ruler | `r` |
 | Select a word range using hints | `v` |
+| Select a whole-line range using hints | `V` |
 | Next / previous PDF page | `J` / `K` |
 | Forward / backward one screen | Ctrl-F / Ctrl-B |
 | Down / up half a screen | Ctrl-D / Ctrl-U or Space / Shift-Space |
@@ -217,6 +218,9 @@ Choose **Visual select…** in the command palette, or press `v` with the Vim
 reader focused. Type the two-letter label of the first word, then the label
 of the last word. Both words are included; choosing them in reverse selects
 the same passage, and choosing one word twice selects just that word.
+For whole lines, choose **Visual select line…** (`V` in Vim). Each visible line
+is labelled at its first visible eligible word. Both endpoint lines are included
+in full, including clipped text; the same label twice selects one full line.
 Endpoints must be on the same page. The second stage keeps the original labels
 and marks the chosen start in red with underlined letters.
 
@@ -239,6 +243,8 @@ keys = "v"
 context = "reader"
 command = "visual-select"
 ```
+
+Use `command = "visual-select-line"` to bind whole-line targeting instead.
 
 ## Annotation shortcuts
 

@@ -90,6 +90,12 @@ impl CommandPalette {
                 cx,
             ),
             reader_command(
+                "Visual select line…",
+                crate::reader::VisualSelectLine,
+                has_document,
+                cx,
+            ),
+            reader_command(
                 "Toggle PDF dark mode",
                 crate::reader::TogglePdfDarkMode,
                 has_document,

@@ -7,6 +7,11 @@ context = "reader"
 command = "visual-select"
 
 [[keyboard.bindings]]
+keys = "shift-v"
+context = "reader"
+command = "visual-select-line"
+
+[[keyboard.bindings]]
 keys = "cmd-o"
 command = "open-pdf"
 platform = "mac"

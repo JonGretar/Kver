@@ -13,6 +13,10 @@ fn visual_select_is_reader_scoped_and_customizable_in_both_presets() {
                 map.action("v", Context::Reader),
                 (preset == Preset::Vim).then_some("kver::VisualSelect")
             );
+            assert_eq!(
+                map.action("shift-v", Context::Reader),
+                (preset == Preset::Vim).then_some("kver::VisualSelectLine")
+            );
             for context in [
                 Context::Global,
                 Context::Sidebar,
@@ -20,6 +24,7 @@ fn visual_select_is_reader_scoped_and_customizable_in_both_presets() {
                 Context::Annotations,
             ] {
                 assert_eq!(map.action("v", context), None);
+                assert_eq!(map.action("shift-v", context), None);
             }
             let map = resolve_config(
                 "[[keyboard.bindings]]\nkeys = 'q'\ncontext = 'reader'\ncommand = 'visual-select'\n",
@@ -29,6 +34,24 @@ fn visual_select_is_reader_scoped_and_customizable_in_both_presets() {
             assert!(
                 map.shortcuts(&crate::reader::VisualSelect, Context::Reader)
                     .contains(&"q")
+            );
+            let map = resolve_config(
+                "[[keyboard.bindings]]\nkeys = 'q'\ncontext = 'reader'\ncommand = 'visual-select-line'\n\
+                 [[keyboard.bindings]]\nkeys = 'shift-v'\ncontext = 'reader'\ncommand = 'visual-select'\n",
+                platform,
+                preset,
+            ).unwrap();
+            assert!(
+                map.shortcuts(&crate::reader::VisualSelectLine, Context::Reader)
+                    .contains(&"q")
+            );
+            assert_eq!(
+                map.action("shift-v", Context::Reader),
+                Some("kver::VisualSelect")
+            );
+            assert_eq!(
+                map.action("v", Context::Reader),
+                (preset == Preset::Vim).then_some("kver::VisualSelect")
             );
         }
     }

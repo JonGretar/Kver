@@ -524,6 +524,21 @@ impl DocumentWindow {
             .dispatch_action(action, window, cx);
     }
 
+    /// Acquisition needs reader keyboard ownership after a palette invocation,
+    /// including when the palette was opened from a sidebar.
+    fn route_selection_action<A: Action>(
+        &mut self,
+        action: &A,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.palette.is_some() {
+            self.dismiss_palette(window, cx);
+            window.focus(&self.reader.read(cx).focus_handle(cx), cx);
+        }
+        self.route_reader_action(action, window, cx);
+    }
+
     fn traverse_jumplist(&mut self, direction: i32, window: &mut Window, cx: &mut Context<Self>) {
         self.jumplist.traverse(direction, |location| {
             self.reader
@@ -914,17 +929,8 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<Continuous>))
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
-            .on_action(
-                cx.listener(|this, action: &crate::reader::VisualSelect, window, cx| {
-                    // Unlike immediate reader commands, acquisition needs keyboard
-                    // ownership after the palette (even if opened from a sidebar).
-                    if this.palette.is_some() {
-                        this.dismiss_palette(window, cx);
-                        window.focus(&this.reader.read(cx).focus_handle(cx), cx);
-                    }
-                    this.route_reader_action(action, window, cx);
-                }),
-            )
+            .on_action(cx.listener(Self::route_selection_action::<crate::reader::VisualSelect>))
+            .on_action(cx.listener(Self::route_selection_action::<crate::reader::VisualSelectLine>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::ApplyMarkup>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Underline>))

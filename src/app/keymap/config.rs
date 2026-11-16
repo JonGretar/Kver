@@ -230,6 +230,7 @@ commands! {
         "show-contents" => ShowContents, "show-find" => ShowFind,
         "show-annotations" => ShowAnnotations,
         "visual-select" => crate::reader::VisualSelect,
+        "visual-select-line" => crate::reader::VisualSelectLine,
         "apply-markup" => crate::reader::ApplyMarkup,
         "highlight" => Highlight,
         "underline" => crate::reader::Underline,

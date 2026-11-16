@@ -6,6 +6,8 @@ use gpui_kit::component::{Sizable as _, button::ButtonVariants as _};
 
 use super::{hint, *};
 
+/// A word anchor in shared PageText. A caller may use its page/line identity
+/// for a larger semantic target without changing this anchor's glyph geometry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WordTarget {
     page: usize,
@@ -121,7 +123,7 @@ impl ReaderView {
     }
 
     pub(super) fn invalidate_hints(&mut self, cx: &mut Context<Self>) {
-        self.word_acquisition = None;
+        self.acquisition = None;
         self.hints.serial += 1;
         if self.hints.active.take().is_some() {
             cx.emit(HintEvent::Cancelled);
@@ -228,15 +230,23 @@ impl ReaderView {
         let filter = session.filter.clone();
         let metrics = session.metrics;
         let serial = self.hints.serial;
+        let lines = self
+            .acquisition
+            .as_ref()
+            .is_some_and(|acquisition| acquisition.mode == selection::Targeting::Lines);
         let work = cx.background_executor().spawn(async move {
             let targets = texts.iter().flat_map(|(page, text)| {
                 text.lines
                     .iter()
                     .enumerate()
                     .flat_map(|(line, _)| {
+                        let mut anchored = false;
                         text.word_units(line)
                             .into_iter()
                             .filter_map(|glyphs| {
+                                if lines && anchored {
+                                    return None;
+                                }
                                 let id = WordTarget {
                                     page: *page,
                                     line,
@@ -268,7 +278,7 @@ impl ReaderView {
                                     .iter()
                                     .map(|g| g.bottom)
                                     .fold(f64::INFINITY, f64::min);
-                                Some(hint::Target::new(
+                                let target = hint::Target::new(
                                     id,
                                     *page,
                                     [
@@ -280,7 +290,16 @@ impl ReaderView {
                                             y: bottom,
                                         },
                                     ],
-                                ))
+                                );
+                                if lines {
+                                    // Identity remains the whole line; geometry belongs
+                                    // to its first visible eligible word, not its first word.
+                                    if !target.is_eligible(&pages, &[], metrics) {
+                                        return None;
+                                    }
+                                    anchored = true;
+                                }
+                                Some(target)
                             })
                             .collect::<Vec<_>>()
                     })
@@ -343,10 +362,23 @@ impl ReaderView {
 
     pub(super) fn render_hint_input(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let session = self.hints.active.as_ref()?;
-        let prompt = match &self.word_acquisition {
-            Some(selection::Acquisition::Start) => "Choose start",
-            Some(selection::Acquisition::End { .. }) => "Choose end",
+        let prompt = match self
+            .acquisition
+            .as_ref()
+            .map(|acquisition| &acquisition.stage)
+        {
+            Some(selection::Stage::Start) => "Choose start",
+            Some(selection::Stage::End { .. }) => "Choose end",
             None => "Type two letters",
+        };
+        let line_mode = self
+            .acquisition
+            .as_ref()
+            .is_some_and(|acquisition| acquisition.mode == selection::Targeting::Lines);
+        let cancel = if line_mode {
+            "Cancel line hints"
+        } else {
+            "Cancel word hints"
         };
         let status = match &session.state {
             State::Loading | State::Preparing => "Loading visible text…".to_owned(),
@@ -389,7 +421,9 @@ impl ReaderView {
                         .min_w_0()
                         .truncate()
                         .text_color(cx.theme().muted_foreground)
-                        .child(if self.word_acquisition.is_some() {
+                        .child(if line_mode {
+                            "Lines"
+                        } else if self.acquisition.is_some() {
                             "Visual select"
                         } else {
                             "Word hints"
@@ -449,8 +483,8 @@ impl ReaderView {
                         .small()
                         .icon(IconName::Close)
                         .flex_shrink_0()
-                        .accessibility_label("Cancel word hints")
-                        .tooltip("Cancel word hints (Escape)")
+                        .accessibility_label(cancel)
+                        .tooltip(format!("{cancel} (Escape)"))
                         .on_click(cx.listener(|reader, _, window, cx| {
                             reader.invalidate_hints(cx);
                             window.focus(&reader.focus, cx);
@@ -474,11 +508,14 @@ impl ReaderView {
                         if event.keystroke.key == "backspace"
                             && session.input.prefix().is_empty()
                             && matches!(
-                                reader.word_acquisition,
-                                Some(selection::Acquisition::End { .. })
+                                reader
+                                    .acquisition
+                                    .as_ref()
+                                    .map(|acquisition| &acquisition.stage),
+                                Some(selection::Stage::End { .. })
                             )
                         {
-                            reader.back_to_word_start();
+                            reader.back_to_selection_start();
                             cx.notify();
                             return;
                         }
@@ -496,7 +533,7 @@ impl ReaderView {
                             }
                             hint::Outcome::Chosen(index) => {
                                 if let Some(snapshot) = snapshot
-                                    && !reader.choose_selection_word(snapshot.clone(), index)
+                                    && !reader.choose_selection_target(snapshot.clone(), index)
                                 {
                                     reader.finish_word_hints();
                                     cx.emit(HintEvent::Chosen { snapshot, index });

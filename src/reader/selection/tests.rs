@@ -69,6 +69,32 @@ fn phrase_points(text: &PageText, phrase: &str) -> (Point, Point) {
 }
 
 #[test]
+fn whole_line_ranges_share_copy_quads_and_reject_invalid_boundaries_atomically() {
+    let text = Arc::new(
+        crate::pdf::page_text(std::path::Path::new("examples/selection-sample.pdf"), 0).unwrap(),
+    );
+    let mut selection = super::Selection::default();
+    for (start, end) in [(0, 1), (1, 0), (1, 1)] {
+        assert!(selection.select_lines(0, text.clone(), start, end));
+        assert_eq!(
+            selection.selected_text().as_deref(),
+            Some(if start == end {
+                "Second naïve line"
+            } else {
+                "Alpha café world\nSecond naïve line"
+            })
+        );
+        let quads = selection.document_quads();
+        let before = selection.selected_text();
+        assert!(!selection.select_lines(0, text.clone(), 0, usize::MAX));
+        assert_eq!(selection.selected_text(), before);
+        assert_eq!(selection.document_quads(), quads);
+        assert_eq!(selection.page(), Some(0));
+        assert_eq!(selection.dragging_page(), None);
+    }
+}
+
+#[test]
 fn captured_quads_follow_selected_fragments_and_retain_selection() {
     let text = crate::pdf::page_text(std::path::Path::new("examples/field-guide.pdf"), 7).unwrap();
     let start = phrase_points(&text, "Route and reference points.").0;

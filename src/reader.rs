@@ -104,7 +104,7 @@ pub struct ReaderView {
     document_generation: u64,
     page_text: page_text::PageTexts,
     hints: hinting::Hinting,
-    word_acquisition: Option<selection::Acquisition>,
+    acquisition: Option<selection::Acquisition>,
     ruler: ruler::Ruler,
     ruler_history: ruler_history::RulerHistory,
     selection: Selection,
@@ -245,7 +245,7 @@ impl ReaderView {
             document_generation: 0,
             page_text: page_text::PageTexts::default(),
             hints: hinting::Hinting::new(cx),
-            word_acquisition: None,
+            acquisition: None,
             ruler: ruler::Ruler::default(),
             ruler_history: ruler_history::RulerHistory::default(),
             selection: Selection::default(),
@@ -2433,7 +2433,10 @@ impl Render for ReaderView {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &VisualSelect, window, cx| {
-                this.begin_word_selection(window, cx);
+                this.begin_selection(selection::Targeting::Words, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &VisualSelectLine, window, cx| {
+                this.begin_selection(selection::Targeting::Lines, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ApplyMarkup, window, cx| {
                 this.markup_selection(this.active_markup, window, cx)

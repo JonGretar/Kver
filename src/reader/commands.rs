@@ -32,6 +32,7 @@ gpui::actions!(
         ReadDown,
         ReadUp,
         VisualSelect,
+        VisualSelectLine,
         ApplyMarkup,
         Highlight,
         Underline,

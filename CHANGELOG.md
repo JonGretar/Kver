@@ -17,14 +17,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   archive for your user, with a one-PDF launcher and icon, without changing
   your default reader or deleting documents, settings or reading history.
 - **Experimental Linux archive:** a versioned Ubuntu x86-64 tarball with
-  checksums and runtime/manual-update guidance, generated as a non-publishing
-  CI artifact rather than a supported Linux release.
+  checksums and runtime/manual-update guidance, available on GitHub Releases
+  as an experimental download rather than a supported Linux release.
 - **Linux and Windows application menu:** access window, file, Settings, About
   and Quit commands from the title bar, with current keyboard shortcuts and
   the same unsaved-work protection as keyboard commands.
 - **Experimental Windows archive:** a native x86-64 MSVC ZIP build with the
   Kver icon, version identity, checksums and manual-update/runtime guidance,
-  available as a non-publishing CI artifact rather than a supported release.
+  available on GitHub Releases as an experimental download rather than a
+  supported Windows release.
 - Keyboard platform filters accept a list such as `["linux", "windows"]`
   as well as a single platform name.
 - **CLI handoff:** `kver some.pdf` opens files in the running app instead of
@@ -35,7 +36,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
-- Experimental Linux and Windows tester guides now cover acquiring CI artifacts,
+- Experimental Linux and Windows tester guides now cover acquiring release assets,
   current menu/keyboard and opening behavior, switching builds, and reporting
   native-platform problems without treating package checks as GUI certification.
 - Keyboard presets use conventional Ctrl application shortcuts on Linux and

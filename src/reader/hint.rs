@@ -62,6 +62,43 @@ impl<T> Target<T> {
     pub fn page(&self) -> usize {
         self.page
     }
+
+    /// Whether this anchor can receive a label before assigning the snapshot.
+    /// Callers can choose among alternative anchors without copying clip rules.
+    pub fn is_eligible(&self, pages: &[Page], occlusions: &[Rect], metrics: Metrics) -> bool {
+        self.visible_anchor(pages, occlusions, metrics).is_some()
+    }
+
+    fn visible_anchor(
+        &self,
+        pages: &[Page],
+        occlusions: &[Rect],
+        metrics: Metrics,
+    ) -> Option<(Rect, Rect, Rect)> {
+        let page = pages.iter().find(|page| page.index == self.page)?;
+        let clip = page.clip?;
+        let points = self
+            .corners
+            .map(|point| page.projection.document_to_screen(point));
+        let anchor = Rect::new(
+            points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
+            points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
+            points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
+            points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
+        );
+        let visible = anchor.intersection(clip)?;
+        if occlusions
+            .iter()
+            .any(|occlusion| occlusion.contains(visible))
+        {
+            return None;
+        }
+        let [left, top, right, bottom] = visible.edges;
+        if visible != anchor && (right - left < metrics.width || bottom - top < metrics.height) {
+            return None;
+        }
+        Some((anchor, visible, clip))
+    }
 }
 
 /// Page projection and actual viewport. Their intersection is enforced here,
@@ -145,36 +182,12 @@ impl<T> Snapshot<T> {
         }
         let mut labels: Vec<Label<T>> = Vec::new();
         for target in targets {
-            let Some(page) = pages.iter().find(|page| page.index == target.page) else {
+            let Some((anchor, visible, clip)) = target.visible_anchor(pages, occlusions, metrics)
+            else {
                 continue;
             };
-            let Some(clip) = page.clip else { continue };
-            let points = target
-                .corners
-                .map(|point| page.projection.document_to_screen(point));
-            let anchor = Rect::new(
-                points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min),
-                points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min),
-                points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max),
-                points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max),
-            );
-            let Some(visible) = anchor.intersection(clip) else {
-                continue;
-            };
-            if occlusions
-                .iter()
-                .any(|occlusion| occlusion.contains(visible))
-            {
-                continue;
-            }
             let [left, top, right, bottom] = visible.edges;
             let partial = visible != anchor;
-            // Clipped words are eligible only when their visible portion can
-            // intrinsically hold a label. This decision must not depend on
-            // other labels.
-            if partial && (right - left < metrics.width || bottom - top < metrics.height) {
-                continue;
-            }
             if labels.len() == 676 {
                 return Err(Refusal::Crowded);
             }

@@ -4,7 +4,18 @@ use std::sync::Arc;
 
 use super::super::{hint, *};
 
-pub(in crate::reader) enum Acquisition {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::reader) enum Targeting {
+    Words,
+    Lines,
+}
+
+pub(in crate::reader) struct Acquisition {
+    pub mode: Targeting,
+    pub stage: Stage,
+}
+
+pub(in crate::reader) enum Stage {
     Start,
     End {
         original: Arc<hint::Snapshot<WordTarget>>,
@@ -13,8 +24,9 @@ pub(in crate::reader) enum Acquisition {
 }
 
 impl ReaderView {
-    pub(in crate::reader) fn begin_word_selection(
+    pub(in crate::reader) fn begin_selection(
         &mut self,
+        mode: Targeting,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -23,42 +35,56 @@ impl ReaderView {
         }
         self.begin_word_hints(|_| true, window, cx);
         if self.hints.is_active() {
-            self.word_acquisition = Some(Acquisition::Start);
+            self.acquisition = Some(Acquisition {
+                mode,
+                stage: Stage::Start,
+            });
         }
     }
 
     /// Returns true when selection owns the choice; independent hint consumers
     /// still receive the original Chosen event without selection semantics.
-    pub(in crate::reader) fn choose_selection_word(
+    pub(in crate::reader) fn choose_selection_target(
         &mut self,
         snapshot: Arc<hint::Snapshot<WordTarget>>,
         index: usize,
     ) -> bool {
-        let Some(stage) = self.word_acquisition.take() else {
+        let Some(Acquisition { mode, stage }) = self.acquisition.take() else {
             return false;
         };
         let target = snapshot.labels()[index].target().id().clone();
         match stage {
-            Acquisition::Start => {
+            Stage::Start => {
                 self.resume_word_hints(
                     Arc::new(snapshot.subset(|word| word.page() == target.page())),
                     Some(target.clone()),
                 );
-                self.word_acquisition = Some(Acquisition::End {
-                    original: snapshot,
-                    start: target,
+                self.acquisition = Some(Acquisition {
+                    mode,
+                    stage: Stage::End {
+                        original: snapshot,
+                        start: target,
+                    },
                 });
             }
-            Acquisition::End { start, .. } => {
+            Stage::End { start, .. } => {
                 if start.page() == target.page()
                     && let Some(text) = self.page_text.get(start.page()).cloned()
                 {
-                    self.selection.select_words(
-                        start.page(),
-                        text,
-                        (start.line(), start.glyphs()),
-                        (target.line(), target.glyphs()),
-                    );
+                    match mode {
+                        Targeting::Words => self.selection.select_words(
+                            start.page(),
+                            text,
+                            (start.line(), start.glyphs()),
+                            (target.line(), target.glyphs()),
+                        ),
+                        Targeting::Lines => self.selection.select_lines(
+                            start.page(),
+                            text,
+                            start.line(),
+                            target.line(),
+                        ),
+                    };
                 }
                 self.finish_word_hints();
             }
@@ -66,10 +92,17 @@ impl ReaderView {
         true
     }
 
-    pub(in crate::reader) fn back_to_word_start(&mut self) {
-        if let Some(Acquisition::End { original, .. }) = self.word_acquisition.take() {
+    pub(in crate::reader) fn back_to_selection_start(&mut self) {
+        if let Some(Acquisition {
+            mode,
+            stage: Stage::End { original, .. },
+        }) = self.acquisition.take()
+        {
             self.resume_word_hints(original, None);
-            self.word_acquisition = Some(Acquisition::Start);
+            self.acquisition = Some(Acquisition {
+                mode,
+                stage: Stage::Start,
+            });
         }
     }
 }

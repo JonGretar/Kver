@@ -2,6 +2,22 @@ use super::*;
 
 #[gpui_kit::test]
 fn visual_select_ignores_late_text_and_reloaded_endpoint_choices(cx: &mut TestAppContext) {
+    stale_selection_work(cx, false);
+}
+
+#[gpui_kit::test]
+fn visual_select_line_ignores_late_text_and_reloaded_endpoint_choices(cx: &mut TestAppContext) {
+    stale_selection_work(cx, true);
+}
+
+fn stale_selection_work(cx: &mut TestAppContext, lines: bool) {
+    let action = || {
+        if lines {
+            Box::new(VisualSelectLine) as Box<dyn gpui::Action>
+        } else {
+            Box::new(VisualSelect)
+        }
+    };
     cx.update(|cx| {
         gpui_kit::init(cx);
         bind_reader_keys(cx);
@@ -18,7 +34,7 @@ fn visual_select_ignores_late_text_and_reloaded_endpoint_choices(cx: &mut TestAp
             .unwrap()
     });
     cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(VisualSelect), cx);
+        window.dispatch_action(action(), cx);
     })
     .unwrap();
     super::authoring::draw(cx, handle);
@@ -49,7 +65,7 @@ fn visual_select_ignores_late_text_and_reloaded_endpoint_choices(cx: &mut TestAp
     super::authoring::draw(cx, handle);
     cx.update_window(handle, |_, window, cx| {
         assert!(window.try_find("hint-input").is_none());
-        window.dispatch_action(Box::new(VisualSelect), cx);
+        window.dispatch_action(action(), cx);
     })
     .unwrap();
     super::authoring::draw(cx, handle);
@@ -70,10 +86,8 @@ fn visual_select_ignores_late_text_and_reloaded_endpoint_choices(cx: &mut TestAp
     reader.update(cx, |reader, cx| reader.open_path(path.clone(), cx));
     cx.run_until_parked();
     super::authoring::draw(cx, handle);
-    cx.update_window(handle, |_, window, cx| {
-        window.dispatch_action(Box::new(VisualSelect), cx)
-    })
-    .unwrap();
+    cx.update_window(handle, |_, window, cx| window.dispatch_action(action(), cx))
+        .unwrap();
     for _ in 0..3 {
         cx.run_until_parked();
         super::authoring::draw(cx, handle);

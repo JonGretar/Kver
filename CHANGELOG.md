@@ -9,10 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- **Visual select:** select a whole-word passage by typing two hint pairs
-  (`v` in Vim or **Visual select…** in the command palette), then copy or
-  annotate it like a mouse selection. Escape cancels without replacing your
-  previous selection.
+- **Visual select:** select whole words or lines by typing two hint pairs
+  (`v` / `V` in Vim or **Visual select…** / **Visual select line…** in the
+  command palette), then copy or annotate it like a mouse selection. Escape
+  cancels without replacing your previous selection.
 - **Linux desktop installation:** optionally install or remove the experimental
   archive for your user, with a one-PDF launcher and icon, without changing
   your default reader or deleting documents, settings or reading history.

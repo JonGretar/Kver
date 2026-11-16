@@ -170,6 +170,28 @@ fn clips_partial_words_and_excludes_occlusion_and_missing_pages() {
 }
 
 #[test]
+fn callers_choose_first_eligible_anchor_without_semantics_in_hinting() {
+    let metrics = Metrics::new(20., 12., 1.);
+    let pages = pages();
+    let occlusions = [Rect::new(70., 0., 150., 60.)];
+    let alternatives = [
+        target(1, -40., 5.),
+        target(1, -20., 5.),
+        target(1, 80., 30.),
+        target(1, -5., 5.),
+        target(1, 200., 30.),
+    ];
+    let first = alternatives
+        .into_iter()
+        .find(|target| target.is_eligible(&pages, &occlusions, metrics))
+        .unwrap();
+    let snapshot = Snapshot::prepare([first], &pages, &occlusions, metrics).unwrap();
+    assert_eq!(snapshot.labels().len(), 1);
+    assert_eq!(*snapshot.labels()[0].target().id(), 1);
+    assert_eq!(snapshot.labels()[0].bounds().edges(), [0., 5., 20., 17.]);
+}
+
+#[test]
 fn short_word_can_use_space_after_it_instead_of_colliding_before_it() {
     let short = Target::new(
         2,

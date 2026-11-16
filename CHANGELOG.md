@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-16
+
+Select passages and follow links without reaching for the mouse. This release
+also introduces experimental Linux and Windows downloads.
+
 ### Added
 
 - **Follow links:** press `f` and type a link hint to follow it, or `F` to open
@@ -16,19 +21,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   (`v` / `V` in Vim or **Visual select…** / **Visual select line…** in the
   command palette), then copy or annotate it like a mouse selection. Escape
   cancels without replacing your previous selection.
-- **Linux desktop installation:** optionally install or remove the experimental
-  archive for your user, with a one-PDF launcher and icon, without changing
-  your default reader or deleting documents, settings or reading history.
-- **Experimental Linux archive:** a versioned Ubuntu x86-64 tarball with
-  checksums and runtime/manual-update guidance, available on GitHub Releases
-  as an experimental download rather than a supported Linux release.
+- **Experimental Linux and Windows downloads:** try the Ubuntu x86-64 tarball
+  or Windows x86-64 ZIP, with checksums and runtime/manual-update guidance.
+  These are testing builds, not supported-platform releases; native desktop
+  usability remains unverified. Linux requires glibc 2.39 or newer; Windows
+  requires the Microsoft Visual C++ x64 runtime described in its guide.
+- **Linux desktop installation:** optionally install a launcher and icon for
+  your user, without changing your default PDF reader. Removing the installation
+  preserves documents, settings, and reading history.
 - **Linux and Windows application menu:** access window, file, Settings, About
   and Quit commands from the title bar, with current keyboard shortcuts and
   the same unsaved-work protection as keyboard commands.
-- **Experimental Windows archive:** a native x86-64 MSVC ZIP build with the
-  Kver icon, version identity, checksums and manual-update/runtime guidance,
-  available on GitHub Releases as an experimental download rather than a
-  supported Windows release.
 - Keyboard platform filters accept a list such as `["linux", "windows"]`
   as well as a single platform name.
 - **CLI handoff:** `kver some.pdf` opens files in the running app instead of
@@ -41,9 +44,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Vim Fit Page now uses `Shift-W` instead of `f`, leaving `f` free for Follow;
   `w` remains Fit Width.
-- Experimental Linux and Windows tester guides now cover acquiring release assets,
-  current menu/keyboard and opening behavior, switching builds, and reporting
-  native-platform problems without treating package checks as GUI certification.
 - Keyboard presets use conventional Ctrl application shortcuts on Linux and
   Windows while preserving macOS Command shortcuts. Standard Ctrl-O opens a
   PDF; Vim keeps Ctrl-O/Ctrl-I history navigation in Reader and Contents and
@@ -53,6 +53,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Words positioned without encoded spaces, common in TeX-produced PDFs, now
   remain separate in word selection, visual hints, copying, and Find results.
+
+### Known issues
+
+- Windows cannot safely overwrite an existing PDF yet; save to a new filename.
+- Some malformed PDFs hide annotations after invalid entries in their annotation
+  arrays. The data remains in the PDF, but Kver may not display it
+  ([#142](https://github.com/JonGretar/Kver/issues/142)).
 
 ## [0.6.0] - 2026-11-14
 

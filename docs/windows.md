@@ -35,8 +35,14 @@ License notices and the dependency report travel with the executable.
 ## Extract and run
 
 1. Obtain the experimental artifact from a trusted run of the project's
-   **Experimental Windows archive** GitHub Actions workflow. Extract the
-   GitHub artifact wrapper to find the versioned ZIP and its `.zip.sha256`.
+   [Experimental Windows archive](https://github.com/JonGretar/Kver/actions/workflows/windows-archive.yml)
+   GitHub Actions workflow. Choose a successful run at the revision you intend
+   to test, sign in to GitHub, and download its
+   `Kver-experimental-windows-x86_64-<revision>` artifact under **Artifacts**.
+   Extract this outer download to find the versioned ZIP and its `.zip.sha256`.
+   Keep the run URL/revision: different builds can report the same app version.
+   If the artifact has expired, ask the maintainer for a replacement; these
+   are not public release assets.
 2. In PowerShell, run `Get-FileHash .\Kver-vVERSION-experimental-windows-x86_64.zip
    -Algorithm SHA256` and compare the hash with the adjacent `.sha256` file.
    A matching hash detects corruption; an unsigned checksum from the same
@@ -52,15 +58,32 @@ License notices and the dependency report travel with the executable.
    & 'C:\Users\you\Apps\Kver\kver.exe' --version
    ```
 
-The existing CLI defaults to reusing a reader; explicit options override the
-application preference. Relative PDF paths use the caller's working directory.
+The **Open files in** application preference defaults to reusing a reader;
+explicit `--new-window` / `--reuse-window` options override it. Relative PDF
+paths use the caller's working directory; each invocation accepts one PDF.
 See the included `CLI.md` for the command contract. Windows instance forwarding
 requires separate native acceptance; the package check only executes `--version`.
+A successful CLI exit means the request was queued, not loaded or saved.
+Answer any Save / Discard / Cancel prompt in the reader; Cancel must preserve
+the original PDF and edits.
 No installer, default-reader change or file-association registration is performed.
 
 Known platform limitation: safe overwrite of an existing PDF is currently
 unavailable on Windows. Save to a new filename instead; this archive does not
 change that safeguard.
+
+## Menu and keyboard
+
+Open the title-bar **Kver** menu (a menu icon in narrow windows) for New Window,
+Open/Recent, Save/Save As, Close Window, Settings, About and Quit.
+**Settings → Keyboard** selects Standard or Vim and shows effective shortcuts;
+menu and palette hints follow that selection and your overrides. Standard uses
+Ctrl-O to open, Ctrl-F for Find and Ctrl-T for Contents. Vim uses `o`, `/`
+and `g c` in the reader instead, and keeps Ctrl-O/Ctrl-I for back/forward
+history and Ctrl-F for scrolling. Both use Ctrl-C to copy selected text and
+Ctrl-Shift-P for the command palette. See the
+[keyboard guide](https://github.com/JonGretar/Kver/blob/main/docs/keybindings.md)
+for the full policy. There is no experimental Check for Updates menu command.
 
 ## Unsigned downloads and policy
 
@@ -75,7 +98,8 @@ exact warning and Windows version; do not send private documents.
 
 ## Update or remove
 
-Quit all Kver windows/processes before changing versions. Extract the new ZIP
+Save your work and quit all Kver windows/processes before changing versions;
+otherwise the new executable can forward to the old running app. Extract the new ZIP
 into a separate folder, verify it, and launch that copy. Update any personal
 shortcut manually. There is no Windows self-updater. Keep the previous folder
 if you need to return to that version; do not overwrite a running executable.
@@ -92,10 +116,40 @@ imports, licenses, ZIP contents and checksums, and executes the extracted
 `--version` from an unrelated directory on a Windows development runner.
 That runner has development runtimes and is **not a clean PC**.
 
-Before calling a build natively usable, record Windows version, installed
-runtime, GPU/driver, scaling and security conditions separately in the issue:
-clean non-development extraction/launch; first-run warnings; file picker and CLI
-opens/instance forwarding; text, scanned, long and rotated/cropped PDFs; zoom
-and scrolling; selection/copy; Find/Contents; keyboard/menu behavior; multiple
-windows; persistence; DPI changes; saving and unsaved-work safeguards.
-Unperformed checks remain **unverified**, not inferred passes.
+On a non-development PC, record each check as passed, failed or unverified:
+
+- Clean extraction and launch from an unrelated directory; first-run security
+  prompts and runtime availability without development tools installed.
+- File picker and relative/absolute CLI opens, cold and with Kver running;
+  default reuse, the New window preference and both CLI overrides. Check the
+  actual destination window, not just the CLI exit status.
+- Text, scanned, long and rotated/cropped PDFs; zoom/scroll; selection/copy
+  into another app; Find and Contents when the PDF provides searchable text/outline.
+- Standard/Vim keys and effective menu/palette hints; keyboard/pointer menu
+  navigation, disabled Save, dismissal and return to reader/Find focus.
+- Multiple document windows; close/reopen persistence; monitor/DPI changes.
+- On disposable PDF copies, edit markup, save to a **new filename** and reopen
+  it; check the known existing-file overwrite refusal leaves that file intact.
+  Test Save / Discard / Cancel while replacing a dirty PDF, closing and quitting.
+  Cancel must preserve the document and edits.
+
+Record Windows version/build, installed x64 v14 runtime, GPU/driver, scaling
+and security conditions separately in
+[#183](https://github.com/JonGretar/Kver/issues/183). Unperformed checks remain
+**unverified**, not inferred passes.
+
+### Report a problem
+
+[Open an issue](https://github.com/JonGretar/Kver/issues/new) with:
+
+- `kver.exe --version`, workflow run URL/revision, ZIP filename and SHA-256;
+  launch path and whether another version was running.
+- Windows edition/version/build (`winver`), architecture, installed Microsoft
+  x64 v14 runtime version, GPU/driver, monitor scaling and any VM or remote session.
+  Say when a detail is unknown.
+- Exact launch command or menu/keys, preset and relevant overrides, steps,
+  expected/actual results and whether the problem repeats after restart.
+- Exact security warning, missing-DLL or dialog error, terminal output and a
+  screenshot if useful. Redact personal paths and private information.
+- PDF type/page count and a public or minimal reproducer, if possible.
+  Do not upload private PDFs, configuration or reading-history databases.

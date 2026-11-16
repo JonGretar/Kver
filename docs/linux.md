@@ -4,6 +4,21 @@ This is a testing artifact, not a supported Linux release or a claim of
 compatibility with every distribution. No Rust development environment is
 needed to use it. Updates are manual; no updater is included.
 
+## Obtain a test build
+
+Open the [Experimental Linux archive workflow](https://github.com/JonGretar/Kver/actions/workflows/linux-archive.yml)
+and choose a successful run at the revision you intend to test. Sign in to
+GitHub to download its `Kver-experimental-linux-x86_64-<revision>` artifact
+from the run's **Artifacts** section. Extract that outer download to find the
+tarball and checksum below. These are nonpublishing CI artifacts, not public
+release assets; they expire after 14 days. If a trusted build has expired,
+ask the maintainer for a replacement rather than using an unrelated mirror.
+
+Keep the run URL and revision: multiple experimental builds can report the
+same app version. `BUILD-INFO.json` inside the tarball records its source commit.
+Package/loader checks do not establish native desktop usability. See
+[#183](https://github.com/JonGretar/Kver/issues/183) for per-OS evidence and gaps.
+
 ## Extract and run
 
 Download the versioned `Kver-vX.Y.Z-experimental-linux-x86_64.tar.gz` and
@@ -25,6 +40,27 @@ options. Launching by absolute executable path works from any directory.
 Reader icons, app artwork and both keybinding presets are embedded.
 `resources/kver.png` is supplied for desktop integration, not loaded
 relative to the working directory. Nothing registers a default PDF reader.
+
+## Read and open more files
+
+Use **Open PDF** or the title-bar **Kver** menu (a menu icon in narrow windows).
+The menu includes New Window, Open Recent, Save/Save As, Settings, About and
+Quit. **Settings → Keyboard** selects Standard or Vim and shows effective
+shortcuts; menu and palette hints follow that selection and your overrides.
+Standard uses Ctrl-O to open, Ctrl-F for Find and Ctrl-T for Contents.
+Vim uses `o`, `/` and `g c` in the reader instead, and keeps Ctrl-O/Ctrl-I
+for back/forward history and Ctrl-F for scrolling. Both use Ctrl-C to copy
+selected text and Ctrl-Shift-P for the command palette.
+The [keyboard guide](https://github.com/JonGretar/Kver/blob/main/docs/keybindings.md)
+has the full policy.
+
+The **Open files in** application preference defaults to an existing reader.
+For explicit choices, use `./kver --new-window /path/to/other.pdf` or
+`./kver --reuse-window /path/to/other.pdf`. Each invocation accepts one PDF;
+quote paths containing spaces. Opens forward to the running per-user app,
+including opens from the installed launcher. A successful CLI exit means
+queued, not loaded or saved: answer any Save / Discard / Cancel prompt in
+the reader. Cancel must leave the original PDF and edits intact.
 
 ## Runtime requirements and limits
 
@@ -98,12 +134,49 @@ and retry. Never delete your data directories to fix an installation.
 Removal does not delete downloaded/extracted copies. Those remain portable,
 independent copies that you can remove separately.
 
+## Update a portable copy
+
+Save your work and quit **all** Kver windows/processes before switching builds;
+otherwise the new executable can forward to the old running app. Extract and
+verify the new tarball in a separate directory, then run that copy and check
+its version. Keep the previous archive if you want to return to it. For an
+installed copy, use the replacement procedure above. Neither procedure updates
+automatically or resets configuration and reading history.
+
 ## Native testing
 
-Report the archive checksum, version, distribution, X11/Wayland session,
-desktop/portal backend and GPU/driver when testing. Archive verification is
-separate from native acceptance. On a non-development desktop, check launch,
-file picker and CLI opens/forwarding; text, scanned, long and rotated/cropped
-PDFs; zoom/scrolling; selection/copy; Find/Contents; keyboard/menu interaction;
-multiple windows; persistence; DPI changes; and save/unsaved-work safeguards.
-Treat any unavailable checks as unverified, not inferred passes.
+On a non-development desktop, record each check as passed, failed or unverified:
+
+- Clean extraction and launch from an unrelated directory; first-run security
+  prompts; installed desktop launcher and window grouping, if installed.
+- File picker, relative/absolute CLI paths and launcher opens, both cold and
+  with Kver running; default reuse, the New window preference and both CLI
+  overrides. Check the actual destination window, not just the CLI exit status.
+- Text, scanned, long and rotated/cropped PDFs; zoom/scroll; selection/copy
+  into another app; Find and Contents when the PDF provides searchable text/outline.
+- Standard/Vim keys and effective menu/palette hints; menu keyboard/pointer
+  navigation, disabled Save, dismissal and return to reader/Find focus.
+- Multiple document windows; close/reopen persistence; monitor/scaling changes.
+- On disposable PDF copies, edit markup and Save/Save As, reopen the result,
+  then test Save / Discard / Cancel while replacing a dirty PDF, closing and
+  quitting. Cancel must preserve the document and edits.
+
+Record X11 and Wayland results separately, including the desktop/compositor,
+portal backend and GPU driver. CI, software rendering and loader success
+are not native acceptance. Leave unavailable combinations unverified.
+
+### Report a problem
+
+[Open an issue](https://github.com/JonGretar/Kver/issues/new) with:
+
+- `kver --version`, workflow run URL/revision, archive filename and SHA-256;
+  extracted or installed copy, and whether another version was running.
+- Distribution/version, architecture and glibc (`ldd --version`); X11/Wayland,
+  desktop/compositor, portal/backend, GPU/driver, monitor scaling and any VM
+  or remote session. Say when a detail is unknown.
+- Exact launch command or menu/keys, preset and relevant overrides, steps,
+  expected/actual results and whether the problem repeats after restart.
+- Terminal output, exact security/dialog errors and a screenshot if useful.
+  Redact personal paths and private information.
+- PDF type/page count and a public or minimal reproducer, if possible.
+  Do not upload private PDFs, configuration or reading-history databases.

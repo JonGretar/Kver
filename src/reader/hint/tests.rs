@@ -129,7 +129,7 @@ fn paint_order_puts_leftmost_behind_without_changing_assignments() {
     .unwrap();
     let input = Input::default();
     let painted: Vec<_> = snapshot
-        .paint_labels(0, &input)
+        .paint_labels(0, &input, None)
         .into_iter()
         .map(|label| (*label.target().id(), label.letters()))
         .collect();
@@ -138,8 +138,9 @@ fn paint_order_puts_leftmost_behind_without_changing_assignments() {
     assert_eq!(snapshot.labels()[0].letters(), "aa");
     let mut input = Input::default();
     input.key("s", Some(&snapshot));
-    assert_eq!(snapshot.paint_labels(0, &input)[0].letters(), "sa");
-    assert!(snapshot.paint_labels(1, &input).is_empty());
+    assert_eq!(snapshot.paint_labels(0, &input, None)[0].letters(), "sa");
+    assert!(snapshot.paint_labels(1, &input, None).is_empty());
+    assert_eq!(snapshot.paint_labels(0, &input, Some(&1)).len(), 2);
 }
 
 #[test]

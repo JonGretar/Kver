@@ -12,6 +12,9 @@ use crate::{
     pdf::{PageText, TextGlyph},
 };
 
+mod acquisition;
+pub(super) use acquisition::Acquisition;
+
 #[derive(Default)]
 pub(super) struct Selection {
     text: Option<Arc<PageText>>,
@@ -128,6 +131,41 @@ impl Selection {
 
     pub(super) fn finish(&mut self) {
         self.drag = None;
+    }
+
+    /// Commit both complete words at once, in the same reading order used by
+    /// pointer selection. Invalid boundaries leave the prior selection intact.
+    pub(super) fn select_words(
+        &mut self,
+        page: usize,
+        text: Arc<PageText>,
+        start: (usize, Range<usize>),
+        end: (usize, Range<usize>),
+    ) -> bool {
+        let word_span = |(line, glyphs): (usize, Range<usize>)| {
+            text.word_units(line).contains(&glyphs).then_some(Span {
+                page,
+                start: Anchor {
+                    line,
+                    boundary: glyphs.start,
+                },
+                end: Anchor {
+                    line,
+                    boundary: glyphs.end,
+                },
+            })
+        };
+        let (Some(start), Some(end)) = (word_span(start), word_span(end)) else {
+            return false;
+        };
+        self.span = Some(Span {
+            page,
+            start: start.start.min(end.start),
+            end: start.end.max(end.end),
+        });
+        self.text = Some(text);
+        self.drag = None;
+        true
     }
 
     pub(super) fn selected_text(&self) -> Option<String> {

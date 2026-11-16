@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Visual select:** select a whole-word passage by typing two hint pairs
+  (`v` in Vim or **Visual select…** in the command palette), then copy or
+  annotate it like a mouse selection. Escape cancels without replacing your
+  previous selection.
 - **Linux desktop installation:** optionally install or remove the experimental
   archive for your user, with a one-PDF launcher and icon, without changing
   your default reader or deleting documents, settings or reading history.
@@ -38,6 +42,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   Windows while preserving macOS Command shortcuts. Standard Ctrl-O opens a
   PDF; Vim keeps Ctrl-O/Ctrl-I history navigation in Reader and Contents and
   `o` for Open. Windows annotation redo uses Ctrl-Y.
+
+### Fixed
+
+- Words positioned without encoded spaces, common in TeX-produced PDFs, now
+  remain separate in word selection, visual hints, copying, and Find results.
 
 ## [0.6.0] - 2026-11-14
 

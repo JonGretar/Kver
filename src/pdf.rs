@@ -516,8 +516,8 @@ pub struct TextGlyph {
     pub text: String,
     pub start: Point,
     pub end: Point,
-    /// Right edge of visible ink, when the font exposes an outline. Unlike
-    /// `end`, this does not absorb PDF word spacing before the next glyph.
+    /// Right edge of visible ink, when the font exposes an outline. This may
+    /// differ from the nominal advance in `end` because of font sidebearings.
     pub ink_right: Option<f64>,
     pub top: f64,
     pub bottom: f64,
@@ -567,9 +567,23 @@ impl PageText {
 }
 
 mod text_layout;
+mod text_spacing;
 
-fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> {
-    glyphs.sort_by(|a, b| b.start.y.total_cmp(&a.start.y));
+fn sort_visible_glyphs<T>(items: &mut [T], glyph: impl Fn(&T) -> &TextGlyph) {
+    items.sort_by(|a, b| glyph(b).start.y.total_cmp(&glyph(a).start.y));
+    let mut start = 0;
+    while start < items.len() {
+        let baseline = glyph(&items[start]).start.y;
+        let mut end = start + 1;
+        while end < items.len() && (glyph(&items[end]).start.y - baseline).abs() <= 3.0 {
+            end += 1;
+        }
+        items[start..end].sort_by(|a, b| glyph(a).start.x.total_cmp(&glyph(b).start.x));
+        start = end;
+    }
+}
+
+fn visible_lines(glyphs: &[TextGlyph]) -> Vec<std::ops::Range<usize>> {
     let mut lines = Vec::new();
     let mut start = 0;
     while start < glyphs.len() {
@@ -578,7 +592,6 @@ fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> 
         while end < glyphs.len() && (glyphs[end].start.y - baseline).abs() <= 3.0 {
             end += 1;
         }
-        glyphs[start..end].sort_by(|a, b| a.start.x.total_cmp(&b.start.x));
         // A common baseline does not imply a common line: columns and table
         // cells can share it. Do not draw a selection rectangle over a gutter.
         let mut fragment = start;
@@ -598,9 +611,15 @@ fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> 
     text_layout::reading_order(glyphs, lines)
 }
 
+#[cfg(test)]
+fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> {
+    sort_visible_glyphs(glyphs, |glyph| glyph);
+    visible_lines(glyphs)
+}
+
 struct TextCollector {
     crop: Rect,
-    glyphs: Vec<TextGlyph>,
+    glyphs: Vec<text_spacing::DecodedGlyph>,
 }
 
 impl<'a> Device<'a> for TextCollector {
@@ -623,6 +642,16 @@ impl<'a> Device<'a> for TextCollector {
             };
             let transform = props.transform * glyph.transform();
             let origin = transform * KurboPoint::ZERO;
+            let em = (transform * KurboPoint::new(1000., 0.) - origin).hypot();
+            // A next origin includes TJ/Tc/Tw positioning, not just this
+            // glyph's width. Preserve its nominal advance so extraction can
+            // recover unmapped word gaps without confusing font sidebearings.
+            let advance = match &**glyph {
+                Glyph::Outline(glyph) => glyph
+                    .advance_width()
+                    .map(|width| transform * KurboPoint::new(width as f64, 0.)),
+                Glyph::Type3(_) => None,
+            };
             let outline = match &**glyph {
                 Glyph::Outline(outline) if !outline.outline().elements().is_empty() => {
                     Some((transform * outline.outline()).bounding_box())
@@ -659,23 +688,26 @@ impl<'a> Device<'a> for TextCollector {
             {
                 continue;
             }
-            self.glyphs.push(TextGlyph {
-                text: match unicode {
-                    BfString::Char(c) => c.to_string(),
-                    BfString::String(s) => s,
+            self.glyphs.push(text_spacing::DecodedGlyph::new(
+                TextGlyph {
+                    text: match unicode {
+                        BfString::Char(c) => c.to_string(),
+                        BfString::String(s) => s,
+                    },
+                    start: Point {
+                        x: origin.x,
+                        y: origin.y,
+                    },
+                    end: Point {
+                        x: advance.unwrap_or(next).x,
+                        y: advance.unwrap_or(next).y,
+                    },
+                    ink_right: outline.map(|bounds| bounds.x1),
+                    top: bounds.y1.max(origin.y + 8.0),
+                    bottom: bounds.y0.min(origin.y - 2.0),
                 },
-                start: Point {
-                    x: origin.x,
-                    y: origin.y,
-                },
-                end: Point {
-                    x: next.x,
-                    y: next.y,
-                },
-                ink_right: outline.map(|bounds| bounds.x1),
-                top: bounds.y1.max(origin.y + 8.0),
-                bottom: bounds.y0.min(origin.y - 2.0),
-            });
+                em,
+            ));
         }
     }
 }
@@ -738,10 +770,12 @@ fn page_text_with_settings(
         glyphs: Vec::new(),
     };
     interpret_page(page, &mut context, &mut collector);
-    let lines = order_visible_lines(&mut collector.glyphs);
+    sort_visible_glyphs(&mut collector.glyphs, |decoded| decoded.glyph());
+    let glyphs = text_spacing::normalize(collector.glyphs);
+    let lines = visible_lines(&glyphs);
     Ok(PageText {
         transform: PageTransform::from_coefficients(page.initial_transform(true).as_coeffs()),
-        glyphs: collector.glyphs,
+        glyphs,
         lines,
     })
 }
@@ -933,7 +967,8 @@ mod tests {
             bottom: y - 2.0,
         })
         .collect();
-        let lines = order_visible_lines(&mut glyphs);
+        sort_visible_glyphs(&mut glyphs, |glyph| glyph);
+        let lines = visible_lines(&glyphs);
         assert_eq!(lines, [0..2, 2..4]);
         assert_eq!(
             glyphs

@@ -2,6 +2,11 @@
 # No bindings are inherited from Standard.
 
 [[keyboard.bindings]]
+keys = "v"
+context = "reader"
+command = "visual-select"
+
+[[keyboard.bindings]]
 keys = "cmd-o"
 command = "open-pdf"
 platform = "mac"

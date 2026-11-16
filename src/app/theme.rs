@@ -46,6 +46,16 @@ pub(crate) fn word_hints() -> (gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla) {
     )
 }
 
+/// Chosen range start: red document-surface fill, paired with underlined letters
+/// and an explicit accessible start label by the hint presentation.
+pub(crate) fn word_hint_start() -> (gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla) {
+    (
+        gpui_kit::rgb(0xd20f39).into(),
+        gpui_kit::rgb(0xffffff).into(),
+        gpui_kit::rgb(0x4c4f69).into(),
+    )
+}
+
 // Official palette roles: https://catppuccin.com/palette/
 struct Palette {
     base: &'static str,

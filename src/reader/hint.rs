@@ -266,11 +266,22 @@ impl<T> Snapshot<T> {
         &self.labels
     }
 
-    pub(super) fn paint_labels(&self, page: usize, input: &Input) -> Vec<&Label<T>> {
+    pub(super) fn paint_labels(
+        &self,
+        page: usize,
+        input: &Input,
+        marked: Option<&T>,
+    ) -> Vec<&Label<T>>
+    where
+        T: PartialEq,
+    {
         let mut labels: Vec<_> = self
             .labels
             .iter()
-            .filter(|label| label.target.page == page && input.matches(label))
+            .filter(|label| {
+                label.target.page == page
+                    && (input.matches(label) || marked == Some(label.target.id()))
+            })
             .collect();
         // Paint leftmost first: a right neighbour can cover the trailing
         // letter, leaving the leading prefix exposed. Never reorder identities.

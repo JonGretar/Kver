@@ -1,9 +1,6 @@
 //! Mapped-text phrase matching. Geometry stays in PDF document coordinates.
 
-use crate::{
-    coordinates::Point,
-    pdf::{PageText, TextGlyph},
-};
+use crate::{coordinates::Point, pdf::PageText};
 
 #[derive(Clone, Debug)]
 pub struct FindMatch {
@@ -12,45 +9,6 @@ pub struct FindMatch {
     pub transform: crate::coordinates::PageTransform,
     /// Four document-space corners enclosing the mapped glyphs.
     pub corners: [Point; 4],
-}
-
-/// Some PDFs position words apart without mapping a space character. Infer
-/// only a clear word-sized gap; small kerning/tracking gaps remain within a
-/// word, and mapped whitespace is never duplicated.
-fn has_word_gap(previous: &TextGlyph, next: &TextGlyph) -> bool {
-    if previous
-        .text
-        .chars()
-        .last()
-        .is_some_and(char::is_whitespace)
-        || next.text.chars().next().is_some_and(char::is_whitespace)
-    {
-        return false;
-    }
-    let previous_width =
-        (previous.end.x - previous.start.x) / previous.text.chars().count().max(1) as f64;
-    let next_width = (next.end.x - next.start.x) / next.text.chars().count().max(1) as f64;
-    let height = (previous.top - previous.bottom)
-        .min(next.top - next.bottom)
-        .max(0.);
-    let threshold = ((previous_width + next_width) * 0.23)
-        .max(height * 0.23)
-        .max(1.5);
-    // A run's advance may already include the gap before the next origin;
-    // only the outline gives us an ink edge independent of that advance.
-    let right = previous.ink_right.unwrap_or(previous.end.x);
-    next.start.x - right > threshold
-}
-
-fn snippet_text(glyphs: &[TextGlyph]) -> String {
-    let mut snippet = String::new();
-    for (index, glyph) in glyphs.iter().enumerate() {
-        if index > 0 && has_word_gap(&glyphs[index - 1], glyph) {
-            snippet.push(' ');
-        }
-        snippet.push_str(&glyph.text);
-    }
-    snippet
 }
 
 /// Match within visual lines only: synthesizing reading order across columns
@@ -66,10 +24,6 @@ pub fn matches_on_page(text: &PageText, page: usize, query: &str) -> Vec<FindMat
         let mut folded = Vec::new();
         let mut owners = Vec::new();
         for (index, glyph) in glyphs.iter().enumerate() {
-            if index > 0 && has_word_gap(&glyphs[index - 1], glyph) {
-                folded.push(' ');
-                owners.push(index);
-            }
             for c in glyph.text.to_lowercase().chars() {
                 folded.push(c);
                 owners.push(index);
@@ -94,7 +48,10 @@ pub fn matches_on_page(text: &PageText, page: usize, query: &str) -> Vec<FindMat
             matches.push(FindMatch {
                 page,
                 transform: text.transform,
-                snippet: snippet_text(&glyphs[snippet_start..snippet_end]),
+                snippet: glyphs[snippet_start..snippet_end]
+                    .iter()
+                    .map(|glyph| glyph.text.as_str())
+                    .collect(),
                 corners: [
                     Point { x: left, y: top },
                     Point { x: right, y: top },
@@ -157,14 +114,20 @@ pub fn highlight_rect(hit: &FindMatch, size: (f32, f32)) -> (f32, f32, f32, f32)
 mod tests {
     use super::*;
     use crate::coordinates::PageTransform;
-    use crate::pdf::TextGlyph;
     use std::path::Path;
 
     #[test]
     fn real_pdf_with_positioned_words_searches_and_displays_the_gap() {
-        // TJ spacing moves the next word without encoding a Unicode space.
-        let stream = b"BT /F1 16 Tf 40 100 Td [(incorrect) -400 (matches)] TJ ET";
-        let objects = [
+        // A modest TJ adjustment separates words without encoding a space,
+        // as in TeX-produced PDFs. It must reach every text consumer.
+        for stream in [
+            b"BT /F1 16 Tf 40 100 Td [(incorrect) -180 (matches)] TJ ET".as_slice(),
+            b"BT /F1 16 Tf 0.4 Tc 40 100 Td [(incorrect) -180 (matches)] TJ ET".as_slice(),
+            b"BT /F1 16 Tf 40 100 Td [(incorrect) -180] TJ (matches) Tj ET".as_slice(),
+            b"BT /F1 16 Tf 1 0 0 1 104.224 100 Tm (matches) Tj 1 0 0 1 40 100 Tm (incorrect) Tj ET"
+                .as_slice(),
+        ] {
+            let objects = [
             b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
             b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
@@ -176,113 +139,49 @@ mod tests {
                 .collect(),
             b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
         ];
-        let mut data = b"%PDF-1.4\n".to_vec();
-        let mut offsets = Vec::new();
-        for (index, object) in objects.iter().enumerate() {
-            offsets.push(data.len());
-            data.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
-            data.extend_from_slice(object);
-            data.extend_from_slice(b"\nendobj\n");
-        }
-        let xref = data.len();
-        data.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
-        for offset in offsets {
-            data.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-        }
-        data.extend_from_slice(
-            format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-        );
-        let path = std::env::temp_dir().join(format!("kver-56-gap-{}.pdf", std::process::id()));
-        std::fs::write(&path, data).unwrap();
-        let page = crate::pdf::page_text(&path, 0).unwrap();
-        std::fs::remove_file(path).unwrap();
-        assert!(
-            page.glyphs.iter().all(|glyph| glyph.text != " "),
-            "fixture must represent a PDF without mapped spaces"
-        );
-        let matches = matches_on_page(&page, 0, "incorrect matches");
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].snippet, "incorrect matches");
-    }
-
-    #[test]
-    fn unmapped_word_gap_appears_in_find_snippet_and_matches_phrase() {
-        let mut glyphs = Vec::new();
-        let mut x = 20.;
-        for (index, c) in "incorrectmatches".chars().enumerate() {
-            if index == "incorrect".len() {
-                x += 5.;
+            let mut data = b"%PDF-1.4\n".to_vec();
+            let mut offsets = Vec::new();
+            for (index, object) in objects.iter().enumerate() {
+                offsets.push(data.len());
+                data.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
+                data.extend_from_slice(object);
+                data.extend_from_slice(b"\nendobj\n");
             }
-            glyphs.push(TextGlyph {
-                text: c.to_string(),
-                start: Point { x, y: 80. },
-                end: Point { x: x + 6., y: 80. },
-                ink_right: Some(x + 6.),
-                top: 90.,
-                bottom: 78.,
-            });
-            x += 6.;
+            let xref = data.len();
+            data.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+            for offset in offsets {
+                data.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+            }
+            data.extend_from_slice(
+                format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n")
+                    .as_bytes(),
+            );
+            let path = std::env::temp_dir().join(format!("kver-56-gap-{}.pdf", std::process::id()));
+            std::fs::write(&path, data).unwrap();
+            let page = crate::pdf::page_text(&path, 0).unwrap();
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(
+                page.glyphs
+                    .iter()
+                    .map(|glyph| glyph.text.as_str())
+                    .collect::<String>(),
+                "incorrect matches",
+            );
+            let words: Vec<_> = page
+                .word_units(0)
+                .into_iter()
+                .map(|unit| {
+                    page.glyphs[unit]
+                        .iter()
+                        .map(|g| g.text.as_str())
+                        .collect::<String>()
+                })
+                .collect();
+            assert_eq!(words, ["incorrect", " ", "matches"]);
+            let matches = matches_on_page(&page, 0, "incorrect matches");
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].snippet, "incorrect matches");
         }
-        let page = PageText {
-            transform: PageTransform::from_coefficients([1., 0., 0., 1., 0., 0.]),
-            lines: std::iter::once(0..glyphs.len()).collect(),
-            glyphs,
-        };
-        assert_eq!(
-            matches_on_page(&page, 0, "incorrect")[0].snippet,
-            "incorrect matches"
-        );
-        assert_eq!(matches_on_page(&page, 0, "incorrect matches").len(), 1);
-
-        // Hayro may include the word gap in a glyph's advance within one run.
-        let mut in_run = PageText {
-            transform: page.transform,
-            lines: page.lines.clone(),
-            glyphs: page.glyphs.clone(),
-        };
-        let boundary = "incorrect".len();
-        in_run.glyphs[boundary - 1].end.x = in_run.glyphs[boundary].start.x;
-        assert_eq!(
-            matches_on_page(&in_run, 0, "incorrect")[0].snippet,
-            "incorrect matches"
-        );
-        assert_eq!(matches_on_page(&in_run, 0, "incorrect matches").len(), 1);
-
-        // A small tracking adjustment is not a word boundary.
-        let mut tracked = page;
-        for glyph in &mut tracked.glyphs["incorrect".len()..] {
-            glyph.start.x -= 4.;
-            glyph.end.x -= 4.;
-        }
-        assert_eq!(
-            matches_on_page(&tracked, 0, "incorrect")[0].snippet,
-            "incorrectmatches"
-        );
-        assert!(matches_on_page(&tracked, 0, "incorrect matches").is_empty());
-
-        // A mapped space must not be duplicated by its own visual advance.
-        let mut mapped = tracked;
-        let boundary = "incorrect".len();
-        let left = mapped.glyphs[boundary - 1].end.x;
-        mapped.glyphs.insert(
-            boundary,
-            TextGlyph {
-                text: " ".into(),
-                start: Point { x: left, y: 80. },
-                end: Point {
-                    x: left + 2.,
-                    y: 80.,
-                },
-                ink_right: None,
-                top: 90.,
-                bottom: 78.,
-            },
-        );
-        mapped.lines = std::iter::once(0..mapped.glyphs.len()).collect();
-        assert_eq!(
-            matches_on_page(&mapped, 0, "incorrect")[0].snippet,
-            "incorrect matches"
-        );
     }
 
     #[test]

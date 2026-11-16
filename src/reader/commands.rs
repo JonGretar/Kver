@@ -31,6 +31,7 @@ gpui::actions!(
         ExitReadingRuler,
         ReadDown,
         ReadUp,
+        VisualSelect,
         ApplyMarkup,
         Highlight,
         Underline,

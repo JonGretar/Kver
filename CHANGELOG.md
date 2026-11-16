@@ -31,6 +31,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Experimental Linux and Windows tester guides now cover acquiring CI artifacts,
+  current menu/keyboard and opening behavior, switching builds, and reporting
+  native-platform problems without treating package checks as GUI certification.
 - Keyboard presets use conventional Ctrl application shortcuts on Linux and
   Windows while preserving macOS Command shortcuts. Standard Ctrl-O opens a
   PDF; Vim keeps Ctrl-O/Ctrl-I history navigation in Reader and Contents and

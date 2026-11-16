@@ -58,18 +58,17 @@ Anyway** and confirm. Do not disable Gatekeeper globally.
 ### Windows and Linux
 
 Windows and Linux are targets, but supported downloads are not available
-yet. Packaging and native testing need contributors—if you would like to
-help, [open an issue](https://github.com/JonGretar/Kver/issues).
+yet. Testers can obtain nonpublishing CI artifacts, with manual updates:
 
-Windows testers can build an [experimental x86-64 ZIP](docs/development.md#build-an-experimental-windows-archive)
-or obtain one from the non-publishing **Experimental Windows archive** Actions
-workflow. Read the [runtime, extraction and security guidance](docs/windows.md)
-first; a successful package job is not clean-PC or native GUI certification.
+- [Linux x86-64 tarball: download, requirements and optional launcher installation](docs/linux.md)
+  — Ubuntu 24.04/glibc 2.39 baseline; no older-distribution promise.
+- [Windows x86-64 ZIP: download, runtime and security guidance](docs/windows.md)
+  — unsigned; requires the Microsoft x64 v14 runtime.
 
-Linux testers can obtain the experimental Ubuntu x86-64 tarball from the
-non-publishing **Experimental Linux archive** Actions workflow. See the
-[requirements and optional user-level install/remove instructions](docs/linux.md).
-It is not a supported Linux release or an older-distribution compatibility promise.
+These are experimental artifacts, not public release assets or native GUI
+certification. Each guide explains extraction, use, updates and useful bug
+reports. GitHub sign-in is required; artifacts expire after 14 days.
+Native testing needs contributors—see [the per-OS acceptance gaps](https://github.com/JonGretar/Kver/issues/183).
 
 ## Get started
 

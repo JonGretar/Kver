@@ -438,7 +438,7 @@ keys = "w"
 context = "reader"
 command = "fit-width"
 [[keyboard.bindings]]
-keys = "f"
+keys = "shift-w"
 context = "reader"
 command = "fit-page"
 [[keyboard.bindings]]

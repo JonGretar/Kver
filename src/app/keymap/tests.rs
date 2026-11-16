@@ -1056,7 +1056,7 @@ fn vim_defaults_keep_application_commands_without_leaking_reader_keys_to_other_c
             ("/", "kver::ShowFind"),
             (":", "kver::ShowCommandPalette"),
             ("w", "kver::FitWidth"),
-            ("f", "kver::FitPage"),
+            ("shift-w", "kver::FitPage"),
             ("s", "kver::SinglePage"),
             ("c", "kver::Continuous"),
         ] {
@@ -1069,7 +1069,7 @@ fn vim_defaults_keep_application_commands_without_leaking_reader_keys_to_other_c
             assert_eq!(map.action(key, Context::Settings), None, "{key}");
         }
         let standard = resolve(platform, Preset::Standard).unwrap();
-        for key in ["cmd-f", "cmd-b", "cmd-g", "cmd-shift-g", "cmd-t", "p"] {
+        for key in ["cmd-f", "cmd-b", "cmd-g", "cmd-shift-g", "cmd-t", "p", "f"] {
             assert_eq!(map.action(key, Context::Reader), None, "{key}");
         }
         for key in ["o", "shift-o", "/", ":"] {

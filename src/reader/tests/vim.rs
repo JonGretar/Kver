@@ -57,7 +57,7 @@ fn vim_reader_navigation_and_marks_share_one_focused_workflow(cx: &mut TestAppCo
     reader.read_with(cx, |reader, _| {
         assert_eq!(reader.zoom_mode(), ZoomMode::FitWidth)
     });
-    cx.simulate_keystrokes(window, "f");
+    cx.simulate_keystrokes(window, "shift-w");
     reader.read_with(cx, |reader, _| {
         assert_eq!(reader.zoom_mode(), ZoomMode::FitPage)
     });

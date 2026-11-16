@@ -14,6 +14,7 @@ mod authorship;
 mod current_save;
 mod dark_mode;
 mod find;
+mod hints;
 mod links;
 mod loading;
 mod marks;

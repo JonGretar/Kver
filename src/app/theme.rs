@@ -36,6 +36,16 @@ pub(crate) fn reading_ruler(dark: bool) -> (gpui_kit::Hsla, gpui_kit::Hsla) {
     )
 }
 
+/// Word targeting is a document-surface role, not a warning badge. Keep the
+/// requested pale paper and dark letters readable on original and dark PDFs.
+pub(crate) fn word_hints() -> (gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla) {
+    (
+        gpui_kit::rgb(0xf9e2af).into(),
+        gpui_kit::rgb(0x4c4f69).into(),
+        gpui_kit::rgb(0x9b640b).into(),
+    )
+}
+
 // Official palette roles: https://catppuccin.com/palette/
 struct Palette {
     base: &'static str,

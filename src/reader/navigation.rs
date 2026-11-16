@@ -28,6 +28,7 @@ pub(super) struct PageLayout<'a> {
     zoom: f32,
     mode: ReadingMode,
     current_page: usize,
+    padding: f32,
 }
 
 /// Fit target and the document point to hold steady during a viewport update.
@@ -51,7 +52,14 @@ impl<'a> PageLayout<'a> {
             zoom,
             mode,
             current_page,
+            padding: PAGE_PADDING,
         }
+    }
+
+    /// Resolved from the same rem inset used by the reader's scroll container.
+    pub(super) fn with_padding(mut self, padding: f32) -> Self {
+        self.padding = padding;
+        self
     }
 
     pub(super) fn page_dimensions(&self, page: usize) -> Option<(f32, f32)> {
@@ -111,7 +119,7 @@ impl<'a> PageLayout<'a> {
                 (page_top(self.pages, self.zoom, self.pages.len()) - height).max(0.0)
             }
             ReadingMode::SinglePage => {
-                (self.pages[self.current_page].1 * self.zoom + GAP + PAGE_PADDING * 2.0 - height)
+                (self.pages[self.current_page].1 * self.zoom + GAP + self.padding * 2.0 - height)
                     .max(0.0)
             }
         }
@@ -141,7 +149,7 @@ impl<'a> PageLayout<'a> {
         page: usize,
         viewport: (f32, f32),
     ) -> Option<f32> {
-        fit_scale(mode, *self.pages.get(page)?, viewport)
+        fit_scale(mode, *self.pages.get(page)?, viewport, self.padding)
     }
 
     /// Keep explicit page turns current while visible. When scrolling changes
@@ -208,25 +216,25 @@ impl<'a> PageLayout<'a> {
         scroll: Point,
     ) -> Option<PageViewport> {
         let width = self.pages.get(page)?.0 * self.zoom;
-        let inner_width = (viewport_width - PAGE_PADDING * 2.0).max(0.0);
+        let inner_width = (viewport_width - self.padding * 2.0).max(0.0);
         let origin = Point {
-            x: origin.x + PAGE_PADDING as f64 + ((inner_width - width).max(0.0) / 2.0) as f64,
-            y: origin.y + PAGE_PADDING as f64 + self.page_top(page) as f64,
+            x: origin.x + self.padding as f64 + ((inner_width - width).max(0.0) / 2.0) as f64,
+            y: origin.y + self.padding as f64 + self.page_top(page) as f64,
         };
         PageViewport::new(transform, self.zoom as f64, origin, scroll)
     }
 }
 
-fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32)) -> Option<f32> {
+fn fit_scale(mode: ZoomMode, page: (f32, f32), viewport: (f32, f32), padding: f32) -> Option<f32> {
     let (width, height) = viewport;
-    if width <= PAGE_PADDING * 2.0 || height <= PAGE_PADDING * 2.0 {
+    if width <= padding * 2.0 || height <= padding * 2.0 {
         return None;
     }
-    let width_scale = (width - PAGE_PADDING * 2.0) / page.0;
+    let width_scale = (width - padding * 2.0) / page.0;
     let scale = match mode {
         ZoomMode::Fixed => return None,
         ZoomMode::FitWidth => width_scale,
-        ZoomMode::FitPage => width_scale.min((height - PAGE_PADDING * 2.0) / page.1),
+        ZoomMode::FitPage => width_scale.min((height - padding * 2.0) / page.1),
     };
     Some(scale.clamp(0.25, 4.0))
 }

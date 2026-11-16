@@ -5,6 +5,36 @@ const PLATFORMS: [Platform; 3] = [Platform::Mac, Platform::Linux, Platform::Wind
 const PRESETS: [Preset; 2] = [Preset::Standard, Preset::Vim];
 
 #[test]
+fn visual_select_is_reader_scoped_and_customizable_in_both_presets() {
+    for platform in PLATFORMS {
+        for preset in PRESETS {
+            let map = resolve_config("", platform, preset).unwrap();
+            assert_eq!(
+                map.action("v", Context::Reader),
+                (preset == Preset::Vim).then_some("kver::VisualSelect")
+            );
+            for context in [
+                Context::Global,
+                Context::Sidebar,
+                Context::Contents,
+                Context::Annotations,
+            ] {
+                assert_eq!(map.action("v", context), None);
+            }
+            let map = resolve_config(
+                "[[keyboard.bindings]]\nkeys = 'q'\ncontext = 'reader'\ncommand = 'visual-select'\n",
+                platform,
+                preset,
+            ).unwrap();
+            assert!(
+                map.shortcuts(&crate::reader::VisualSelect, Context::Reader)
+                    .contains(&"q")
+            );
+        }
+    }
+}
+
+#[test]
 fn complete_presets_keep_save_marks_and_platform_modifier_semantics() {
     for platform in PLATFORMS {
         for preset in PRESETS {

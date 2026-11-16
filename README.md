@@ -79,6 +79,8 @@ Native testing needs contributors—see [the per-OS acceptance gaps](https://git
 3. **Find a passage.** Use Command-F to search or Command-T to open Contents
    when the PDF provides an outline. Select ordinary text and press Command-C
    to copy it.
+   For keyboard selection, choose **Visual select…** from the command palette
+   (`v` in Vim), then type the first and last word's two-letter hints.
 4. **Discover commands.** Press Command-Shift-P to open the command palette. It shows
    available commands and their shortcut hints.
 5. **Make it yours.** Open **Kver → Settings…** (Command-,) for appearance,

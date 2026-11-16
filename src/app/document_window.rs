@@ -914,6 +914,17 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<Continuous>))
             .on_action(cx.listener(Self::route_reader_action::<UseDefaultReadingMode>))
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
+            .on_action(
+                cx.listener(|this, action: &crate::reader::VisualSelect, window, cx| {
+                    // Unlike immediate reader commands, acquisition needs keyboard
+                    // ownership after the palette (even if opened from a sidebar).
+                    if this.palette.is_some() {
+                        this.dismiss_palette(window, cx);
+                        window.focus(&this.reader.read(cx).focus_handle(cx), cx);
+                    }
+                    this.route_reader_action(action, window, cx);
+                }),
+            )
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::ApplyMarkup>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Underline>))

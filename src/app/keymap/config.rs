@@ -229,6 +229,7 @@ commands! {
         "close-about" => CloseAbout, "command-palette" => ShowCommandPalette,
         "show-contents" => ShowContents, "show-find" => ShowFind,
         "show-annotations" => ShowAnnotations,
+        "visual-select" => crate::reader::VisualSelect,
         "apply-markup" => crate::reader::ApplyMarkup,
         "highlight" => Highlight,
         "underline" => crate::reader::Underline,

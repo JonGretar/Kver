@@ -114,6 +114,7 @@ by the current keyboard configuration:
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `read-down`, `read-up`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
 | Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
+| Text selection | `visual-select` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline`, `select-down`, `select-up` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
 | Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
@@ -172,6 +173,7 @@ Vim distinguishes PDF pages from viewport-sized scrolling:
 | --- | --- |
 | Scroll down / up (follow lines in ruler mode) | `j` / `k` |
 | Toggle reading ruler | `r` |
+| Select a word range using hints | `v` |
 | Next / previous PDF page | `J` / `K` |
 | Forward / backward one screen | Ctrl-F / Ctrl-B |
 | Down / up half a screen | Ctrl-D / Ctrl-U or Space / Shift-Space |
@@ -208,6 +210,35 @@ Explicit line commands do nothing while the ruler is off; explicit
 Line movement follows reading order across columns and pages.
 The guide belongs to the current window; its remembered location follows
 reading-history privacy settings and is never saved in the PDF.
+
+## Visual select
+
+Choose **Visual select…** in the command palette, or press `v` with the Vim
+reader focused. Type the two-letter label of the first word, then the label
+of the last word. Both words are included; choosing them in reverse selects
+the same passage, and choosing one word twice selects just that word.
+Endpoints must be on the same page. The second stage keeps the original labels
+and marks the chosen start in red with underlined letters.
+
+Backspace corrects a prefix. With no endpoint prefix, Backspace returns to the
+start choices. Escape or the ribbon’s × button exits without replacing the
+previous selection.
+Scrolling, zooming, resizing, changing the reading layout, or moving focus to
+another tool exits targeting; invoke Visual select again rather than reuse old
+labels. If there are too many visible words, zoom in and retry.
+
+The result is ordinary text selection: copy it or apply any text-markup type.
+Selection alone does not edit the PDF. This is not a caret or persistent Vim
+visual mode, and it does not select across pages.
+
+Standard has no bare-letter default. To assign a shortcut in either preset:
+
+```toml
+[[keyboard.bindings]]
+keys = "v"
+context = "reader"
+command = "visual-select"
+```
 
 ## Annotation shortcuts
 

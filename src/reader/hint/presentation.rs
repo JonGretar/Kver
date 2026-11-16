@@ -40,15 +40,29 @@ pub fn measure_labels(window: &Window, cx: &App) -> Metrics {
 }
 
 impl<T> Label<T> {
-    pub(crate) fn render(&self, origin: Point, input: &Input, cx: &App) -> gpui_kit::AnyElement {
+    pub(crate) fn render(
+        &self,
+        origin: Point,
+        input: &Input,
+        marked: bool,
+        cx: &App,
+    ) -> gpui_kit::AnyElement {
         let [l, t, r, b] = self.bounds().edges();
-        let (background, foreground, border) = crate::app::theme::word_hints();
+        let (background, foreground, border) = if marked {
+            crate::app::theme::word_hint_start()
+        } else {
+            crate::app::theme::word_hints()
+        };
         // Absolute pixel values are resolved PDF/viewport and shaped-text
         // geometry. Typography and the measured padding scale with rem.
         div()
             .id(format!("hint-{}", self.letters()))
             .test_support()
-            .aria_label(self.letters().to_owned())
+            .aria_label(if marked {
+                format!("Start: {}", self.letters())
+            } else {
+                self.letters().to_owned()
+            })
             .absolute()
             .left(px((l - origin.x) as f32))
             .top(px((t - origin.y) as f32))
@@ -69,6 +83,8 @@ impl<T> Label<T> {
             .justify_center()
             .children(self.letters().chars().enumerate().map(|(ix, c)| {
                 div()
+                    // A chosen start remains identifiable without its red fill.
+                    .when(marked, |letter| letter.underline())
                     .when(ix < input.prefix().len(), |letter| letter.underline())
                     .child(c.to_string())
             }))

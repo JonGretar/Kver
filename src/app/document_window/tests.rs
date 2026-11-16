@@ -20,6 +20,7 @@ mod recent_picker;
 mod saving;
 mod sidebar;
 mod unsaved;
+mod visual_select;
 
 const REDO_KEY: &str = if cfg!(target_os = "windows") {
     "ctrl-y"

@@ -1,6 +1,8 @@
-//! Reader composition for the independent hint module. No selection mutation.
+//! Reader composition for the independent hint module.
 
 use std::{ops::Range, sync::Arc};
+
+use gpui_kit::component::{Sizable as _, button::ButtonVariants as _};
 
 use super::{hint, *};
 
@@ -49,6 +51,7 @@ struct Session {
     metrics: hint::Metrics,
     input: hint::Input,
     state: State,
+    marked: Option<WordTarget>,
 }
 
 enum State {
@@ -105,10 +108,11 @@ impl ReaderView {
             metrics: hint::measure_labels(window, cx),
             input: hint::Input::default(),
             state: State::Loading,
+            marked: None,
         });
         self.ruler.cancel_work();
         let focus = self.hints.focus.clone();
-        self.hints.blur = Some(cx.on_blur(&focus, window, |reader, _, cx| {
+        self.hints.blur = Some(cx.on_focus_out(&focus, window, |reader, _, _, cx| {
             reader.invalidate_hints(cx);
         }));
         window.focus(&focus, cx);
@@ -117,11 +121,29 @@ impl ReaderView {
     }
 
     pub(super) fn invalidate_hints(&mut self, cx: &mut Context<Self>) {
+        self.word_acquisition = None;
         self.hints.serial += 1;
         if self.hints.active.take().is_some() {
             cx.emit(HintEvent::Cancelled);
             cx.notify();
         }
+    }
+
+    pub(super) fn resume_word_hints(
+        &mut self,
+        snapshot: Arc<hint::Snapshot<WordTarget>>,
+        marked: Option<WordTarget>,
+    ) {
+        if let Some(session) = &mut self.hints.active {
+            session.state = State::Ready(snapshot);
+            session.input = hint::Input::default();
+            session.marked = marked;
+        }
+    }
+
+    pub(super) fn finish_word_hints(&mut self) {
+        self.hints.active = None;
+        self.hints.serial += 1;
     }
 
     fn hint_geometry(&self, window: &Window, cx: &App) -> Geometry {
@@ -141,13 +163,13 @@ impl ReaderView {
     pub(super) fn sync_hints(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.hints.active.as_ref().is_some_and(|session| {
             session.geometry != self.hint_geometry(window, cx)
-                || !self.hints.focus.is_focused(window)
+                || !self.hints.focus.contains_focused(window, cx)
         }) {
             self.invalidate_hints(cx);
         }
         if !self.hints.is_active() {
             // Never restore through a menu/dialog/input which superseded hints.
-            if self.hints.focus.is_focused(window) {
+            if self.hints.focus.contains_focused(window, cx) {
                 window.focus(&self.focus, cx);
             }
             return;
@@ -175,13 +197,13 @@ impl ReaderView {
             return;
         };
         let bounds = self.scroll.bounds();
-        // The status surface occupies the bottom two rem of the reader. It is
+        // The command surface occupies the top two rem of the reader. It is
         // excluded before publishing labels, not covered up after assignment.
         let clip = hint::Rect::new(
             f32::from(bounds.left()) as f64,
-            f32::from(bounds.top()) as f64,
+            f32::from(bounds.top() + window.rem_size() * 2.) as f64,
             f32::from(bounds.right()) as f64,
-            f32::from(bounds.bottom() - window.rem_size() * 2.) as f64,
+            f32::from(bounds.bottom()) as f64,
         );
         let pages: Vec<_> = texts
             .iter()
@@ -306,14 +328,26 @@ impl ReaderView {
         };
         let origin = viewport.document_to_screen(zero);
         snapshot
-            .paint_labels(page, &session.input)
+            .paint_labels(page, &session.input, session.marked.as_ref())
             .into_iter()
-            .map(|label| label.render(origin, &session.input, cx))
+            .map(|label| {
+                label.render(
+                    origin,
+                    &session.input,
+                    session.marked.as_ref() == Some(label.target().id()),
+                    cx,
+                )
+            })
             .collect()
     }
 
     pub(super) fn render_hint_input(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let session = self.hints.active.as_ref()?;
+        let prompt = match &self.word_acquisition {
+            Some(selection::Acquisition::Start) => "Choose start",
+            Some(selection::Acquisition::End { .. }) => "Choose end",
+            None => "Type two letters",
+        };
         let status = match &session.state {
             State::Loading | State::Preparing => "Loading visible text…".to_owned(),
             State::Refused(message) => message.to_string(),
@@ -321,7 +355,7 @@ impl ReaderView {
                 "No matching hint. Try again.".to_owned()
             }
             State::Ready(_) => format!(
-                "Type two letters: {}{}",
+                "{prompt}: {}{}",
                 session.input.prefix(),
                 if session.input.prefix().is_empty() {
                     "__"
@@ -336,20 +370,92 @@ impl ReaderView {
                 .test_support()
                 .track_focus(&self.hints.focus)
                 .absolute()
-                .bottom_0()
+                .top_0()
                 .left_0()
                 .w_full()
                 .h_8()
                 .px_3()
                 .flex()
                 .items_center()
-                .justify_between()
-                .bg(cx.theme().popover)
-                .text_color(cx.theme().popover_foreground)
+                .gap_3()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
                 .text_sm()
                 .aria_label(status.clone())
-                .child(status)
-                .child("Backspace corrects · Escape cancels")
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(if self.word_acquisition.is_some() {
+                            "Visual select"
+                        } else {
+                            "Word hints"
+                        }),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .when(
+                            matches!(session.state, State::Ready(_)) && !session.input.is_retry(),
+                            |row| {
+                                row.child(div().flex_shrink_0().child(prompt))
+                                    .children((0..2).map(|index| {
+                                        div()
+                                            .flex_shrink_0()
+                                            .w_5()
+                                            .h_5()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded_sm()
+                                            .border_1()
+                                            .border_color(cx.theme().border)
+                                            .bg(cx.theme().muted)
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .child(
+                                                session
+                                                    .input
+                                                    .prefix()
+                                                    .chars()
+                                                    .nth(index)
+                                                    .map_or("·".to_owned(), |c| c.to_string()),
+                                            )
+                                    }))
+                            },
+                        )
+                        .when(
+                            !matches!(session.state, State::Ready(_)) || session.input.is_retry(),
+                            |row| row.child(div().min_w_0().truncate().child(status)),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(cx.theme().muted_foreground)
+                        .text_xs()
+                        .child("Backspace corrects · Escape cancels"),
+                )
+                .child(
+                    Button::new("cancel-word-hints")
+                        .ghost()
+                        .small()
+                        .icon(IconName::Close)
+                        .flex_shrink_0()
+                        .accessibility_label("Cancel word hints")
+                        .tooltip("Cancel word hints (Escape)")
+                        .on_click(cx.listener(|reader, _, window, cx| {
+                            reader.invalidate_hints(cx);
+                            window.focus(&reader.focus, cx);
+                        })),
+                )
                 .on_key_down(
                     cx.listener(|reader, event: &gpui::KeyDownEvent, window, cx| {
                         if event.keystroke.modifiers.platform
@@ -365,6 +471,17 @@ impl ReaderView {
                         let Some(session) = reader.hints.active.as_mut() else {
                             return;
                         };
+                        if event.keystroke.key == "backspace"
+                            && session.input.prefix().is_empty()
+                            && matches!(
+                                reader.word_acquisition,
+                                Some(selection::Acquisition::End { .. })
+                            )
+                        {
+                            reader.back_to_word_start();
+                            cx.notify();
+                            return;
+                        }
                         let snapshot = match &session.state {
                             State::Ready(snapshot) => Some(snapshot.clone()),
                             _ => None,
@@ -373,17 +490,20 @@ impl ReaderView {
                             hint::Outcome::Pending => {}
                             hint::Outcome::Cancelled => {
                                 reader.invalidate_hints(cx);
-                                if reader.hints.focus.is_focused(window) {
+                                if reader.hints.focus.contains_focused(window, cx) {
                                     window.focus(&reader.focus, cx);
                                 }
                             }
                             hint::Outcome::Chosen(index) => {
-                                reader.hints.active = None;
-                                reader.hints.serial += 1;
-                                if let Some(snapshot) = snapshot {
+                                if let Some(snapshot) = snapshot
+                                    && !reader.choose_selection_word(snapshot.clone(), index)
+                                {
+                                    reader.finish_word_hints();
                                     cx.emit(HintEvent::Chosen { snapshot, index });
                                 }
-                                if reader.hints.focus.is_focused(window) {
+                                if !reader.hints.is_active()
+                                    && reader.hints.focus.contains_focused(window, cx)
+                                {
                                     window.focus(&reader.focus, cx);
                                 }
                             }

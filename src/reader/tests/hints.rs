@@ -1,5 +1,108 @@
 use super::*;
 
+#[gpui_kit::test]
+fn visual_select_ignores_late_text_and_reloaded_endpoint_choices(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+    });
+    let path = PathBuf::from("examples/selection-sample.pdf");
+    let (handle, reader) = recent_test_window(cx, Some(path.clone()));
+    cx.run_until_parked();
+    super::authoring::select_title(cx, handle, &reader, &path);
+    let request = reader.update(cx, |reader, _| {
+        reader.page_text = page_text::PageTexts::default();
+        reader
+            .page_text
+            .request(0..1, None, [None], reader.document_generation)
+            .unwrap()
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(VisualSelect), cx);
+    })
+    .unwrap();
+    super::authoring::draw(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        assert_eq!(
+            window.find("hint-input").label(),
+            Some("Loading visible text…")
+        );
+        window.press("a", cx);
+        window.press("a", cx);
+        window.press("escape", cx);
+    })
+    .unwrap();
+    assert_eq!(
+        reader
+            .read_with(cx, |reader, _| reader.selected_text())
+            .as_deref(),
+        Some("Alpha")
+    );
+    reader.update(cx, |reader, _| {
+        assert!(
+            reader
+                .page_text
+                .finish(request, Err("delayed failure".into()))
+        );
+    });
+    cx.run_until_parked();
+    super::authoring::draw(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        assert!(window.try_find("hint-input").is_none());
+        window.dispatch_action(Box::new(VisualSelect), cx);
+    })
+    .unwrap();
+    super::authoring::draw(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        assert_eq!(
+            window.find("hint-input").label(),
+            Some("Couldn’t read page text. Reopen the document to retry.")
+        );
+        window.press("escape", cx);
+    })
+    .unwrap();
+    assert_eq!(
+        reader
+            .read_with(cx, |reader, _| reader.selected_text())
+            .as_deref(),
+        Some("Alpha")
+    );
+    reader.update(cx, |reader, cx| reader.open_path(path.clone(), cx));
+    cx.run_until_parked();
+    super::authoring::draw(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(VisualSelect), cx)
+    })
+    .unwrap();
+    for _ in 0..3 {
+        cx.run_until_parked();
+        super::authoring::draw(cx, handle);
+    }
+    cx.update_window(handle, |_, window, cx| {
+        window.press("s", cx);
+        window.press("a", cx);
+        assert_eq!(window.find("hint-input").label(), Some("Choose end: __"));
+    })
+    .unwrap();
+    reader.update(cx, |reader, cx| reader.open_path(path, cx));
+    cx.run_until_parked();
+    super::authoring::draw(cx, handle);
+    reader.update(cx, |reader, _| {
+        assert!(!reader.page_text.finish(request, Err("obsolete".into())));
+        assert_eq!(reader.selected_text(), None);
+    });
+    cx.update_window(handle, |_, window, cx| {
+        assert!(window.try_find("hint-input").is_none());
+        window.press("s", cx);
+        window.press("a", cx);
+    })
+    .unwrap();
+    assert_eq!(
+        reader.read_with(cx, |reader, _| reader.selected_text()),
+        None
+    );
+}
+
 fn begin(cx: &mut TestAppContext, handle: AnyWindowHandle, reader: &Entity<ReaderView>) {
     cx.update_window(handle, |_, window, cx| {
         reader.update(cx, |reader, cx| {

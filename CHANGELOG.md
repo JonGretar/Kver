@@ -36,6 +36,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Vim Fit Page now uses `Shift-W` instead of `f`, leaving `f` free for Follow;
+  `w` remains Fit Width.
 - Experimental Linux and Windows tester guides now cover acquiring release assets,
   current menu/keyboard and opening behavior, switching builds, and reporting
   native-platform problems without treating package checks as GUI certification.

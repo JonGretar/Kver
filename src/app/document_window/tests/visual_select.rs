@@ -952,3 +952,79 @@ fn positioned_word_gaps_are_shared_by_double_click_hints_copy_and_find(cx: &mut 
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn visual_select_workflows_yield_to_sidebar_menu_and_dialog_focus(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| keymap::reload(cx, None, Preset::Vim).unwrap());
+    let (handle, reader) = reader_window(cx, Some("examples/selection-sample.pdf".into()));
+    settle(cx, handle);
+    for begin in [begin, begin_lines] {
+        for action in [
+            Box::new(crate::reader::ShowContents) as Box<dyn gpui_kit::Action>,
+            Box::new(crate::reader::ShowAnnotations),
+        ] {
+            begin(cx, handle);
+            press(cx, handle, "a a");
+            cx.update_window(handle, |_, window, cx| {
+                window.dispatch_action(action, cx);
+            })
+            .unwrap();
+            settle(cx, handle);
+            let before = reader.read_with(cx, |reader, _| reader.reading_position());
+            press(cx, handle, "v shift-v a a s a");
+            cx.update_window(handle, |_, window, cx| {
+                assert!(window.try_find("hint-input").is_none());
+                assert!(!reader.read(cx).focus_handle(cx).is_focused(window));
+                window.dispatch_action(Box::new(VisualSelect), cx);
+                window.dispatch_action(Box::new(crate::reader::VisualSelectLine), cx);
+                assert!(window.try_find("hint-input").is_none());
+            })
+            .unwrap();
+            assert_eq!(selected(&reader, cx), None);
+            assert_eq!(
+                reader.read_with(cx, |reader, _| reader.reading_position()),
+                before
+            );
+            press(cx, handle, "escape");
+        }
+        begin(cx, handle);
+        press(cx, handle, "a a");
+        cx.update_window(handle, |_, window, cx| window.click("annotation-color", cx))
+            .unwrap();
+        settle(cx, handle);
+        cx.update_window(handle, |_, window, _| {
+            assert!(window.find("popup-menu").visible());
+            assert!(window.try_find("hint-input").is_none());
+        })
+        .unwrap();
+        press(cx, handle, "v shift-v a a s a");
+        cx.update_window(handle, |_, window, cx| {
+            assert!(window.find("popup-menu").visible());
+            assert!(window.try_find("hint-input").is_none());
+            assert!(!reader.read(cx).focus_handle(cx).is_focused(window));
+            window.press("escape", cx);
+            window.click("pdf-page-0", cx);
+        })
+        .unwrap();
+        settle(cx, handle);
+        begin(cx, handle);
+        press(cx, handle, "a a");
+        cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(ShowRecent), cx)
+        })
+        .unwrap();
+        settle(cx, handle);
+        cx.update_window(handle, |_, window, cx| {
+            window.input("vVasa", cx);
+            assert!(window.find("recent-panel").visible());
+            assert!(window.try_find("hint-input").is_none());
+            assert!(!reader.read(cx).focus_handle(cx).is_focused(window));
+        })
+        .unwrap();
+        assert_eq!(selected(&reader, cx), None);
+        // The command input's first Escape clears its nonempty query.
+        press(cx, handle, "escape escape");
+        settle(cx, handle);
+    }
+}

@@ -18,12 +18,9 @@ intended behavior, not a finalized default keymap.
 - **Counts (numeric prefixes):** apply a quantity to a command, such as
   `10J` to advance ten pages or `5j` to move five steps. Define count behavior
   consistently for supported commands, including line movement with the ruler.
-- **Keyboard text selection:** start a selection, extend it by word or line,
-  then copy or highlight it without using the mouse. Build on the ruler where
-  useful. Do something similar to sioyek's visual selection.
-- **Follow Links:** Pressing `f` or `shift-F`(new window) will allow clicking 
-  links and such things with keyboard only motion. Follow examples of ui from 
-  sioyek, vimlike, vimium.
+- **Keyboard link targeting:** reuse the hint interaction behind keyboard text
+  selection to follow visible links, either in the current view or a new
+  window. Define link-specific behavior separately; default keys are not settled.
 - **Independent splits:** view the same PDF at two locations, or two different
   PDFs, with independent navigation and keyboard focus switching. Start here;
   pinned reference panes and linked scrolling are possible later extensions.
@@ -55,7 +52,7 @@ recognition either.
 
 ## Other directions
 
-- **Reading and navigation:** independent named bookmarks and link hints.
+- **Reading and navigation:** independent named bookmarks.
 - **Source-aware copying:** copy a passage with the document title and page
   label, with an optional Markdown quotation format.
 - **Portable reading state:** export and import marks, bookmarks, and future

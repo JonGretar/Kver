@@ -1,27 +1,10 @@
 name: Experimental Linux archive
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - Cargo.toml
-      - Cargo.lock
-      - build.rs
-      - src/**
-      - assets/**
-      - scripts/package-linux.sh
-      - scripts/linux/**
-      - scripts/test_linux_package.py
-      - scripts/test_linux_install.py
-      - scripts/release-metadata.py
-      - scripts/windows/licenses.hbs
-      - docs/linux.md
-      - docs/cli.md
-      - LICENSE
-      - .github/workflows/linux-archive.yml
+  workflow_call:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   archive:
@@ -50,12 +33,13 @@ jobs:
         run: python3 -m unittest discover -s scripts -p test_linux_package.py
       - name: Build, package and verify clean extraction
         run: sh scripts/package-linux.sh
-      - name: Upload experimental archive and checksum (no release)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kver-experimental-linux-x86_64-${{ github.sha }}
-          path: |
-            target/x86_64-unknown-linux-gnu/release/Kver-v*-experimental-linux-x86_64.tar.gz
-            target/x86_64-unknown-linux-gnu/release/Kver-v*-experimental-linux-x86_64.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 14
+      - name: Upload experimental archive and checksum to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
+          gh release upload "$RELEASE_TAG" \
+            "target/x86_64-unknown-linux-gnu/release/Kver-v${version}-experimental-linux-x86_64.tar.gz" \
+            "target/x86_64-unknown-linux-gnu/release/Kver-v${version}-experimental-linux-x86_64.tar.gz.sha256" \
+            --clobber

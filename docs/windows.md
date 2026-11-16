@@ -1,7 +1,7 @@
 # Experimental Windows x86-64 archive
 
-This is an unsigned testing build, not a supported Windows release. CI artifacts
-expire after 14 days and are not published to GitHub Releases. Build/package
+This is an unsigned testing build, not a supported Windows release. Experimental
+archives are published as GitHub Release assets. Build/package
 verification does not establish clean-PC launch or native GUI usability.
 
 ## Requirements
@@ -34,15 +34,11 @@ License notices and the dependency report travel with the executable.
 
 ## Extract and run
 
-1. Obtain the experimental artifact from a trusted run of the project's
-   [Experimental Windows archive](https://github.com/JonGretar/Kver/actions/workflows/windows-archive.yml)
-   GitHub Actions workflow. Choose a successful run at the revision you intend
-   to test, sign in to GitHub, and download its
-   `Kver-experimental-windows-x86_64-<revision>` artifact under **Artifacts**.
-   Extract this outer download to find the versioned ZIP and its `.zip.sha256`.
-   Keep the run URL/revision: different builds can report the same app version.
-   If the artifact has expired, ask the maintainer for a replacement; these
-   are not public release assets.
+1. Open the project's [GitHub Releases](https://github.com/JonGretar/Kver/releases)
+   and choose the version you intend to test. Download the experimental Windows
+   ZIP and its `.zip.sha256` from **Assets**. No GitHub sign-in is needed.
+   Experimental assets appear after the macOS release if their build succeeds.
+   Keep the release URL to identify the version you tested.
 2. In PowerShell, run `Get-FileHash .\Kver-vVERSION-experimental-windows-x86_64.zip
    -Algorithm SHA256` and compare the hash with the adjacent `.sha256` file.
    A matching hash detects corruption; an unsigned checksum from the same

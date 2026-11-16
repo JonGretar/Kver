@@ -1,4 +1,4 @@
-name: macOS release
+name: Release
 
 on:
   push:
@@ -70,8 +70,23 @@ jobs:
           python3 scripts/release-metadata.py --tag "$RELEASE_TAG" --notes > "$RUNNER_TEMP/release-notes.md"
           printf '\nUnsigned Apple silicon macOS app. See the [download/security instructions](https://github.com/%s/blob/%s/README.md#install).\n' \
             "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$RUNNER_TEMP/release-notes.md"
+          printf '\nExperimental Linux and Windows archives and checksums are added after their builds succeed. These are unsupported testing builds; packaging checks do not certify native GUI usability. See the [Linux guide](https://github.com/%s/blob/%s/docs/linux.md) and [Windows guide](https://github.com/%s/blob/%s/docs/windows.md).\n' \
+            "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" \
             "target/release/Kver-v${version}-macos-arm64.zip" \
             "$RUNNER_TEMP/kver-updates/appcast.xml" \
             --verify-tag --latest --title "Kver $version" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
+
+  # Publish macOS first; experimental failures must not block its release.
+  linux-archive:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux-archive.yml
+
+  windows-archive:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/windows-archive.yml

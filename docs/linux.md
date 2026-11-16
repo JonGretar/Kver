@@ -6,23 +6,20 @@ needed to use it. Updates are manual; no updater is included.
 
 ## Obtain a test build
 
-Open the [Experimental Linux archive workflow](https://github.com/JonGretar/Kver/actions/workflows/linux-archive.yml)
-and choose a successful run at the revision you intend to test. Sign in to
-GitHub to download its `Kver-experimental-linux-x86_64-<revision>` artifact
-from the run's **Artifacts** section. Extract that outer download to find the
-tarball and checksum below. These are nonpublishing CI artifacts, not public
-release assets; they expire after 14 days. If a trusted build has expired,
-ask the maintainer for a replacement rather than using an unrelated mirror.
+Open [GitHub Releases](https://github.com/JonGretar/Kver/releases) and choose
+the version you intend to test. Download its experimental Linux tarball and
+matching checksum from **Assets**. These are public downloads; no GitHub
+sign-in is needed. Experimental assets appear after the macOS release if
+their build succeeds.
 
-Keep the run URL and revision: multiple experimental builds can report the
-same app version. `BUILD-INFO.json` inside the tarball records its source commit.
+Keep the release URL. `BUILD-INFO.json` inside the tarball records its source commit.
 Package/loader checks do not establish native desktop usability. See
 [#183](https://github.com/JonGretar/Kver/issues/183) for per-OS evidence and gaps.
 
 ## Extract and run
 
 Download the versioned `Kver-vX.Y.Z-experimental-linux-x86_64.tar.gz` and
-matching `.tar.gz.sha256` from the same CI artifact. In the download directory,
+matching `.tar.gz.sha256` from the same release. In the download directory,
 substitute its version:
 
 ```sh

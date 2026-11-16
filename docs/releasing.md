@@ -107,8 +107,12 @@ update-enabled release before relying on that path.
    a CLI download may not carry quarantine.
 
 The tag-only workflow validates metadata and signing configuration, packages
-the app, signs/verifies updates, and marks the release latest. Do not use a
-production tag to test CI.
+the app, signs/verifies updates, and marks the release latest. After macOS
+publication, it builds experimental Linux and Windows archives and uploads
+them with their checksums to the same release. These builds do not run on PRs.
+Their failures leave the macOS release available; rerun failed jobs after
+resolving the failure. Experimental archives are not part of the Sparkle feed.
+Do not use a production tag to test CI.
 
 ## Native quit checks after dependency upgrades
 

@@ -58,16 +58,17 @@ Anyway** and confirm. Do not disable Gatekeeper globally.
 ### Windows and Linux
 
 Windows and Linux are targets, but supported downloads are not available
-yet. Testers can obtain nonpublishing CI artifacts, with manual updates:
+yet. Testers can obtain experimental archives from
+[GitHub Releases](https://github.com/JonGretar/Kver/releases), with manual updates:
 
 - [Linux x86-64 tarball: download, requirements and optional launcher installation](docs/linux.md)
   — Ubuntu 24.04/glibc 2.39 baseline; no older-distribution promise.
 - [Windows x86-64 ZIP: download, runtime and security guidance](docs/windows.md)
   — unsigned; requires the Microsoft x64 v14 runtime.
 
-These are experimental artifacts, not public release assets or native GUI
-certification. Each guide explains extraction, use, updates and useful bug
-reports. GitHub sign-in is required; artifacts expire after 14 days.
+These downloads are experimental, not native GUI certification. Each guide
+explains extraction, use, updates and useful bug reports. No GitHub sign-in is
+required. Archives appear after the macOS release if their builds succeed.
 Native testing needs contributors—see [the per-OS acceptance gaps](https://github.com/JonGretar/Kver/issues/183).
 
 ## Get started

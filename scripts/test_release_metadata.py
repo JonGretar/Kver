@@ -1,6 +1,10 @@
 import importlib.util
+import contextlib
+import io
 import pathlib
+import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = pathlib.Path(__file__).with_name("release-metadata.py")
 spec = importlib.util.spec_from_file_location("release_metadata", SCRIPT)
@@ -9,6 +13,30 @@ spec.loader.exec_module(release_metadata)
 
 
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_metadata_reads_utf8_under_legacy_windows_locale(self):
+        read_text = pathlib.Path.read_text
+
+        def legacy_read_text(path, encoding=None, errors=None):
+            return read_text(path, encoding=encoding or "cp1252", errors=errors)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "Cargo.toml").write_text(
+                '[package]\nname = "kver"\nversion = "1.2.3"\n', encoding="utf-8"
+            )
+            (root / "CHANGELOG.md").write_text(
+                "## [1.2.3] - 2026-02-28\n\nChoose “New window”.\n", encoding="utf-8"
+            )
+            output = io.StringIO()
+            with (
+                patch.object(release_metadata, "ROOT", root),
+                patch("sys.argv", [str(SCRIPT), "--tag", "v1.2.3"]),
+                patch.object(pathlib.Path, "read_text", legacy_read_text),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(release_metadata.main(), 0)
+            self.assertEqual(output.getvalue(), "1.2.3\n")
+
     def test_valid_release(self):
         release_metadata.validate("v1.2.3", "1.2.3", "## [Unreleased]\n\n## [1.2.3] - 2026-02-28\n")
 

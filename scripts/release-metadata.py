@@ -69,9 +69,9 @@ def main() -> int:
     if args.notes and not args.tag:
         parser.error("--notes requires --tag")
     try:
-        version = package_version((ROOT / "Cargo.toml").read_text())
+        version = package_version((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
         if args.tag:
-            changelog = (ROOT / "CHANGELOG.md").read_text()
+            changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
             validate(args.tag, version, changelog)
             print(changelog_chapter(version, changelog) if args.notes else version)
         else:

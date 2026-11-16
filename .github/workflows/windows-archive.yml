@@ -2,9 +2,19 @@ name: Experimental Windows archive
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to rebuild and attach Windows assets
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  # Recovery may check out an older tag whose tooling used the Windows locale.
+  PYTHONUTF8: '1'
 
 jobs:
   archive:
@@ -12,6 +22,19 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Validate existing release for manual recovery
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          python scripts/release-metadata.py --tag "$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release metadata validation failed' }
+          gh release view "$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery requires an existing release' }
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -49,7 +72,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           $version = python scripts/release-metadata.py --tag "$env:RELEASE_TAG"
           if ($LASTEXITCODE -ne 0) { throw 'Release metadata validation failed' }

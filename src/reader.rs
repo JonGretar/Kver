@@ -5,6 +5,8 @@ mod commands;
 mod contents;
 pub(crate) mod document_session;
 mod find;
+pub mod hint;
+mod hinting;
 mod links;
 mod marks;
 mod navigation;
@@ -30,6 +32,7 @@ pub use find::{NextMatch, PreviousMatch};
 // Preserve the former public name while callers adopt the narrowed view.
 pub use ReaderView as Preview;
 use document_session::DocumentSession;
+pub use hinting::{HintEvent, WordTarget};
 use links::PageLinks;
 use marks::MarksEvent;
 pub use marks::{
@@ -100,6 +103,7 @@ pub struct ReaderView {
     pdf_dark_mode_override: Option<bool>,
     document_generation: u64,
     page_text: page_text::PageTexts,
+    hints: hinting::Hinting,
     ruler: ruler::Ruler,
     ruler_history: ruler_history::RulerHistory,
     selection: Selection,
@@ -111,6 +115,7 @@ pub struct ReaderView {
     // part of a neighboring page. Scrolling chooses a new current page.
     selected_page: Option<usize>,
     last_viewport: (f32, f32, f32),
+    page_padding: f32,
     scroll: ScrollHandle,
     focus: FocusHandle,
     focus_initialized: bool,
@@ -238,6 +243,7 @@ impl ReaderView {
             pdf_dark_mode_override: None,
             document_generation: 0,
             page_text: page_text::PageTexts::default(),
+            hints: hinting::Hinting::new(cx),
             ruler: ruler::Ruler::default(),
             ruler_history: ruler_history::RulerHistory::default(),
             selection: Selection::default(),
@@ -246,6 +252,7 @@ impl ReaderView {
             page_index: 0,
             selected_page: None,
             last_viewport: (f32::NAN, f32::NAN, f32::NAN),
+            page_padding: PAGE_PADDING,
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
@@ -267,6 +274,7 @@ impl ReaderView {
 
     /// Replace the active document immediately, before any asynchronous work completes.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         self.document_generation += 1;
         self.detach_session(cx);
         self.session_wait = None;
@@ -326,6 +334,7 @@ impl ReaderView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.invalidate_hints(cx);
         let Some(marks) = self.ensure_marks(cx) else {
             return false;
         };
@@ -422,6 +431,7 @@ impl ReaderView {
     }
 
     pub(crate) fn navigate_find(&mut self, hit: &find_search::FindMatch, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         if hit.page >= self.pages.len() {
             return;
         }
@@ -457,6 +467,7 @@ impl ReaderView {
         annotation: &pdf::annotations::Annotation,
         cx: &mut Context<Self>,
     ) {
+        self.invalidate_hints(cx);
         if generation != self.document_generation
             || annotation.page() >= self.pages.len()
             || self.session.as_ref().is_none_or(|session| {
@@ -843,6 +854,7 @@ impl ReaderView {
 
     /// Apply a stored logical location without creating another semantic jump.
     pub(crate) fn restore_jump(&mut self, location: &JumpLocation, cx: &mut Context<Self>) -> bool {
+        self.invalidate_hints(cx);
         if self.path.as_ref() != Some(&location.path)
             || self.document_generation != location.generation
             || location.page >= self.pages.len()
@@ -985,6 +997,7 @@ impl ReaderView {
     }
 
     fn reload_shared_session(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         let Some(session) = self.session.clone() else {
             return;
         };
@@ -1212,6 +1225,7 @@ impl ReaderView {
 
     fn layout(&self) -> PageLayout<'_> {
         PageLayout::new(&self.pages, self.scale, self.reading_mode, self.page_index)
+            .with_padding(self.page_padding)
     }
 
     fn scroll_to(&mut self, x: f32, top: f32) {
@@ -1228,6 +1242,7 @@ impl ReaderView {
     }
 
     pub fn set_reading_mode(&mut self, mode: ReadingMode, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         if self.reading_mode == mode {
             return;
         }
@@ -1348,6 +1363,7 @@ impl ReaderView {
         click_count: usize,
         cx: &mut Context<Self>,
     ) {
+        self.invalidate_hints(cx);
         self.ruler.cancel_work();
         self.annotation_identification = None;
         self.annotation_press = Some((page, position, false));
@@ -1701,6 +1717,9 @@ impl ReaderView {
     }
 
     pub(crate) fn sync_viewport(&mut self, cx: &mut Context<Self>) {
+        if self.viewport() != self.last_viewport {
+            self.invalidate_hints(cx);
+        }
         if self.pages.is_empty() {
             return;
         }
@@ -1798,6 +1817,7 @@ impl ReaderView {
         }
     }
     pub fn select_page(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         if index >= self.pages.len() {
             return;
         }
@@ -1831,6 +1851,7 @@ impl ReaderView {
         destination: pdf::OutlineDestination,
         cx: &mut Context<Self>,
     ) {
+        self.invalidate_hints(cx);
         let page = destination.page();
         if page >= self.pages.len() {
             return;
@@ -1925,6 +1946,7 @@ impl ReaderView {
         self.set_zoom_mode(ZoomMode::FitPage, cx);
     }
     fn set_zoom_mode(&mut self, mode: ZoomMode, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         self.position_touched = true;
         self.zoom_mode = mode;
         if !self.pages.is_empty() {
@@ -1942,6 +1964,7 @@ impl ReaderView {
         cx.notify();
     }
     fn change_scale(&mut self, factor: f32, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         self.position_touched = true;
         let next = (self.scale * factor).clamp(0.25, 4.0);
         if next == self.scale && self.zoom_mode == ZoomMode::Fixed {
@@ -2076,7 +2099,8 @@ impl Render for ReaderView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.focus_initialized {
             window.focus(&self.focus, cx);
-            cx.observe_window_bounds(window, |_, window, cx| {
+            cx.observe_window_bounds(window, |reader, window, cx| {
+                reader.invalidate_hints(cx);
                 // The scroll area's bounds are laid out in the resize frame.
                 // Refit after that frame, using its measured content viewport.
                 let reader = cx.weak_entity();
@@ -2087,6 +2111,13 @@ impl Render for ReaderView {
             .detach();
             self.focus_initialized = true;
         }
+        let padding = f32::from(window.rem_size());
+        if self.page_padding != padding {
+            self.invalidate_hints(cx);
+            self.page_padding = padding;
+            self.sync_viewport(cx);
+        }
+        self.sync_hints(window, cx);
         self.sync_page_colors(cx);
         let density = window.scale_factor();
         if self.display_scale != density {
@@ -2189,7 +2220,9 @@ impl Render for ReaderView {
                         .bg(gpui::rgba(0x278acb70)),
                 );
             }
+            page = page.children(self.render_hints(index, cx));
             if self.ruler.enabled
+                && !self.hints.is_active()
                 && !self.ruler_editing()
                 && (self.ruler.browse_task.is_none() || self.ruler_visible())
                 && let Some(target) = self
@@ -2333,11 +2366,13 @@ impl Render for ReaderView {
         content = content.child(div().h(px(end_space)).flex_shrink_0());
 
         div()
+            .relative()
             .size_full()
             .tab_group()
             .track_focus(&self.focus)
             .when(
                 self.selected_annotation.is_some()
+                    && !self.hints.is_active()
                     && !self.marks_open(cx)
                     && self.annotation_choice.is_none(),
                 |reader| reader.key_context(crate::key_context::SELECTED_ANNOTATION),
@@ -2547,6 +2582,7 @@ impl Render for ReaderView {
                         }),
                     )
                     .on_scroll(cx.listener(|this, _, _, cx| {
+                        this.invalidate_hints(cx);
                         if this.viewport().0 != this.last_viewport.0 {
                             this.position_touched = true;
                             this.selected_page = None;
@@ -2668,16 +2704,18 @@ impl Render for ReaderView {
                 }
             })
             .child(self.render_annotation_choice(cx))
+            .children(self.render_hint_input(cx))
     }
 }
 
 impl ReaderView {
     fn scroll_horizontal_by(&mut self, amount: f32, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         let Some((page_width, _)) = self.pages.get(self.page_index).copied() else {
             return;
         };
         let (_, width, _) = self.viewport();
-        let max = (page_width * self.scale + PAGE_PADDING * 2.0 - width).max(0.0);
+        let max = (page_width * self.scale + self.page_padding * 2.0 - width).max(0.0);
         let old = -f32::from(self.scroll.offset().x);
         let next = (old + amount).clamp(0.0, max);
         if next == old {
@@ -2690,6 +2728,7 @@ impl ReaderView {
     }
 
     pub fn scroll_by(&mut self, amount: f32, cx: &mut Context<Self>) {
+        self.invalidate_hints(cx);
         let top = (-f32::from(self.scroll.offset().y) + amount).max(0.0);
         if self.pages.is_empty() {
             return;

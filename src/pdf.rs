@@ -531,6 +531,41 @@ pub struct PageText {
     pub lines: Vec<std::ops::Range<usize>>,
 }
 
+impl PageText {
+    /// Unicode word-boundary units mapped back to whole glyphs. Shared by
+    /// pointer selection and keyboard target preparation, including ligatures.
+    pub fn word_units(&self, line: usize) -> Vec<std::ops::Range<usize>> {
+        use unicode_segmentation::UnicodeSegmentation as _;
+        let Some(range) = self.lines.get(line) else {
+            return Vec::new();
+        };
+        let contents: String = self.glyphs[range.clone()]
+            .iter()
+            .map(|g| g.text.as_str())
+            .collect();
+        let mut offsets = Vec::with_capacity(range.len() + 1);
+        offsets.push(0);
+        for glyph in &self.glyphs[range.clone()] {
+            offsets.push(offsets.last().copied().unwrap_or(0) + glyph.text.len());
+        }
+        let mut units: Vec<_> = contents
+            .split_word_bound_indices()
+            .filter_map(|(start, unit)| {
+                let end = start + unit.len();
+                let first = offsets
+                    .partition_point(|offset| *offset <= start)
+                    .saturating_sub(1);
+                let end = offsets.partition_point(|offset| *offset < end);
+                (first < end && end <= range.len())
+                    .then_some(range.start + first..range.start + end)
+            })
+            .collect();
+        // A single decoded glyph can span more than one Unicode unit.
+        units.dedup();
+        units
+    }
+}
+
 mod text_layout;
 
 fn order_visible_lines(glyphs: &mut [TextGlyph]) -> Vec<std::ops::Range<usize>> {

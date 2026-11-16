@@ -6,7 +6,6 @@
 //! It has no window, clipboard, PDF path, or independent document identity.
 
 use std::{ops::Range, sync::Arc};
-use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     coordinates::Point,
@@ -325,29 +324,12 @@ fn unit_span(text: &PageText, page: usize, at: Point, granularity: Granularity) 
                         distance(a).total_cmp(&distance(b))
                     })
                 })?;
-            let contents: String = text.glyphs[line.clone()]
-                .iter()
-                .map(|glyph| glyph.text.as_str())
-                .collect();
-            let offset: usize = text.glyphs[line.start..index]
-                .iter()
-                .map(|glyph| glyph.text.len())
-                .sum();
-            let (start, word) = contents
-                .split_word_bound_indices()
-                .find(|(start, word)| *start <= offset && offset < start + word.len())?;
-            let end = start + word.len();
-            let mut byte = 0;
-            for (index, glyph) in text.glyphs[line.clone()].iter().enumerate() {
-                let next = byte + glyph.text.len();
-                if byte <= start && start < next {
-                    span.start.boundary = line.start + index;
-                }
-                if byte < end && end <= next {
-                    span.end.boundary = line.start + index + 1;
-                }
-                byte = next;
-            }
+            let unit = text
+                .word_units(anchor.line)
+                .into_iter()
+                .find(|unit| unit.contains(&index))?;
+            span.start.boundary = unit.start;
+            span.end.boundary = unit.end;
         }
         Granularity::Paragraph => {
             while span.start.line > 0 && paragraph_continues(text, span.start.line - 1) {

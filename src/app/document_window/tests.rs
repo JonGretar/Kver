@@ -9,6 +9,7 @@ mod chrome;
 mod contents;
 mod external;
 mod find;
+mod hints;
 mod jumplist;
 mod keyboard;
 mod links;

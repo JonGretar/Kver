@@ -269,6 +269,17 @@ pub enum DestinationFit {
 }
 
 impl OutlineDestination {
+    pub(crate) fn at_page(page: usize) -> Self {
+        Self {
+            page,
+            point: None,
+            page_x: None,
+            page_y: None,
+            zoom: None,
+            fit: None,
+        }
+    }
+
     pub fn page(&self) -> usize {
         self.page
     }

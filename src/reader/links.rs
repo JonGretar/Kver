@@ -35,6 +35,10 @@ impl PageLinks {
         self.pages.get(&page).map(Vec::as_slice)
     }
 
+    pub(super) fn failed(&self, page: usize) -> bool {
+        self.failed.contains(&page)
+    }
+
     pub(super) fn destination(&self, page: usize, index: usize) -> Option<&PageLink> {
         self.pages.get(&page)?.get(index)
     }

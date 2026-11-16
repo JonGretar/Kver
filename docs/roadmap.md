@@ -18,9 +18,6 @@ intended behavior, not a finalized default keymap.
 - **Counts (numeric prefixes):** apply a quantity to a command, such as
   `10J` to advance ten pages or `5j` to move five steps. Define count behavior
   consistently for supported commands, including line movement with the ruler.
-- **Keyboard link targeting:** reuse the hint interaction behind keyboard text
-  selection to follow visible links, either in the current view or a new
-  window. Define link-specific behavior separately; default keys are not settled.
 - **Independent splits:** view the same PDF at two locations, or two different
   PDFs, with independent navigation and keyboard focus switching. Start here;
   pinned reference panes and linked scrolling are possible later extensions.
@@ -64,7 +61,9 @@ recognition either.
 - **Layouts:** snapshots and two-page/presentation layouts.
 - **Form Support:** Allow filling out PDF Forms(Zathura/gpui-pdf do it)
 - **CLI Tool:** Better support opening files from the cli
-- **Open Links:** Download and open links.
+- **PDFs from web URLs:** download and open PDFs in Kver from HTTP(S) links
+  in documents or URLs passed on the command line. This is separate from
+  opening web links in the default browser.
 - **Library integration:** investigate Zotero without assuming its database
   annotations are embedded in the PDF. No integration API is selected.
 - **Desktop delivery:** signed/notarized macOS distribution and separately

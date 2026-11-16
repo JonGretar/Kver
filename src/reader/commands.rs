@@ -33,6 +33,8 @@ gpui::actions!(
         ReadUp,
         VisualSelect,
         VisualSelectLine,
+        FollowLink,
+        FollowLinkInNewWindow,
         ApplyMarkup,
         Highlight,
         Underline,

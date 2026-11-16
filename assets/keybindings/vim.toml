@@ -2,6 +2,16 @@
 # No bindings are inherited from Standard.
 
 [[keyboard.bindings]]
+keys = "f"
+context = "reader"
+command = "follow-link"
+
+[[keyboard.bindings]]
+keys = "shift-f"
+context = "reader"
+command = "follow-link-in-new-window"
+
+[[keyboard.bindings]]
 keys = "v"
 context = "reader"
 command = "visual-select"

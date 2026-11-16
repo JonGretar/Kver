@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **Follow links:** press `f` and type a link hint to follow it, or `F` to open
+  its PDF destination in a new window. Both commands are also in the command
+  palette. HTTP(S) links open in the default browser, by keyboard or click.
 - **Visual select:** select whole words or lines by typing two hint pairs
   (`v` / `V` in Vim or **Visual select…** / **Visual select line…** in the
   command palette), then copy or annotate it like a mouse selection. Escape

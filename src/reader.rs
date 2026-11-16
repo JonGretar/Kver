@@ -144,6 +144,10 @@ pub(crate) enum DocumentEvent {
         path: PathBuf,
         page: usize,
     },
+    OpenDestinationWindow {
+        generation: u64,
+        destination: pdf::OutlineDestination,
+    },
     Updated {
         generation: u64,
     },
@@ -1333,7 +1337,8 @@ impl ReaderView {
                     .as_ref()
                     .filter(|target| target.page == index)
                     .map(|target| target.text.transform)
-            })?;
+            })
+            .or_else(|| self.document.as_ref()?.page_transform(index))?;
         let bounds = self.scroll.bounds();
         self.layout().page_viewport(
             index,
@@ -1906,6 +1911,17 @@ impl ReaderView {
         index: usize,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.follow_link(generation, page, index, false, cx)
+    }
+
+    fn follow_link(
+        &mut self,
+        generation: u64,
+        page: usize,
+        index: usize,
+        new_window: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if generation != self.document_generation {
             return false;
         }
@@ -1913,6 +1929,13 @@ impl ReaderView {
             return false;
         };
         match link.target().cloned() {
+            Some(pdf::LinkDestination::SameDocument(destination)) if new_window => {
+                cx.emit(DocumentEvent::OpenDestinationWindow {
+                    generation,
+                    destination,
+                });
+                false
+            }
             Some(pdf::LinkDestination::SameDocument(destination)) => {
                 self.selection.clear();
                 self.navigate_outline(destination, cx);
@@ -1925,6 +1948,10 @@ impl ReaderView {
                     page,
                 });
                 false // Focus stays in the source window until the new one is ready.
+            }
+            Some(pdf::LinkDestination::WebUrl(url)) => {
+                cx.open_url(&url);
+                false
             }
             None => {
                 self.report_link_error(
@@ -2300,13 +2327,20 @@ impl Render for ReaderView {
                                 path.file_name().unwrap_or_default().to_string_lossy()
                             )
                         }
+                        Some(pdf::LinkDestination::WebUrl(url)) => {
+                            format!("Open {url} in the default browser")
+                        }
                         None => "Unsupported PDF link".to_owned(),
                     };
                     page = page.child(
                         div()
                             .id(id)
                             .test_support()
-                            .role(gpui::Role::Button)
+                            .role(if matches!(link.target(), Some(pdf::LinkDestination::WebUrl(_))) {
+                                gpui::Role::Link
+                            } else {
+                                gpui::Role::Button
+                            })
                             .aria_label(label)
                             .absolute()
                             .left(px(left * self.scale))
@@ -2437,6 +2471,12 @@ impl Render for ReaderView {
             }))
             .on_action(cx.listener(|this, _: &VisualSelectLine, window, cx| {
                 this.begin_selection(selection::Targeting::Lines, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FollowLink, window, cx| {
+                this.begin_link_hints(false, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FollowLinkInNewWindow, window, cx| {
+                this.begin_link_hints(true, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ApplyMarkup, window, cx| {
                 this.markup_selection(this.active_markup, window, cx)

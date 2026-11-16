@@ -115,9 +115,17 @@ by the current keyboard configuration:
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
 | Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
 | Text selection | `visual-select`, `visual-select-line` |
+| Links | `follow-link`, `follow-link-in-new-window` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline`, `select-down`, `select-up` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
 | Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
+
+`f` starts **Follow link…** and `F` starts **Follow link in new window…**
+in both presets. Type a visible link's two-letter hint to follow it; Backspace
+corrects and Escape cancels. Same-document links navigate in place with `f`
+and open in another window with `F`. Links to another local PDF always open
+in a new window. HTTP(S) links open in the default browser with either
+command, just as they do when clicked; Kver does not download them.
 
 `read-down` and `read-up` follow lines with the reading ruler on and scroll
 with it off. `select-down` and `select-up` move the focused sidebar list's

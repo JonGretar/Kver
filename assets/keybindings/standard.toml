@@ -2,6 +2,16 @@
 # Platform filters select entries within this preset, not another policy layer.
 
 [[keyboard.bindings]]
+keys = "f"
+context = "reader"
+command = "follow-link"
+
+[[keyboard.bindings]]
+keys = "shift-f"
+context = "reader"
+command = "follow-link-in-new-window"
+
+[[keyboard.bindings]]
 keys = "cmd-o"
 command = "open-pdf"
 platform = "mac"

@@ -83,6 +83,13 @@ impl CommandPalette {
         let has_document = available.page_count > 0;
         let mut items = vec![
             command("Open PDF…", OpenPdf, true),
+            reader_command("Follow link…", crate::reader::FollowLink, has_document, cx),
+            reader_command(
+                "Follow link in new window…",
+                crate::reader::FollowLinkInNewWindow,
+                has_document,
+                cx,
+            ),
             reader_command(
                 "Visual select…",
                 crate::reader::VisualSelect,

@@ -28,6 +28,7 @@ pub struct PageLink {
 pub enum LinkDestination {
     SameDocument(OutlineDestination),
     AnotherDocument { path: PathBuf, page: usize },
+    WebUrl(String),
 }
 
 impl PageLink {
@@ -43,7 +44,7 @@ impl PageLink {
     pub fn destination(&self) -> Option<OutlineDestination> {
         match self.destination.as_ref()? {
             LinkDestination::SameDocument(destination) => Some(*destination),
-            LinkDestination::AnotherDocument { .. } => None,
+            LinkDestination::AnotherDocument { .. } | LinkDestination::WebUrl(_) => None,
         }
     }
 }
@@ -162,6 +163,10 @@ pub(super) fn links_in_pdf(
                         .map(LinkDestination::SameDocument),
                         b"GoToR" => remote_destination(&action, path)
                             .map(|(path, page)| LinkDestination::AnotherDocument { path, page }),
+                        b"URI" => {
+                            let uri = action.get::<PdfString>(b"URI")?;
+                            web_destination(std::str::from_utf8(uri.as_bytes()).ok()?)
+                        }
                         _ => None,
                     }
                 });
@@ -173,6 +178,13 @@ pub(super) fn links_in_pdf(
         }
     }
     Ok(links)
+}
+
+fn web_destination(uri: &str) -> Option<LinkDestination> {
+    let url = url::Url::parse(uri).ok()?;
+    // PDF actions are untrusted input. Never delegate arbitrary schemes to the OS.
+    (matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        .then(|| LinkDestination::WebUrl(url.into()))
 }
 
 fn remote_destination(action: &Dict<'_>, source: &Path) -> Option<(PathBuf, usize)> {
@@ -293,7 +305,11 @@ mod tests {
             links[3].destination().unwrap().page_position().unwrap().1,
             900.0
         );
-        assert!(links[4..9].iter().all(|link| link.target().is_none()));
+        assert!([4, 5, 7, 8].iter().all(|&ix| links[ix].target().is_none()));
+        assert_eq!(
+            links[6].target(),
+            Some(&LinkDestination::WebUrl("https://example.org/".into()))
+        );
         assert_eq!(
             links[9].target(),
             Some(&LinkDestination::AnotherDocument {
@@ -303,5 +319,28 @@ mod tests {
         );
         assert!(links[10].target().is_none());
         assert!(links_bytes(linked_fixture(), Path::new("/books/source.pdf"), 2).is_err());
+    }
+
+    #[test]
+    fn web_links_allow_only_absolute_http_and_https_destinations() {
+        for uri in ["http://example.org/a.pdf?q=x#page=2", "HTTPS://example.org"] {
+            assert!(matches!(
+                web_destination(uri),
+                Some(LinkDestination::WebUrl(_))
+            ));
+        }
+        for uri in [
+            "javascript:alert(1)",
+            "file:///tmp/test.pdf",
+            "mailto:a@example.org",
+            "ftp://example.org/a.pdf",
+            "custom:run",
+            "//example.org",
+            "/relative.pdf",
+            "https://",
+            "not a url",
+        ] {
+            assert_eq!(web_destination(uri), None, "{uri}");
+        }
     }
 }

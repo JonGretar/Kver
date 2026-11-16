@@ -86,7 +86,7 @@ impl ReaderView {
                         ),
                     };
                 }
-                self.finish_word_hints();
+                self.finish_hints();
             }
         }
         true

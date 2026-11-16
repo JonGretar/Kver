@@ -58,7 +58,7 @@ pub struct DocumentWindow {
     recent_subscription: Option<Subscription>,
     recent_open: Option<PendingRecentOpen>,
     linked_open_request: u64,
-    initial_link_page: Option<usize>,
+    initial_link_destination: Option<crate::pdf::OutlineDestination>,
     palette: Option<CommandPalette>,
     sidebar: Option<Entity<ReaderSidebar>>,
     panel_subscriptions: Vec<Subscription>,
@@ -203,7 +203,7 @@ impl DocumentWindow {
             recent_subscription: None,
             recent_open: None,
             linked_open_request: 0,
-            initial_link_page: page,
+            initial_link_destination: page.map(crate::pdf::OutlineDestination::at_page),
             palette: None,
             sidebar: None,
             panel_subscriptions: Vec::new(),
@@ -584,7 +584,7 @@ impl DocumentWindow {
         self.save_picker = None;
         self.save_prompt_open = false;
         self.save_observation = None;
-        self.initial_link_page = None;
+        self.initial_link_destination = None;
         let target = path.clone();
         self.reader
             .update(cx, |reader, cx| reader.open_path(path, cx));
@@ -653,7 +653,8 @@ impl DocumentWindow {
         let result = result.and_then(|()| {
             if replace_active {
                 self.open_path(open.path.clone(), cx);
-                self.initial_link_page = Some(open.page);
+                self.initial_link_destination =
+                    Some(crate::pdf::OutlineDestination::at_page(open.page));
                 Ok(())
             } else {
                 windows::open_link(cx, open.path.clone(), open.page).map(|_| ())
@@ -766,6 +767,27 @@ impl DocumentWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let DocumentEvent::OpenDestinationWindow {
+            generation,
+            destination,
+        } = event
+        {
+            if *generation != self.reader.read(cx).document_generation() {
+                return;
+            }
+            let Some(path) = self.reader.read(cx).path().map(PathBuf::from) else {
+                return;
+            };
+            match windows::open_link(cx, path, destination.page()) {
+                Ok(document) => document.update(cx, |document, _| {
+                    document.initial_link_destination = Some(*destination);
+                }),
+                Err(error) => self.reader.update(cx, |reader, cx| {
+                    reader.report_link_error(format!("Cannot open linked PDF: {error}"), cx);
+                }),
+            }
+            return;
+        }
         if let DocumentEvent::OpenLinkedDocument {
             generation,
             path,
@@ -779,7 +801,8 @@ impl DocumentWindow {
             DocumentEvent::Replaced { generation }
             | DocumentEvent::Opened { generation, .. }
             | DocumentEvent::Updated { generation } => *generation,
-            DocumentEvent::OpenLinkedDocument { .. } => unreachable!(),
+            DocumentEvent::OpenLinkedDocument { .. }
+            | DocumentEvent::OpenDestinationWindow { .. } => unreachable!(),
         };
         if generation != self.reader.read(cx).document_generation() {
             return;
@@ -794,15 +817,15 @@ impl DocumentWindow {
                 self.cancel_pending_leave(cx);
             }
             self.jumplist.clear();
-            self.initial_link_page = None;
+            self.initial_link_destination = None;
             self.refresh_navigation_menu(window, cx);
             cx.notify();
         }
         if let DocumentEvent::Opened { result: Ok(()), .. } = event
-            && let Some(page) = self.initial_link_page.take()
+            && let Some(destination) = self.initial_link_destination.take()
         {
             self.reader
-                .update(cx, |reader, cx| reader.select_page(page, cx));
+                .update(cx, |reader, cx| reader.navigate_outline(destination, cx));
         }
         self.sync_sidebar_document(window, cx);
         if let DocumentEvent::Opened {
@@ -931,6 +954,10 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_reader_action::<Copy>))
             .on_action(cx.listener(Self::route_selection_action::<crate::reader::VisualSelect>))
             .on_action(cx.listener(Self::route_selection_action::<crate::reader::VisualSelectLine>))
+            .on_action(cx.listener(Self::route_selection_action::<crate::reader::FollowLink>))
+            .on_action(
+                cx.listener(Self::route_selection_action::<crate::reader::FollowLinkInNewWindow>),
+            )
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::ApplyMarkup>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Underline>))

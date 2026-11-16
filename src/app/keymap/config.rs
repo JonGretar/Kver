@@ -231,6 +231,8 @@ commands! {
         "show-annotations" => ShowAnnotations,
         "visual-select" => crate::reader::VisualSelect,
         "visual-select-line" => crate::reader::VisualSelectLine,
+        "follow-link" => crate::reader::FollowLink,
+        "follow-link-in-new-window" => crate::reader::FollowLinkInNewWindow,
         "apply-markup" => crate::reader::ApplyMarkup,
         "highlight" => Highlight,
         "underline" => crate::reader::Underline,

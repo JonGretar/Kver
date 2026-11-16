@@ -1069,7 +1069,7 @@ fn vim_defaults_keep_application_commands_without_leaking_reader_keys_to_other_c
             assert_eq!(map.action(key, Context::Settings), None, "{key}");
         }
         let standard = resolve(platform, Preset::Standard).unwrap();
-        for key in ["cmd-f", "cmd-b", "cmd-g", "cmd-shift-g", "cmd-t", "p", "f"] {
+        for key in ["cmd-f", "cmd-b", "cmd-g", "cmd-shift-g", "cmd-t", "p"] {
             assert_eq!(map.action(key, Context::Reader), None, "{key}");
         }
         for key in ["o", "shift-o", "/", ":"] {
@@ -1168,9 +1168,7 @@ fn standard_defaults_keep_application_keys_and_use_contextual_reader_keys() {
         ] {
             assert_eq!(map.action(keys, Context::Reader), Some(action), "{keys}");
         }
-        for key in [
-            "j", "k", "n", "p", "w", "f", "s", "c", "m a", "' a", "d m a",
-        ] {
+        for key in ["j", "k", "n", "p", "w", "s", "c", "m a", "' a", "d m a"] {
             assert_eq!(map.action(key, Context::Reader), None, "{key}");
         }
         assert_eq!(

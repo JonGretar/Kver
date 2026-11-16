@@ -5,6 +5,37 @@ const PLATFORMS: [Platform; 3] = [Platform::Mac, Platform::Linux, Platform::Wind
 const PRESETS: [Preset; 2] = [Preset::Standard, Preset::Vim];
 
 #[test]
+fn follow_links_are_reader_scoped_in_every_preset_and_platform() {
+    for platform in PLATFORMS {
+        for preset in PRESETS {
+            let map = resolve_config("", platform, preset).unwrap();
+            for (key, action) in [
+                ("f", "kver::FollowLink"),
+                ("shift-f", "kver::FollowLinkInNewWindow"),
+            ] {
+                assert_eq!(map.action(key, Context::Reader), Some(action));
+                for context in [
+                    Context::Global,
+                    Context::Sidebar,
+                    Context::Contents,
+                    Context::Annotations,
+                ] {
+                    assert_eq!(map.action(key, context), None);
+                }
+            }
+            let map = resolve_config(
+                "[[keyboard.bindings]]\nkeys = 'q'\ncontext = 'reader'\ncommand = 'follow-link-in-new-window'\n",
+                platform, preset,
+            ).unwrap();
+            assert_eq!(
+                map.action("q", Context::Reader),
+                Some("kver::FollowLinkInNewWindow")
+            );
+        }
+    }
+}
+
+#[test]
 fn visual_select_is_reader_scoped_and_customizable_in_both_presets() {
     for platform in PLATFORMS {
         for preset in PRESETS {

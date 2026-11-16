@@ -6,6 +6,8 @@ use gpui_kit::component::{Sizable as _, button::ButtonVariants as _};
 
 use super::{hint, *};
 
+mod links;
+
 /// A word anchor in shared PageText. A caller may use its page/line identity
 /// for a larger semantic target without changing this anchor's glyph geometry.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,18 +51,30 @@ pub(super) struct Hinting {
 
 struct Session {
     geometry: Geometry,
-    filter: Filter,
+    mode: Mode,
     metrics: hint::Metrics,
     input: hint::Input,
     state: State,
     marked: Option<WordTarget>,
 }
 
+enum Mode {
+    Words(Filter),
+    Links { new_window: bool },
+}
+
 enum State {
     Loading,
     Preparing,
     Ready(Arc<hint::Snapshot<WordTarget>>),
+    Links(Arc<hint::Snapshot<(usize, usize)>>),
     Refused(&'static str),
+}
+
+impl State {
+    fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready(_) | Self::Links(_))
+    }
 }
 
 #[derive(PartialEq)]
@@ -100,13 +114,26 @@ impl ReaderView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.begin_hints(Mode::Words(Arc::new(filter)), window, cx);
+    }
+
+    pub(super) fn begin_link_hints(
+        &mut self,
+        new_window: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.begin_hints(Mode::Links { new_window }, window, cx);
+    }
+
+    fn begin_hints(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
         if !self.focus.is_focused(window) || self.pages.is_empty() || self.marks_open(cx) {
             return;
         }
         self.invalidate_hints(cx);
         self.hints.active = Some(Session {
             geometry: self.hint_geometry(window, cx),
-            filter: Arc::new(filter),
+            mode,
             metrics: hint::measure_labels(window, cx),
             input: hint::Input::default(),
             state: State::Loading,
@@ -118,7 +145,14 @@ impl ReaderView {
             reader.invalidate_hints(cx);
         }));
         window.focus(&focus, cx);
-        self.schedule_text(cx);
+        if matches!(
+            self.hints.active.as_ref().map(|s| &s.mode),
+            Some(Mode::Links { .. })
+        ) {
+            self.schedule_links(cx);
+        } else {
+            self.schedule_text(cx);
+        }
         cx.notify();
     }
 
@@ -143,7 +177,7 @@ impl ReaderView {
         }
     }
 
-    pub(super) fn finish_word_hints(&mut self) {
+    pub(super) fn finish_hints(&mut self) {
         self.hints.active = None;
         self.hints.serial += 1;
     }
@@ -180,6 +214,13 @@ impl ReaderView {
             self.hints.active.as_ref().map(|s| &s.state),
             Some(State::Loading)
         ) {
+            return;
+        }
+        if matches!(
+            self.hints.active.as_ref().map(|s| &s.mode),
+            Some(Mode::Links { .. })
+        ) {
+            self.prepare_link_hints(window, cx);
             return;
         }
         let (top, _, height) = self.viewport();
@@ -227,7 +268,10 @@ impl ReaderView {
             return;
         };
         session.state = State::Preparing;
-        let filter = session.filter.clone();
+        let Mode::Words(filter) = &session.mode else {
+            return;
+        };
+        let filter = filter.clone();
         let metrics = session.metrics;
         let serial = self.hints.serial;
         let lines = self
@@ -329,23 +373,29 @@ impl ReaderView {
         .detach();
     }
 
+    fn hint_page_origin(&self, page: usize) -> Option<Point> {
+        let transform = self.document.as_ref()?.page_transform(page)?;
+        let zero = transform.page_to_document(Point { x: 0., y: 0. })?;
+        Some(self.page_viewport(page)?.document_to_screen(zero))
+    }
+
     pub(super) fn render_hints(&self, page: usize, cx: &App) -> Vec<gpui::AnyElement> {
         let Some(session) = &self.hints.active else {
             return Vec::new();
         };
+        let Some(origin) = self.hint_page_origin(page) else {
+            return Vec::new();
+        };
+        if let State::Links(snapshot) = &session.state {
+            return snapshot
+                .paint_labels(page, &session.input, None)
+                .into_iter()
+                .map(|label| label.render(origin, &session.input, false, cx))
+                .collect();
+        }
         let State::Ready(snapshot) = &session.state else {
             return Vec::new();
         };
-        let Some(text) = self.page_text.get(page) else {
-            return Vec::new();
-        };
-        let Some(viewport) = self.page_viewport(page) else {
-            return Vec::new();
-        };
-        let Some(zero) = text.transform.page_to_document(Point { x: 0., y: 0. }) else {
-            return Vec::new();
-        };
-        let origin = viewport.document_to_screen(zero);
         snapshot
             .paint_labels(page, &session.input, session.marked.as_ref())
             .into_iter()
@@ -362,31 +412,39 @@ impl ReaderView {
 
     pub(super) fn render_hint_input(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let session = self.hints.active.as_ref()?;
-        let prompt = match self
-            .acquisition
-            .as_ref()
-            .map(|acquisition| &acquisition.stage)
-        {
-            Some(selection::Stage::Start) => "Choose start",
-            Some(selection::Stage::End { .. }) => "Choose end",
-            None => "Type two letters",
+        let link_mode = matches!(session.mode, Mode::Links { .. });
+        let prompt = if link_mode {
+            "Choose link"
+        } else {
+            match self
+                .acquisition
+                .as_ref()
+                .map(|acquisition| &acquisition.stage)
+            {
+                Some(selection::Stage::Start) => "Choose start",
+                Some(selection::Stage::End { .. }) => "Choose end",
+                None => "Type two letters",
+            }
         };
         let line_mode = self
             .acquisition
             .as_ref()
             .is_some_and(|acquisition| acquisition.mode == selection::Targeting::Lines);
-        let cancel = if line_mode {
+        let cancel = if link_mode {
+            "Cancel link hints"
+        } else if line_mode {
             "Cancel line hints"
         } else {
             "Cancel word hints"
         };
         let status = match &session.state {
+            State::Loading | State::Preparing if link_mode => "Loading visible links…".to_owned(),
             State::Loading | State::Preparing => "Loading visible text…".to_owned(),
             State::Refused(message) => message.to_string(),
-            State::Ready(_) if session.input.is_retry() => {
+            State::Ready(_) | State::Links(_) if session.input.is_retry() => {
                 "No matching hint. Try again.".to_owned()
             }
-            State::Ready(_) => format!(
+            State::Ready(_) | State::Links(_) => format!(
                 "{prompt}: {}{}",
                 session.input.prefix(),
                 if session.input.prefix().is_empty() {
@@ -421,7 +479,13 @@ impl ReaderView {
                         .min_w_0()
                         .truncate()
                         .text_color(cx.theme().muted_foreground)
-                        .child(if line_mode {
+                        .child(if let Mode::Links { new_window } = session.mode {
+                            if new_window {
+                                "Follow in new window"
+                            } else {
+                                "Follow link"
+                            }
+                        } else if line_mode {
                             "Lines"
                         } else if self.acquisition.is_some() {
                             "Visual select"
@@ -436,7 +500,7 @@ impl ReaderView {
                         .items_center()
                         .gap_2()
                         .when(
-                            matches!(session.state, State::Ready(_)) && !session.input.is_retry(),
+                            session.state.is_ready() && !session.input.is_retry(),
                             |row| {
                                 row.child(div().flex_shrink_0().child(prompt))
                                     .children((0..2).map(|index| {
@@ -464,7 +528,7 @@ impl ReaderView {
                             },
                         )
                         .when(
-                            !matches!(session.state, State::Ready(_)) || session.input.is_retry(),
+                            !session.state.is_ready() || session.input.is_retry(),
                             |row| row.child(div().min_w_0().truncate().child(status)),
                         ),
                 )
@@ -523,7 +587,17 @@ impl ReaderView {
                             State::Ready(snapshot) => Some(snapshot.clone()),
                             _ => None,
                         };
-                        match session.input.key(&event.keystroke.key, snapshot.as_deref()) {
+                        let links = match &session.state {
+                            State::Links(snapshot) => Some(snapshot.clone()),
+                            _ => None,
+                        };
+                        let new_window = matches!(session.mode, Mode::Links { new_window: true });
+                        let outcome = if let Some(links) = &links {
+                            session.input.key(&event.keystroke.key, Some(links))
+                        } else {
+                            session.input.key(&event.keystroke.key, snapshot.as_deref())
+                        };
+                        match outcome {
                             hint::Outcome::Pending => {}
                             hint::Outcome::Cancelled => {
                                 reader.invalidate_hints(cx);
@@ -532,10 +606,22 @@ impl ReaderView {
                                 }
                             }
                             hint::Outcome::Chosen(index) => {
+                                if let Some(links) = links {
+                                    let &(page, link) = links.labels()[index].target().id();
+                                    reader.finish_hints();
+                                    window.focus(&reader.focus, cx);
+                                    reader.follow_link(
+                                        reader.document_generation,
+                                        page,
+                                        link,
+                                        new_window,
+                                        cx,
+                                    );
+                                }
                                 if let Some(snapshot) = snapshot
                                     && !reader.choose_selection_target(snapshot.clone(), index)
                                 {
-                                    reader.finish_word_hints();
+                                    reader.finish_hints();
                                     cx.emit(HintEvent::Chosen { snapshot, index });
                                 }
                                 if !reader.hints.is_active()

@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Zoom PDF pages with a touchpad pinch, or hold Command on macOS / Ctrl on
+  Linux and Windows while scrolling. Zoom follows the pointer and keeps page
+  images visible while sharper replacements render.
+
 ## [0.7.0] - 2026-11-16
 
 Select passages and follow links without reaching for the mouse. This release

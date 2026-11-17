@@ -27,6 +27,7 @@ mod ruler;
 mod selection;
 mod sessions;
 mod vim;
+mod zoom;
 use rendering::cached_pages;
 
 fn recent_test_window(

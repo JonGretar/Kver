@@ -33,11 +33,59 @@ fn display_density_changes_bitmap_resolution_not_logical_zoom() {
 }
 
 #[test]
+fn continuous_zoom_keeps_previews_and_coalesces_to_latest_scale() {
+    let pages = [(100.0, 100.0)];
+    let layout = PageLayout::new(&pages, 1.0, ReadingMode::Continuous, 0);
+    let mut rasters = PageRasters::default();
+    let initial = request(&mut rasters, &layout, 0.0, 1000.0, 1.0);
+    rasters.finish(initial, Ok(bitmap(100, 100)), 0..1);
+    rasters.zoom_changed();
+    let zoomed = PageLayout::new(&pages, 1.1, ReadingMode::Continuous, 0);
+    let pending = request(&mut rasters, &zoomed, 0.0, 1000.0, 1.0);
+    for scale in [1.2, 1.3, 1.4] {
+        rasters.zoom_changed();
+        let layout = PageLayout::new(&pages, scale, ReadingMode::Continuous, 0);
+        assert!(matches!(
+            rasters.schedule(&layout, 0.0, 1000.0, 1.0),
+            Schedule::Unchanged
+        ));
+        assert!(rasters.image(0).is_some());
+    }
+    rasters.finish(pending, Ok(bitmap(110, 110)), 0..1);
+    let latest = PageLayout::new(&pages, 1.4, ReadingMode::Continuous, 0);
+    let pending = request(&mut rasters, &latest, 0.0, 1000.0, 1.0);
+    assert_eq!(pending.scale(), 1.4);
+    rasters.finish(pending, Ok(bitmap(140, 140)), 0..1);
+    assert!(matches!(
+        rasters.schedule(&latest, 0.0, 1000.0, 1.0),
+        Schedule::Ready
+    ));
+    assert_eq!(rasters.retained_bytes(), 140 * 140 * 4);
+    rasters.invalidate();
+    assert!(rasters.image(0).is_none());
+}
+
+#[test]
 fn high_zoom_is_bounded_for_a4_scans() {
     let scale = raster_scale(4.0, 2.0, (595.44, 842.04));
     assert!(scale < 8.0);
     assert!(scale > 7.0);
     assert!(595.44 * 842.04 * scale * scale <= 32_000_000.0);
+}
+
+#[test]
+fn old_zoom_failure_does_not_block_latest_scale() {
+    let pages = [(100.0, 100.0)];
+    let layout = PageLayout::new(&pages, 1.0, ReadingMode::Continuous, 0);
+    let mut rasters = PageRasters::default();
+    let old = request(&mut rasters, &layout, 0.0, 1000.0, 1.0);
+    rasters.zoom_changed();
+    rasters.finish(old, Err("old zoom failed".into()), 0..1);
+    let latest = PageLayout::new(&pages, 2.0, ReadingMode::Continuous, 0);
+    assert_eq!(
+        request(&mut rasters, &latest, 0.0, 1000.0, 1.0).scale(),
+        2.0
+    );
 }
 
 #[test]

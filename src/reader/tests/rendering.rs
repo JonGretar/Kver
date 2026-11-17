@@ -72,10 +72,9 @@ fn zoom_and_density_replace_pixels_without_changing_document_position(cx: &mut T
     });
     reader.update(cx, |reader, cx| {
         reader.zoom_in(cx);
-        assert_eq!(
-            reader.retained_bitmap_bytes(),
-            0,
-            "old scale pixels are released immediately"
+        assert!(
+            std::sync::Arc::ptr_eq(&old_image, reader.rasters.image(0).unwrap()),
+            "old scale pixels remain visible until the replacement is ready"
         );
     });
     cx.run_until_parked();

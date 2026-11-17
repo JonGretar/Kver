@@ -29,9 +29,14 @@ GitHub issue or PR, not in architecture docs or a test diary.
    branches and PRs instead.
    In the first prompt to a newly created implementation thread, tell it to
    do the work in that thread; do not instruct it to create another thread.
-   Ask working threads to report decisions needed, blockers that change the
-   plan, and confirmed landings or dependency changes to the orchestrator.
+   When coordinating through an orchestrator thread, include its thread reference
+   explicitly in each working thread's initial prompt. Independently created main
+   threads do not inherit the orchestrator's conversation; include the task context
+   they need. Ask working threads to report decisions needing agreement, blockers
+   that change the plan, and confirmed landings or dependency changes there.
    Keep routine implementation and CI progress in the working thread.
+   GitHub Issues remains authoritative for scope, ownership, and blockers; keep
+   task-specific thread references in prompts rather than a repository thread index.
 3. **Build a slice.** Implement one usable behavior per ticket. Follow the
    applicable project skills (such as `tdd` for test-first work), run the
    checks relevant to that behavior, and demonstrate it with a real PDF where

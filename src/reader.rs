@@ -16,6 +16,7 @@ mod rendering;
 mod ruler;
 mod ruler_history;
 mod selection;
+mod zoom;
 pub use crate::app::document_window::OpenPdf;
 pub use crate::app::document_window::command_palette::ShowCommandPalette;
 pub use crate::app::document_window::sidebar::{
@@ -1808,7 +1809,7 @@ impl ReaderView {
         }
         self.ruler.browse_task = None;
         self.scale = next;
-        self.rasters.invalidate();
+        self.rasters.zoom_changed();
         self.scroll_to(
             -f32::from(self.scroll.offset().x),
             self.layout().offset_for(position, anchor),
@@ -2638,6 +2639,10 @@ impl Render for ReaderView {
                         this.sync_viewport(cx);
                         this.browse_ruler(cx);
                     }))
+                    .on_pinch(cx.listener(|this, event: &gpui::PinchEvent, _, cx| {
+                        this.zoom_at(1.0 + event.delta, event.position, cx);
+                        cx.stop_propagation();
+                    }))
                     .bg(cx.theme().muted)
                     .p_4()
                     .child(if self.path.is_none() || self.pages.is_empty() {
@@ -2702,7 +2707,8 @@ impl Render for ReaderView {
                             .into_any_element()
                     } else {
                         content.into_any_element()
-                    }),
+                    })
+                    .child(self.wheel_zoom_input(cx)),
             )
             .context_menu({
                 let enabled = self.highlight_available(cx);

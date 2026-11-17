@@ -1,8 +1,9 @@
 //! Viewport-owned bitmaps and one-current-job raster scheduling.
 //!
 //! The view executes requests through the PDF adapter and returns replies here.
-//! Invalidating document/zoom/density inputs retires the current request; an
+//! Invalidating document/density inputs retires the current request; an
 //! already-running backend call may finish, but cannot install its old result.
+//! Zoom retains a preview and coalesces work to the latest requested scale.
 //! There is no prefetch queue or offscreen bitmap cache.
 
 use std::{collections::HashMap, ops::Range, sync::Arc};
@@ -20,12 +21,13 @@ pub(super) struct PageRasters {
     images: HashMap<usize, Bitmap>,
     in_flight: Option<RasterRequest>,
     next_request: u64,
-    failed: Option<usize>,
+    failed: Option<RasterRequest>,
 }
 
 struct Bitmap {
     image: Arc<RenderImage>,
     bytes: usize,
+    scale: f32,
 }
 
 /// An opaque ticket, unique even if the same page and scale are requested again.
@@ -62,17 +64,23 @@ pub(super) enum Completion {
 }
 
 impl PageRasters {
-    /// A document, zoom, or density change retires all cached work and failures.
+    /// A document or density change retires all cached work and failures.
     pub(super) fn invalidate(&mut self) {
         self.images.clear();
         self.in_flight = None;
         self.failed = None;
     }
 
+    /// Keep visible pixels and at most one running job during continuous zoom.
+    /// Its completion is a preview; scheduling then uses the latest scale.
+    pub(super) fn zoom_changed(&mut self) {
+        self.failed = None;
+    }
+
     /// Preserve the explicit-turn retry policy, including when a previously
     /// failed neighbor remains visible beside a newly selected short page.
     pub(super) fn on_page_selected(&mut self, page: usize) {
-        if self.failed != Some(page) {
+        if self.failed.is_none_or(|request| request.page != page) {
             self.failed = None;
         }
     }
@@ -98,7 +106,14 @@ impl PageRasters {
         display_scale: f32,
     ) -> Schedule {
         let visible = layout.visible_pages(top, height);
-        if self.failed.is_some_and(|page| !visible.contains(&page)) {
+        if self.failed.is_some_and(|request| {
+            !visible.contains(&request.page)
+                || layout
+                    .page_dimensions(request.page)
+                    .is_some_and(|dimensions| {
+                        request.scale != raster_scale(layout.scale(), display_scale, dimensions)
+                    })
+        }) {
             self.failed = None;
         }
         // Eviction still happens while a current job is running.
@@ -107,7 +122,14 @@ impl PageRasters {
             return Schedule::Unchanged;
         }
         let page = visible
-            .filter(|page| !self.images.contains_key(page) && self.failed != Some(*page))
+            .filter(|page| {
+                self.failed.is_none_or(|request| request.page != *page)
+                    && self.images.get(page).is_none_or(|bitmap| {
+                        layout.page_dimensions(*page).is_some_and(|dimensions| {
+                            bitmap.scale != raster_scale(layout.scale(), display_scale, dimensions)
+                        })
+                    })
+            })
             .min_by_key(|page| (layout.page_top(*page) - top).abs() as i64);
         let Some(page) = page else {
             return if self.failed.is_none() {
@@ -122,7 +144,7 @@ impl PageRasters {
         let scale = raster_scale(layout.scale(), display_scale, dimensions);
         let estimated =
             (dimensions.0 * scale).ceil() as usize * (dimensions.1 * scale).ceil() as usize * 4;
-        let used = self.retained_bytes();
+        let used = self.retained_bytes() - self.images.get(&page).map_or(0, |bitmap| bitmap.bytes);
         if used > 0 && used.saturating_add(estimated) > BITMAP_BUDGET {
             return Schedule::Ready;
         }
@@ -156,6 +178,7 @@ impl PageRasters {
             Ok(Bitmap {
                 image: Arc::new(RenderImage::new(vec![Frame::new(pixels)])),
                 bytes,
+                scale: request.scale,
             })
         });
         match result {
@@ -164,7 +187,7 @@ impl PageRasters {
                 Completion::Accepted
             }
             Err(error) => {
-                self.failed = Some(request.page);
+                self.failed = Some(request);
                 Completion::Failed(error)
             }
         }

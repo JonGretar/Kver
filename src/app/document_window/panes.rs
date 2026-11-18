@@ -252,8 +252,7 @@ impl DocumentWindow {
             self.focus_other_pane(window, cx);
         }
         if let Some(pane) = self.other_pane.take() {
-            pane.reader
-                .update(cx, |reader, cx| reader.detach_session(cx));
+            pane.reader.update(cx, |reader, cx| reader.retire_pane(cx));
         }
         self.split.active_first = true;
         window.focus(&self.reader.read(cx).focus_handle(cx), cx);
@@ -393,6 +392,15 @@ impl DocumentWindow {
     }
 
     pub(super) fn stage_replacement(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.stage_replacement_after_decision(path, false, cx);
+    }
+
+    pub(super) fn stage_replacement_after_decision(
+        &mut self,
+        path: PathBuf,
+        discard: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self
             .recent_open
             .as_ref()
@@ -448,13 +456,29 @@ impl DocumentWindow {
                             result = Err("The current PDF changed while opening its replacement. Both panes were kept; try opening again.".into());
                         }
                         if result.is_ok() {
+                            // A picker or decision opened on the old document
+                            // while loading must not survive adoption.
+                            if this.pending_leave.is_some()
+                                || (this.save_prompt_open && this.save_picker.is_none())
+                            {
+                                window.close_dialog(cx);
+                            }
+                            this.file_picker = None;
+                            this.save_picker = None;
+                            this.save_observation = None;
+                            this.cancel_pending_leave(cx);
+                            // Approval to discard is not a discard until the
+                            // replacement has loaded and the source is unchanged.
+                            if discard && let Some(origin) = &origin {
+                                origin.update(cx, |session, cx| session.discard(cx));
+                            }
                             let reader_focused = this.reader.read(cx).focus_handle(cx).is_focused(window);
                             if let Some(other) = this.other_pane.take() {
-                                other.reader.update(cx, |reader, cx| reader.detach_session(cx));
+                                other.reader.update(cx, |reader, cx| reader.retire_pane(cx));
                             }
                             this.split.active_first = true;
                             this.reader
-                                .update(cx, |reader, cx| reader.detach_session(cx));
+                                .update(cx, |reader, cx| reader.retire_pane(cx));
                             this.reader = source.clone();
                             this.reader.update(cx, |reader, cx| reader.set_pane_active(true, cx));
                             this.pane_subscriptions = Self::observe_pane(&source, window, cx);

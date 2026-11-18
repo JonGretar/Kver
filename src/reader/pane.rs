@@ -52,8 +52,28 @@ impl ReaderView {
         if !active {
             self.invalidate_hints(cx);
         } else {
+            // Another pane may have recorded since this pane last moved.
+            self.recorded_position = None;
             self.record_position(cx);
         }
         cx.notify();
+    }
+
+    /// Retained callback handles must not keep a removed viewport participating
+    /// in the session or writing the window's ordinary reading position.
+    pub(crate) fn retire_pane(&mut self, cx: &mut Context<Self>) {
+        self.detach_session(cx);
+        self.document_generation += 1;
+        self.record_active = false;
+        self.record_path = None;
+        self.pending_restore = None;
+        self.invalidate_hints(cx);
+        self.page_text = page_text::PageTexts::default();
+        self.ruler = ruler::Ruler::default();
+        self.ruler_history = ruler_history::RulerHistory::default();
+        self.marks = None;
+        self.marks_subscriptions.clear();
+        self.links.reset();
+        self.rasters.invalidate();
     }
 }

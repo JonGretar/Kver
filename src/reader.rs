@@ -31,6 +31,7 @@ pub use contents::ActivateOutline;
 pub(crate) use contents::ContentsPanel;
 pub(crate) use find::FindPanel;
 pub use find::{NextMatch, PreviousMatch};
+pub(crate) use pane::PaneTarget;
 // Preserve the former public name while callers adopt the narrowed view.
 pub use ReaderView as Preview;
 use document_session::DocumentSession;

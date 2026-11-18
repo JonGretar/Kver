@@ -31,6 +31,8 @@ pub(crate) struct FindNavigation {
     document_generation: u64,
     revision: u64,
     hit: FindMatch,
+    pub(crate) target: Option<super::PaneTarget>,
+    pub(crate) pulse: u64,
 }
 
 impl FindNavigation {
@@ -61,6 +63,8 @@ pub(crate) struct FindPanel {
     results: Vec<FindMatch>,
     active: Option<usize>,
     pending_next: bool,
+    pending_target: Option<super::PaneTarget>,
+    target: Option<super::PaneTarget>,
     pulse: u64,
     scanned: usize,
     mapped_pages: usize,
@@ -94,6 +98,8 @@ impl FindPanel {
             results: Vec::new(),
             active: None,
             pending_next: false,
+            pending_target: None,
+            target: None,
             pulse: 0,
             scanned: 0,
             mapped_pages: 0,
@@ -116,6 +122,7 @@ impl FindPanel {
         self.results.clear();
         self.active = None;
         self.pending_next = false;
+        self.pending_target = None;
         self.scanned = 0;
         self.mapped_pages = 0;
         self.failed_pages = 0;
@@ -174,6 +181,17 @@ impl FindPanel {
 
     pub(crate) fn generation(&self) -> u64 {
         self.document_generation
+    }
+
+    pub(crate) fn set_target(&mut self, target: super::PaneTarget) {
+        self.target = Some(target);
+    }
+
+    pub(crate) fn retire_target(&mut self, id: gpui_kit::EntityId) {
+        if self.pending_target.is_some_and(|target| target.id == id) {
+            self.pending_next = false;
+            self.pending_target = None;
+        }
     }
 
     pub(crate) fn highlight(&self) -> Option<(&FindMatch, u64)> {
@@ -261,7 +279,8 @@ impl FindPanel {
         }
         if self.pending_next && !self.results.is_empty() {
             self.pending_next = false;
-            self.select_match(0, cx);
+            let target = self.pending_target.take();
+            self.select_match_for(0, target, cx);
         }
         cx.notify();
         self.searching
@@ -271,7 +290,10 @@ impl FindPanel {
         if self.results.is_empty() {
             // Enter before the first batch completes selects the first result
             // as soon as it arrives, without stealing focus from the query.
-            self.pending_next |= direction > 0 && self.searching;
+            if direction > 0 && self.searching {
+                self.pending_next = true;
+                self.pending_target = self.target;
+            }
             return;
         }
         let next = match (self.active, direction) {
@@ -284,6 +306,15 @@ impl FindPanel {
     }
 
     fn select_match(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.select_match_for(ix, self.target, cx);
+    }
+
+    fn select_match_for(
+        &mut self,
+        ix: usize,
+        target: Option<super::PaneTarget>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(hit) = self.results.get(ix).cloned() else {
             return;
         };
@@ -293,6 +324,8 @@ impl FindPanel {
             document_generation: self.document_generation,
             revision: self.revision,
             hit,
+            target,
+            pulse: self.pulse,
         });
         cx.notify();
     }

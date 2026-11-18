@@ -298,24 +298,40 @@ impl DocumentWindow {
                 cx.observe(&find, |this, find, cx| {
                     let find = find.read(cx);
                     let generation = find.generation();
-                    let highlight = find.highlight().map(|(hit, pulse)| (hit.clone(), pulse));
-                    this.reader.update(cx, |reader, cx| {
-                        reader.set_find_highlight(generation, highlight, cx)
-                    });
+                    // Query invalidation clears both views. A selected result's
+                    // pulse belongs only to its captured navigation target.
+                    if find.highlight().is_none() {
+                        this.reader.update(cx, |reader, cx| {
+                            reader.set_find_highlight(generation, None, cx)
+                        });
+                        if let Some(other) = &this.other_pane {
+                            other.reader.update(cx, |reader, cx| {
+                                reader.set_find_highlight(generation, None, cx)
+                            });
+                        }
+                    }
                     cx.notify();
                 }),
                 cx.subscribe(&find, |this, find, navigation, cx| {
-                    if navigation.document_generation()
-                        == this.reader.read(cx).document_generation()
+                    if let Some(reader) = this.navigation_target(navigation.target, cx)
+                        && navigation.document_generation() == reader.read(cx).document_generation()
                         && find.read(cx).is_current(navigation)
                     {
-                        this.reader
-                            .update(cx, |reader, cx| reader.navigate_find(navigation.hit(), cx));
+                        reader.update(cx, |reader, cx| {
+                            reader.set_find_highlight(
+                                navigation.document_generation(),
+                                Some((navigation.hit().clone(), navigation.pulse)),
+                                cx,
+                            );
+                            reader.navigate_find(navigation.hit(), cx);
+                        });
                     }
                 }),
                 cx.subscribe(&contents, |this, _, navigation, cx| {
-                    if navigation.generation() == this.reader.read(cx).document_generation() {
-                        this.reader.update(cx, |reader, cx| {
+                    if let Some(reader) = this.navigation_target(navigation.target, cx)
+                        && navigation.generation() == reader.read(cx).document_generation()
+                    {
+                        reader.update(cx, |reader, cx| {
                             reader.navigate_outline(navigation.destination(), cx)
                         });
                     }
@@ -323,14 +339,16 @@ impl DocumentWindow {
                 cx.subscribe(
                     &annotations,
                     |this, _, navigation: &crate::reader::AnnotationNavigation, cx| {
-                        this.reader.update(cx, |reader, cx| {
-                            reader.navigate_annotation(
-                                navigation.generation,
-                                navigation.revision,
-                                &navigation.annotation,
-                                cx,
-                            );
-                        });
+                        if let Some(reader) = this.navigation_target(navigation.target, cx) {
+                            reader.update(cx, |reader, cx| {
+                                reader.navigate_annotation(
+                                    navigation.generation,
+                                    navigation.revision,
+                                    &navigation.annotation,
+                                    cx,
+                                );
+                            });
+                        }
                     },
                 ),
                 cx.subscribe(
@@ -381,6 +399,7 @@ impl DocumentWindow {
     }
 
     fn sync_sidebar_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_sidebar_target(cx);
         let Some(sidebar) = &self.sidebar else { return };
         let reader = self.reader.read(cx);
         let generation = reader.document_generation();
@@ -409,6 +428,45 @@ impl DocumentWindow {
         if self.sidebar_panel(cx) == Some(SidebarPanel::Annotations) {
             self.load_annotations(window, cx);
         }
+    }
+
+    fn sync_sidebar_target(&self, cx: &mut App) {
+        let Some(sidebar) = &self.sidebar else { return };
+        let target = crate::reader::PaneTarget {
+            id: self.reader.entity_id(),
+            generation: self.reader.read(cx).document_generation(),
+        };
+        sidebar
+            .read(cx)
+            .find()
+            .clone()
+            .update(cx, |find, _| find.set_target(target));
+        sidebar
+            .read(cx)
+            .contents()
+            .clone()
+            .update(cx, |contents, _| contents.set_target(target));
+        sidebar
+            .read(cx)
+            .annotations()
+            .clone()
+            .update(cx, |panel, _| panel.set_target(target));
+    }
+
+    fn navigation_target(
+        &self,
+        target: Option<crate::reader::PaneTarget>,
+        cx: &App,
+    ) -> Option<Entity<ReaderView>> {
+        let target = target?;
+        let reader = if self.reader.entity_id() == target.id {
+            &self.reader
+        } else {
+            &self.other_pane.as_ref()?.reader
+        };
+        (reader.entity_id() == target.id
+            && reader.read(cx).document_generation() == target.generation)
+            .then(|| reader.clone())
     }
 
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {

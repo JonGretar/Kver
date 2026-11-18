@@ -29,6 +29,8 @@ fn obsolete_batches_and_navigation_cannot_cross_query_or_document_revisions(
                 document_generation: 0,
                 revision: first_revision,
                 hit: sample_hit(),
+                target: None,
+                pulse: 0,
             };
             find.query_changed("This is page 2 of 100".into(), cx);
             assert!(!find.is_current(&old_navigation));
@@ -47,6 +49,8 @@ fn obsolete_batches_and_navigation_cannot_cross_query_or_document_revisions(
                 document_generation: 0,
                 revision: current_revision,
                 hit: sample_hit(),
+                target: None,
+                pulse: 0,
             };
             assert!(find.is_current(&navigation));
             find.set_document(1, None, 0, cx);

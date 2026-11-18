@@ -25,6 +25,7 @@ gpui_kit::actions!(kver, [ActivateOutline]);
 pub(crate) struct OutlineNavigation {
     generation: u64,
     destination: OutlineDestination,
+    pub(crate) target: Option<super::PaneTarget>,
 }
 
 impl OutlineNavigation {
@@ -39,6 +40,7 @@ impl OutlineNavigation {
 
 pub(crate) struct ContentsPanel {
     focus: FocusHandle,
+    target: Option<super::PaneTarget>,
     document: Option<Arc<pdf::Document>>,
     generation: u64,
     task: Option<Task<()>>,
@@ -52,6 +54,7 @@ impl ContentsPanel {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle().tab_stop(true),
+            target: None,
             document: None,
             generation: 0,
             task: None,
@@ -79,6 +82,10 @@ impl ContentsPanel {
         self.outline = None;
         self.tree.update(cx, |tree, cx| tree.set_items(vec![], cx));
         cx.notify();
+    }
+
+    pub(crate) fn set_target(&mut self, target: super::PaneTarget) {
+        self.target = Some(target);
     }
 
     pub(crate) fn ensure_loaded(&mut self, cx: &mut Context<Self>) {
@@ -166,6 +173,7 @@ impl ContentsPanel {
             cx.emit(OutlineNavigation {
                 generation,
                 destination,
+                target: self.target,
             });
         }
     }
@@ -175,6 +183,7 @@ impl ContentsPanel {
             cx.emit(OutlineNavigation {
                 generation: self.generation,
                 destination,
+                target: self.target,
             });
         }
     }

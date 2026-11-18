@@ -21,7 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        # GitHub is low on macOS machines. Let's chill a bit with mac tests
+        # os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04]
 
     steps:
       - uses: actions/checkout@v5

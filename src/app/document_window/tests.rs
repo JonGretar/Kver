@@ -15,6 +15,7 @@ mod keyboard;
 mod links;
 mod opening;
 mod palette;
+mod panes;
 mod recent_history;
 mod recent_picker;
 mod saving;

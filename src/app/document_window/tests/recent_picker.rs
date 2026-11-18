@@ -280,6 +280,117 @@ fn replacing_a_recent_open_cancels_its_request_and_ignores_old_completion(cx: &m
 }
 
 #[gpui_kit::test]
+fn split_recent_replacement_finishes_only_its_own_request(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let paths = crate::settings::AppPaths::for_locations(
+        root.path().join("config.toml"),
+        root.path().join("local"),
+    );
+    let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
+    let replacement = RecentStore::normalize(Path::new("examples/selection-sample.pdf")).unwrap();
+    RecentStore::new(&paths).record(&pdf).unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+        recent::install(cx, Some(paths));
+    });
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("secondary-\\", cx);
+        window.dispatch_action(Box::new(ShowRecent), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| window.press("enter", cx))
+        .unwrap();
+    document.read_with(cx, |d, _| {
+        assert!(d.replacement.is_some());
+        assert!(d.recent_open.is_some());
+    });
+    // Supersede A before its load finishes. B must not finish A's picker.
+    document.update(cx, |d, cx| d.open_path(replacement.clone(), cx));
+    cx.run_until_parked();
+    document.read_with(cx, |d, cx| {
+        assert!(d.recent_open.is_none());
+        assert!(d.other_pane.is_none());
+        assert_eq!(d.reader.read(cx).path(), Some(replacement.as_path()));
+        let picker = d
+            .recent
+            .as_ref()
+            .expect("unrelated replacement must preserve picker")
+            .read(cx);
+        assert!(!picker.is_loading());
+        assert!(picker.error().is_none());
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.within("recent-panel").find("input-state").focused(),
+            Some(true)
+        );
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |d, cx| {
+        assert!(d.recent.is_none());
+        assert_eq!(d.reader.read(cx).path(), Some(pdf.as_path()));
+    });
+}
+
+#[gpui_kit::test]
+fn successful_recent_open_replaces_both_panes_and_restores_surviving_focus(
+    cx: &mut TestAppContext,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let paths = crate::settings::AppPaths::for_locations(
+        root.path().join("config.toml"),
+        root.path().join("local"),
+    );
+    let pdf = RecentStore::normalize(Path::new("examples/readme-sample.pdf")).unwrap();
+    RecentStore::new(&paths).record(&pdf).unwrap();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        bind_reader_keys(cx);
+        recent::install(cx, Some(paths));
+    });
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("secondary-\\", cx);
+        window.dispatch_action(Box::new(ShowRecent), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| window.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |d, cx| {
+        assert!(d.recent_open.is_none());
+        assert!(d.recent.is_none());
+        assert!(d.other_pane.is_none());
+        assert_eq!(d.reader.read(cx).path(), Some(pdf.as_path()));
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            document
+                .read(cx)
+                .reader
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        );
+        window.press("right", cx);
+    })
+    .unwrap();
+    document.read_with(cx, |d, cx| assert_eq!(d.reader.read(cx).page_index(), 1));
+}
+
+#[gpui_kit::test]
 fn closing_window_during_recent_open_releases_both_owners(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();
     let paths = crate::settings::AppPaths::for_locations(

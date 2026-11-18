@@ -2,6 +2,19 @@
 # Platform filters select entries within this preset, not another policy layer.
 
 [[keyboard.bindings]]
+keys = 'secondary-\'
+context = "reader"
+command = "split-side-by-side"
+[[keyboard.bindings]]
+keys = 'secondary-shift-\'
+context = "reader"
+command = "split-stacked"
+[[keyboard.bindings]]
+keys = "ctrl-tab"
+context = "reader"
+command = "switch-pane"
+
+[[keyboard.bindings]]
 keys = "f"
 context = "reader"
 command = "follow-link"

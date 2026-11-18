@@ -8,7 +8,10 @@ use gpui_kit::{Global, Menu, MenuItem};
 
 use super::document_window::OpenPdf;
 #[cfg(target_os = "macos")]
-use super::document_window::{NavigateBack, NavigateForward, Save, SaveAs};
+use super::document_window::{
+    ClosePane, KeepOnlyPane, NavigateBack, NavigateForward, Save, SaveAs, SplitSideBySide,
+    SplitStacked, SwitchPane,
+};
 #[cfg(target_os = "macos")]
 use super::windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow};
 #[cfg(target_os = "macos")]
@@ -59,8 +62,9 @@ fn protect_menu_input(mut menus: Vec<Menu>, cx: &App) -> Vec<Menu> {
             match item {
                 MenuItem::Submenu(menu) => protect(menu, cx),
                 MenuItem::Action { action, .. }
-                    if super::keymap::active_map(cx)
-                        .is_some_and(|map| map.has_typing_menu_shortcut(action.as_ref())) =>
+                    if is_pane_action(action.as_ref())
+                        || super::keymap::active_map(cx)
+                            .is_some_and(|map| map.has_typing_menu_shortcut(action.as_ref())) =>
                 {
                     *action = Box::new(NativeMenuAction {
                         action: action.boxed_clone(),
@@ -74,6 +78,17 @@ fn protect_menu_input(mut menus: Vec<Menu>, cx: &App) -> Vec<Menu> {
         protect(menu, cx);
     }
     menus
+}
+
+#[cfg(target_os = "macos")]
+fn is_pane_action(action: &dyn Action) -> bool {
+    // Even modified pane shortcuts are Reader-only. Cocoa key equivalents
+    // bypass that predicate, so always leave their dispatch in GPUI's focus tree.
+    action.partial_eq(&SplitSideBySide)
+        || action.partial_eq(&SplitStacked)
+        || action.partial_eq(&SwitchPane)
+        || action.partial_eq(&ClosePane)
+        || action.partial_eq(&KeepOnlyPane)
 }
 
 /// Commands displayed in the native menu. The keymap checks that overriding
@@ -109,6 +124,11 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "close-window",
     "next-window",
     "previous-window",
+    "split-side-by-side",
+    "split-stacked",
+    "switch-pane",
+    "close-pane",
+    "keep-only-pane",
     "show-contents",
     "toggle-sidebar",
     "single-page",
@@ -130,6 +150,9 @@ struct MenuState {
     annotation_undo_available: Cell<bool>,
     annotation_redo_available: Cell<bool>,
     annotation_edit_available: Cell<bool>,
+    split_side_by_side: Cell<bool>,
+    split_stacked: Cell<bool>,
+    has_split: Cell<bool>,
 }
 #[cfg(target_os = "macos")]
 impl Global for MenuState {}
@@ -149,6 +172,9 @@ pub fn install(cx: &mut App) {
         annotation_undo_available: Cell::new(false),
         annotation_redo_available: Cell::new(false),
         annotation_edit_available: Cell::new(false),
+        split_side_by_side: Cell::new(false),
+        split_stacked: Cell::new(false),
+        has_split: Cell::new(false),
     });
     let about_window = Cell::<Option<AnyWindowHandle>>::new(None);
     cx.on_action(move |_: &AboutKver, cx| {
@@ -177,6 +203,7 @@ pub fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.on_window_closed(|cx, _| {
         if cx.windows().is_empty() {
+            set_pane_availability(cx, false, false, false);
             refresh_navigation(cx, false, false);
         }
     })
@@ -258,6 +285,15 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                     MenuItem::action("Use Default Reading Mode", UseDefaultReadingMode),
                     MenuItem::separator(),
                     MenuItem::action("Toggle reading ruler", crate::reader::ToggleReadingRuler),
+                    MenuItem::separator(),
+                    MenuItem::action("Split side by side", SplitSideBySide)
+                        .disabled(!state.split_side_by_side.get()),
+                    MenuItem::action("Split top and bottom", SplitStacked)
+                        .disabled(!state.split_stacked.get()),
+                    MenuItem::action("Switch pane", SwitchPane).disabled(!state.has_split.get()),
+                    MenuItem::action("Close pane", ClosePane).disabled(!state.has_split.get()),
+                    MenuItem::action("Keep only this pane", KeepOnlyPane)
+                        .disabled(!state.has_split.get()),
                 ]),
                 Menu::new("Navigate").items([
                     MenuItem::action("Contents", ShowContents),
@@ -321,6 +357,18 @@ pub(crate) fn set_annotation_edit_availability(cx: &App, editable: bool) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (cx, editable);
+}
+
+/// Snapshot the active window's pane policy before rebuilding native menus.
+pub(crate) fn set_pane_availability(cx: &App, side_by_side: bool, stacked: bool, has_split: bool) {
+    #[cfg(target_os = "macos")]
+    if let Some(state) = cx.try_global::<MenuState>() {
+        state.split_side_by_side.set(side_by_side);
+        state.split_stacked.set(stacked);
+        state.has_split.set(has_split);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (cx, side_by_side, stacked, has_split);
 }
 
 #[cfg(test)]

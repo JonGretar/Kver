@@ -75,6 +75,30 @@ fn menu_routes_application_commands_to_existing_owners(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn menu_splits_switches_and_keeps_the_intended_reader(cx: &mut TestAppContext) {
+    setup_menu(cx);
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/field-guide.pdf")));
+    cx.run_until_parked();
+    let first = document.read_with(cx, |d, _| d.reader.clone());
+    open_menu(cx, handle);
+    choose(cx, handle, "Split side by side");
+    let second = document.read_with(cx, |d, _| {
+        assert!(d.other_pane.is_some());
+        d.reader.clone()
+    });
+    assert_ne!(first, second);
+    open_menu(cx, handle);
+    choose(cx, handle, "Switch pane");
+    document.read_with(cx, |d, _| assert_eq!(d.reader, first));
+    open_menu(cx, handle);
+    choose(cx, handle, "Keep only this pane");
+    document.read_with(cx, |d, _| {
+        assert_eq!(d.reader, first);
+        assert!(d.other_pane.is_none());
+    });
+}
+
+#[gpui_kit::test]
 fn menu_disabled_commands_dismissal_and_keyboard_do_not_leak(cx: &mut TestAppContext) {
     setup_menu(cx);
     let (handle, document) = open(cx, None);

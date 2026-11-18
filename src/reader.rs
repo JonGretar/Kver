@@ -12,6 +12,7 @@ mod marks;
 mod navigation;
 mod page_annotations;
 mod page_text;
+mod pane;
 mod rendering;
 mod ruler;
 mod ruler_history;
@@ -79,7 +80,7 @@ use gpui_kit::{
     },
 };
 
-/// Central PDF surface and window-local session participation, independent of chrome.
+/// Central PDF surface and pane-local session participation, independent of chrome.
 pub struct ReaderView {
     path: Option<PathBuf>,
     session: Option<Entity<DocumentSession>>,
@@ -121,6 +122,8 @@ pub struct ReaderView {
     scroll: ScrollHandle,
     focus: FocusHandle,
     focus_initialized: bool,
+    focus_on_mount: bool,
+    record_active: bool,
     marks: Option<Entity<LocalMarks>>,
     marks_subscriptions: Vec<Subscription>,
     find_highlight: Option<(find_search::FindMatch, u64)>,
@@ -263,6 +266,8 @@ impl ReaderView {
             scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             focus_initialized: false,
+            focus_on_mount: true,
+            record_active: true,
             marks: None,
             marks_subscriptions: Vec::new(),
             find_highlight: None,
@@ -1760,7 +1765,7 @@ impl ReaderView {
     }
 
     fn record_position(&mut self, cx: &mut Context<Self>) {
-        if !self.position_ready || self.pending_restore.is_some() {
+        if !self.record_active || !self.position_ready || self.pending_restore.is_some() {
             return;
         }
         let position = self.position_to_save();
@@ -2128,7 +2133,9 @@ impl ReaderView {
 impl Render for ReaderView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.focus_initialized {
-            window.focus(&self.focus, cx);
+            if self.focus_on_mount {
+                window.focus(&self.focus, cx);
+            }
             cx.observe_window_bounds(window, |reader, window, cx| {
                 reader.invalidate_hints(cx);
                 // The scroll area's bounds are laid out in the resize frame.

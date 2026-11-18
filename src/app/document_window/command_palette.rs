@@ -14,7 +14,8 @@ use gpui_kit::{
 };
 
 use super::{
-    NavigateBack, NavigateForward, OpenPdf, Save, SaveAs,
+    ClosePane, KeepOnlyPane, NavigateBack, NavigateForward, OpenPdf, Save, SaveAs, SplitSideBySide,
+    SplitStacked, SwitchPane,
     sidebar::{ShowAnnotations, ShowContents, ShowFind, ToggleSidebar},
 };
 use crate::{
@@ -50,6 +51,9 @@ pub(crate) struct CommandAvailability {
     pub(crate) has_matches: bool,
     pub(crate) can_back: bool,
     pub(crate) can_forward: bool,
+    pub(crate) split_side_by_side: bool,
+    pub(crate) split_stacked: bool,
+    pub(crate) has_split: bool,
 }
 
 #[derive(Clone)]
@@ -185,6 +189,21 @@ impl CommandPalette {
             command("Back", NavigateBack, available.can_back),
             command("Forward", NavigateForward, available.can_forward),
             command("Toggle Sidebar", ToggleSidebar, has_document),
+            reader_command(
+                "Split side by side",
+                SplitSideBySide,
+                available.split_side_by_side,
+                cx,
+            ),
+            reader_command(
+                "Split top and bottom",
+                SplitStacked,
+                available.split_stacked,
+                cx,
+            ),
+            reader_command("Switch pane", SwitchPane, available.has_split, cx),
+            reader_command("Close pane", ClosePane, available.has_split, cx),
+            reader_command("Keep only this pane", KeepOnlyPane, available.has_split, cx),
             command("New Window", NewWindow, true),
             command("Next Window", NextWindow, cx.windows().len() >= 2),
             command("Previous Window", PreviousWindow, cx.windows().len() >= 2),

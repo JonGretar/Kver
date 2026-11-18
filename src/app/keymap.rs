@@ -19,7 +19,10 @@ use super::{
     commands::{AboutKver, CheckForUpdates, Quit},
     document_window::command_palette::ShowCommandPalette,
     document_window::sidebar::{ShowAnnotations, ShowContents, ShowFind, ToggleSidebar},
-    document_window::{NavigateBack, NavigateForward, OpenPdf, Save, SaveAs},
+    document_window::{
+        ClosePane, KeepOnlyPane, NavigateBack, NavigateForward, OpenPdf, Save, SaveAs,
+        SplitSideBySide, SplitStacked, SwitchPane,
+    },
     windows::{CloseWindow, NewWindow, NextWindow, PreviousWindow},
 };
 use crate::{

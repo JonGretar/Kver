@@ -43,8 +43,9 @@ GitHub issue or PR, not in architecture docs or a test diary.
    UI or rendering behavior matters. Local and Cloud Runner threads may have
    different machines and tools; use the checks available in each, and briefly
    report what ran in the issue or PR. PR CI runs Rust and GPUI Kit in-process
-   tests and builds the GUI binary on Linux and macOS. These checks do not
-   validate a visible window, screenshot pixels, or OS-native pointer behavior.
+   tests and builds the GUI binary on the platforms enabled in the current
+   workflow configuration. These checks do not validate a visible window,
+   screenshot pixels, or OS-native pointer behavior.
    For changes to native window/input behavior, confirm a real-Mac manual check
    before landing and record its outcome in the
    issue or PR; a Linux Cloud Runner cannot substitute for that check. Before
@@ -65,10 +66,13 @@ GitHub issue or PR, not in architecture docs or a test diary.
    feedback. Implementation threads create PRs only when explicitly instructed;
    orchestrators should not ask them to create PRs by default. During an
    explicitly requested landing, the Land skill creates a PR if needed; an
-   existing PR can also be used. Require passing Linux and macOS PR checks
-   before landing, plus the real-Mac check
-   for native window/input changes. Before tagging a release, run the
-   unsigned archive verification in `scripts/package-macos-app.sh` on an Apple
+   existing PR can also be used. Before landing, require successful completion
+   of all CI checks applicable to the current PR head under the repository's
+   current workflow configuration. Pending, failing, canceled, or missing
+   expected checks block landing; intentionally disabled matrix entries are
+   not expected checks and need no per-PR waiver. Keep the separate real-Mac
+   manual check for native window/input changes. Before tagging a release, run
+   the unsigned archive verification in `scripts/package-macos-app.sh` on an Apple
    silicon Mac; see [macOS releases](../releasing.md) for the full procedure.
    An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree

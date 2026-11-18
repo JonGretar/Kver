@@ -49,20 +49,21 @@ instead of maintaining a parallel roadmap status ledger.
    suite. Derive commands from current project targets. Include applicable
    real-PDF/macOS window verification for UI or rendering changes as required
    by `docs/agents/workflow.md` (step 3). Fix failures and rerun affected
-   checks on the final candidate. Report what actually ran; passing macOS
-   and Linux PR CI is the full cross-platform landing gate.
+   checks on the final candidate. Report what actually ran; use the CI landing
+   gate in `docs/agents/workflow.md` (step 4), not a fixed platform list.
 
 4. **Publish and review.** Push only the feature branch to the verified source
    remote and open a pull request targeting the repository's current default
    branch. Include a meaningful title/body, verification evidence, and known
    limitations; follow any applicable submission template or contribution
    requirements if they appear. `docs/agents/workflow.md` (step 4) calls for
-   review and a feature branch/PR when needed; the PR runs the macOS and Linux
-   checks defined in `.github/workflows/ci.yml`. Inspect their results and,
-   for UI or rendering changes, relevant hosted-macOS headless captures.
-   Verify the macOS and Linux PR checks have passed on the PR's current head
-   and resolve outstanding review feedback. A pending, failing, missing, or
-   unverifiable PR check blocks landing. The owner's `main` protection only
+   review and a feature branch/PR when needed. Derive the applicable PR checks
+   from the repository's current workflow configuration, including enabled
+   matrix entries and trigger conditions. Verify their successful completion
+   on the PR's current head under that policy and resolve outstanding review
+   feedback. Inspect relevant capture artifacts when available; keep the
+   separate native manual-check requirements. An unverifiable expected check
+   blocks landing. The owner's `main` protection only
    prevents force pushes and deletion; do not query GitHub rulesets or
    branch-protection settings as a separate landing gate.
 

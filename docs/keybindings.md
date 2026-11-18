@@ -113,6 +113,7 @@ by the current keyboard configuration:
 | Application and windows | `open-pdf`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `read-down`, `read-up`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
+| Split reading | `split-side-by-side`, `split-stacked`, `switch-pane`, `close-pane`, `keep-only-pane` |
 | Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
 | Text selection | `visual-select`, `visual-select-line` |
 | Links | `follow-link`, `follow-link-in-new-window` |
@@ -195,6 +196,31 @@ These Vim keys belong to the reader, not text inputs or sidebar lists.
 `p` no longer turns pages and has no default binding. Escape dismisses the
 sidebar in either preset. Native menu commands remain available in Vim without
 turning bare reader keys into macOS shortcuts that intercept input text.
+
+## Split reading
+
+Split commands appear in the menu and command palette. A window shows one
+PDF in at most two panes; changing orientation rearranges the existing views.
+
+| Command | Vim | Standard macOS | Standard Linux / Windows |
+| --- | --- | --- | --- |
+| Split side by side | `g w v` | Command-\\ | Ctrl-\\ |
+| Split top and bottom | `g w s` | Command-Shift-\\ | Ctrl-Shift-\\ |
+| Switch pane | `g w w` or Ctrl-Tab | Ctrl-Tab | Ctrl-Tab |
+| Close pane | `g w c` | Unbound | Unbound |
+| Keep only this pane | `g w o` | Unbound | Unbound |
+
+Reader commands target the active pane. Each pane keeps its own location,
+zoom, layout, selection, ruler, and Back/Forward trail. The sidebar and Find
+query remain shared: choosing a destination moves only the intended pane;
+switching panes alone never jumps to a Find result.
+
+Inputs, sidebar lists, menus, and dialogs keep their own keyboard behavior.
+The modified Switch pane shortcut also works during unfinished word, line,
+or link targeting; switching cancels that targeting, not a completed selection.
+Scrolling and zoom gestures follow the pointer without changing the keyboard
+target. Closing a pane preserves the surviving view and never means Close
+Window.
 
 ## Reading ruler
 

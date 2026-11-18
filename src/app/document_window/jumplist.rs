@@ -11,6 +11,12 @@ pub(super) struct Jumplist {
 }
 
 impl Jumplist {
+    pub(super) fn follow_saved_path(&mut self, current: &JumpLocation) {
+        for location in &mut self.entries {
+            location.follow_saved_path(current);
+        }
+    }
+
     pub(super) fn clear(&mut self) {
         self.entries.clear();
         self.cursor = 0;

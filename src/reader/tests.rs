@@ -26,6 +26,7 @@ mod rendering;
 mod ruler;
 mod selection;
 mod sessions;
+mod split_acceptance;
 mod vim;
 mod zoom;
 use rendering::cached_pages;

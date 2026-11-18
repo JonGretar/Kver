@@ -109,6 +109,18 @@ impl DocumentWindow {
                 },
             ),
             cx.subscribe_in(reader, window, |this, source, event, window, cx| {
+                if let DocumentEvent::Updated { generation } = event
+                    && *generation == source.read(cx).document_generation()
+                    && let Some(current) = source.read(cx).jump_location()
+                {
+                    if source == &this.reader {
+                        this.jumplist.follow_saved_path(&current);
+                    } else if let Some(pane) = &mut this.other_pane
+                        && &pane.reader == source
+                    {
+                        pane.jumplist.follow_saved_path(&current);
+                    }
+                }
                 if source == &this.reader {
                     this.on_document_event(event, window, cx);
                 } else if let Some(pane) = &mut this.other_pane

@@ -181,6 +181,13 @@ pub(crate) struct JumpLocation {
 }
 
 impl JumpLocation {
+    /// Save As changes the session path, not this generation's reading locations.
+    pub(crate) fn follow_saved_path(&mut self, current: &Self) {
+        if self.generation == current.generation {
+            self.path.clone_from(&current.path);
+        }
+    }
+
     pub(crate) fn equivalent(&self, other: &Self) -> bool {
         self.path == other.path
             && self.generation == other.generation

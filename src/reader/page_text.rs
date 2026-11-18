@@ -26,6 +26,11 @@ impl TextRequest {
 }
 
 impl PageTexts {
+    #[cfg(test)]
+    pub(super) fn cached_pages(&self) -> impl Iterator<Item = usize> + '_ {
+        self.pages.keys().copied()
+    }
+
     pub(super) fn evidence(&self, page: usize) -> Option<&Vec<super::ruler::furniture::Candidate>> {
         self.evidence.get(&page)
     }

@@ -23,6 +23,7 @@ mod recent_history;
 mod recent_picker;
 mod saving;
 mod sidebar;
+mod split_acceptance;
 mod unsaved;
 mod visual_select;
 

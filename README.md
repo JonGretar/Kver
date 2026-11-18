@@ -114,6 +114,22 @@ whether to record reading history and reopen at the last position. Turn
 recording off to keep new reading activity session-only, or forget a PDF
 without deleting the file.
 
+### Keep two passages in view
+
+Choose **Split side by side** or **Split top and bottom** from the command
+palette to read two locations in the same PDF. The new pane starts at your
+current location. Drag the divider to give either passage more room.
+
+Click a pane or use **Switch pane** to make it active. Navigation, Find
+results, selections, and the reading ruler follow that pane; scrolling or
+pinching over the other pane changes that view without switching the keyboard
+target. Both panes share annotations, undo, and saving.
+
+**Close pane** removes the active view; **Keep only this pane** keeps it and
+removes the other. Neither closes the PDF. Reopening restores one ordinary
+reading position, not the split. See [split shortcuts](docs/keybindings.md#split-reading)
+for keyboard commands.
+
 ## Development
 
 Want to build Kver or contribute? See the [development guide](docs/development.md)

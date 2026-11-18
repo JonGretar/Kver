@@ -10,7 +10,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - Read two locations in the same PDF side by side or stacked, with independent
-  navigation and zoom, a draggable divider, and keyboard pane commands.
+  navigation, zoom, selections, and reading rulers, a draggable divider, and
+  keyboard pane commands. Copy, annotation controls, and visible-content hints
+  follow the active pane; document edits and undo remain shared.
 - Zoom PDF pages with a touchpad pinch, or hold Command on macOS / Ctrl on
   Linux and Windows while scrolling. Zoom follows the pointer and keeps page
   images visible while sharper replacements render.

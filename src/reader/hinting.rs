@@ -102,6 +102,10 @@ impl Hinting {
     pub(super) fn is_active(&self) -> bool {
         self.active.is_some()
     }
+
+    pub(super) fn focused(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
+    }
 }
 
 impl ReaderView {
@@ -458,12 +462,14 @@ impl ReaderView {
             div()
                 .id("hint-input")
                 .test_support()
+                .key_context(crate::key_context::READER_HINTS)
                 .track_focus(&self.hints.focus)
                 .absolute()
                 .top_0()
                 .left_0()
                 .w_full()
                 .h_8()
+                .occlude()
                 .px_3()
                 .flex()
                 .items_center()

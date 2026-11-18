@@ -1,5 +1,6 @@
 //! Stable product contexts shared by the keymap and focused UI regions.
 pub const READER: &str = "Reader";
+pub(crate) const READER_HINTS: &str = "ReaderHints";
 pub const SIDEBAR: &str = "Sidebar";
 pub const CONTENTS: &str = "Contents";
 pub const ANNOTATIONS: &str = "Annotations";

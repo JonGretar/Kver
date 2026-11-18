@@ -186,8 +186,8 @@ impl CommandPalette {
             reader_command("Previous match", PreviousMatch, available.has_matches, cx),
             reader_command("Contents", ShowContents, has_document, cx),
             reader_command("Annotations", ShowAnnotations, has_document, cx),
-            command("Back", NavigateBack, available.can_back),
-            command("Forward", NavigateForward, available.can_forward),
+            reader_command("Back", NavigateBack, available.can_back, cx),
+            reader_command("Forward", NavigateForward, available.can_forward, cx),
             command("Toggle Sidebar", ToggleSidebar, has_document),
             reader_command(
                 "Split side by side",
@@ -313,6 +313,7 @@ fn reader_command(
         .shortcuts(&action, KeyContext::Reader)
         .last()
         .map(|keys| shortcut_label::format(keys, cx));
+    let hint_id = SharedString::from(format!("command-palette-shortcut:{}", action.name()));
     let item = command(label, action, enabled);
     match shortcut {
         None => item,
@@ -326,6 +327,9 @@ fn reader_command(
                 .child(label)
                 .child(
                     div()
+                        .id(hint_id.clone())
+                        .test_support()
+                        .aria_label(shortcut.clone())
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(shortcut.clone()),

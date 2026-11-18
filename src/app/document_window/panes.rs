@@ -166,6 +166,7 @@ impl DocumentWindow {
             .update(cx, |reader, cx| reader.set_pane_active(true, cx));
         // The sidebar and its Find query are window-owned and are not rebuilt
         // merely because the intended reader changes.
+        self.sync_sidebar_target(cx);
         chrome::sync_window_identity(self.reader.read(cx), window, cx);
         self.refresh_navigation_menu(window, cx);
         cx.notify();
@@ -259,6 +260,11 @@ impl DocumentWindow {
             self.focus_other_pane(window, cx);
         }
         if let Some(pane) = self.other_pane.take() {
+            if let Some(sidebar) = &self.sidebar {
+                sidebar.read(cx).find().clone().update(cx, |find, _| {
+                    find.retire_target(pane.reader.entity_id());
+                });
+            }
             pane.reader.update(cx, |reader, cx| reader.retire_pane(cx));
         }
         self.split.active_first = true;

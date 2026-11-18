@@ -6,6 +6,15 @@ use super::*;
 pub(crate) struct PaneActivation;
 impl gpui_kit::EventEmitter<PaneActivation> for ReaderView {}
 
+/// A shared control captures this at invocation, not when delayed work returns.
+/// The window resolves membership; the generation rejects document replacement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub(crate) struct PaneTarget {
+    pub(crate) id: gpui_kit::EntityId,
+    pub(crate) generation: u64,
+}
+
 impl ReaderView {
     pub(crate) fn replacement(path: PathBuf, generation: u64, cx: &mut Context<Self>) -> Self {
         let mut pane = Self::new(None, 1., cx);

@@ -81,6 +81,7 @@ pub(crate) struct AnnotationNavigation {
     pub(crate) generation: u64,
     pub(crate) revision: u64,
     pub(crate) annotation: Annotation,
+    pub(crate) target: Option<super::PaneTarget>,
 }
 
 #[derive(Clone)]
@@ -296,6 +297,7 @@ impl ListDelegate for AnnotationRows {
 
 pub(crate) struct AnnotationsPanel {
     generation: u64,
+    target: Option<super::PaneTarget>,
     revision: Option<u64>,
     editable: bool,
     focus: FocusHandle,
@@ -334,6 +336,7 @@ impl AnnotationsPanel {
         });
         Self {
             generation: 0,
+            target: None,
             revision: None,
             editable: false,
             focus: cx.focus_handle(),
@@ -506,12 +509,17 @@ impl AnnotationsPanel {
             .cloned()
     }
 
+    pub(crate) fn set_target(&mut self, target: super::PaneTarget) {
+        self.target = Some(target);
+    }
+
     fn activate_selected(&self, cx: &mut Context<Self>) {
         if let (Some(annotation), Some(revision)) = (self.selected(cx), self.revision) {
             cx.emit(AnnotationNavigation {
                 generation: self.generation,
                 revision,
                 annotation,
+                target: self.target,
             });
         }
     }

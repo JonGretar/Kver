@@ -12,6 +12,7 @@ mod find;
 mod hints;
 mod jumplist;
 mod keyboard;
+mod lifecycle;
 mod links;
 mod opening;
 mod palette;

@@ -117,16 +117,14 @@ impl DocumentWindow {
     fn perform_leave(&mut self, intent: Leave, window: &mut Window, cx: &mut Context<Self>) {
         match intent {
             Leave::Close => {
-                self.reader
-                    .update(cx, |reader, cx| reader.detach_session(cx));
+                self.reader.update(cx, |reader, cx| reader.retire_pane(cx));
                 if let Some(pane) = &self.other_pane {
-                    pane.reader
-                        .update(cx, |reader, cx| reader.detach_session(cx));
+                    pane.reader.update(cx, |reader, cx| reader.retire_pane(cx));
                 }
                 if let Some(pending) = self.replacement.take() {
                     pending
                         .reader
-                        .update(cx, |reader, cx| reader.detach_session(cx));
+                        .update(cx, |reader, cx| reader.retire_pane(cx));
                 }
                 window.remove_window();
             }
@@ -186,6 +184,11 @@ impl DocumentWindow {
                                             return;
                                         }
                                         let intent = this.pending_leave.take();
+                                        if let Some(Leave::Replace(path)) = intent {
+                                            window.close_dialog(cx);
+                                            this.stage_replacement_after_decision(path, true, cx);
+                                            return;
+                                        }
                                         if let Some(session) = this.reader.read(cx).session() {
                                             session.update(cx, |session, cx| session.discard(cx));
                                         }
@@ -287,17 +290,23 @@ impl DocumentWindow {
                 if this.reader.read(cx).document_generation() != generation
                     || this.reader.read(cx).session().as_ref() != Some(&session)
                 {
-                    this.cancel_pending_leave(cx);
                     return;
                 }
                 let handle = this.window;
                 let owner = cx.weak_entity();
                 cx.defer(move |cx| {
                     let _ = cx.update_window(handle, |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| match choice {
-                            Ok(Some(destination)) => this.confirm_destination(destination, window, cx),
-                            Ok(None) => this.cancel_pending_leave(cx),
-                            Err(error) => this.save_failed(error, window, cx),
+                        let _ = owner.update(cx, |this, cx| {
+                            if this.reader.read(cx).document_generation() != generation
+                                || this.reader.read(cx).session().as_ref() != Some(&session)
+                            {
+                                return;
+                            }
+                            match choice {
+                                Ok(Some(destination)) => this.confirm_destination(destination, window, cx),
+                                Ok(None) => this.cancel_pending_leave(cx),
+                                Err(error) => this.save_failed(error, window, cx),
+                            }
                         });
                     });
                 });

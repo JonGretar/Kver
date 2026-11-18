@@ -18,11 +18,12 @@ domain terms.
 | Window lifecycle and native menus | [`app/windows.rs`](../src/app/windows.rs), [`app/menu.rs`](../src/app/menu.rs) |
 | Keybinding policy and command contexts | [`app/keymap.rs`](../src/app/keymap.rs), [`app/keymap/config.rs`](../src/app/keymap/config.rs), [`key_context.rs`](../src/key_context.rs) |
 | Window composition, chrome, sidebar, palette, and file prompts | [`app/document_window.rs`](../src/app/document_window.rs) and its child modules |
-| Central PDF surface and window-local reading state | [`reader.rs`](../src/reader.rs) |
+| Central PDF surface and pane-local reading state | [`reader.rs`](../src/reader.rs), [`reader/pane.rs`](../src/reader/pane.rs) |
+| Split arrangement, active pane, and pane lifetimes | [`app/document_window/panes.rs`](../src/app/document_window/panes.rs) |
 | Shared PDF baseline, annotation edits, undo, saving, and reload | [`reader/document_session.rs`](../src/reader/document_session.rs) and its child modules |
 | Layout, zoom anchors, and navigation geometry | [`reader/navigation.rs`](../src/reader/navigation.rs) |
 | Raster scheduling and bitmap retention | [`reader/rendering.rs`](../src/reader/rendering.rs) |
-| Shared page-text access and window-local reading ruler | [`reader/page_text.rs`](../src/reader/page_text.rs), [`reader/ruler.rs`](../src/reader/ruler.rs) |
+| Shared page-text access and pane-local reading ruler | [`reader/page_text.rs`](../src/reader/page_text.rs), [`reader/ruler.rs`](../src/reader/ruler.rs) |
 | Text selection, links, and on-page annotation targeting | [`reader/selection.rs`](../src/reader/selection.rs), [`reader/links.rs`](../src/reader/links.rs), [`reader/page_annotations.rs`](../src/reader/page_annotations.rs) |
 | Find, Contents, annotations list, and local marks | [`reader/find.rs`](../src/reader/find.rs), [`reader/contents.rs`](../src/reader/contents.rs), [`reader/annotations.rs`](../src/reader/annotations.rs), [`reader/marks.rs`](../src/reader/marks.rs) |
 | Back/Forward jump history | [`app/document_window/jumplist.rs`](../src/app/document_window/jumplist.rs) |
@@ -37,12 +38,12 @@ domain terms.
 
 - **Application:** startup, shared settings/history services, keymap policy,
   menus, and window creation.
-- **Document window:** composition, focus routing, file prompts, sidebar,
-  palette, and its jumplist.
+- **Document window:** composition, focus routing, file prompts, shared sidebar
+  and palette, and one or two retained readers with independent jumplists.
 - **Document session:** shared immutable PDF baseline, annotation catalog,
   editing history, dirty state, and serialized save/reload operations.
   Readers opening the same canonical path join the same session.
-- **Reader:** window-local navigation, zoom, reading mode, ruler, selection, and
+- **Reader:** pane-local navigation, zoom, reading mode, ruler, selection, and
   viewport resources. Closing one reader does not discard another's session.
   Selection and ruler share bounded background page-text access; each retains
   only its active text page independently of the viewport cache.

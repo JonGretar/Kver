@@ -95,7 +95,17 @@ impl DocumentWindow {
                 );
                 return;
             }
-            if dirty && (matches!(intent, Leave::Quit) || participants <= 1) {
+            // Session participation is per reader, not per window. Both panes
+            // leave together; neither may bypass last-window edit protection.
+            let local_participants =
+                1 + usize::from(
+                    self.other_pane.as_ref().is_some_and(|pane| {
+                        pane.reader.read(cx).session().as_ref() == Some(session)
+                    }),
+                ) + usize::from(self.replacement.as_ref().is_some_and(|pending| {
+                    pending.reader.read(cx).session().as_ref() == Some(session)
+                }));
+            if dirty && (matches!(intent, Leave::Quit) || participants <= local_participants) {
                 self.pending_leave = Some(intent);
                 self.confirm_unsaved(window, cx);
                 return;
@@ -109,6 +119,15 @@ impl DocumentWindow {
             Leave::Close => {
                 self.reader
                     .update(cx, |reader, cx| reader.detach_session(cx));
+                if let Some(pane) = &self.other_pane {
+                    pane.reader
+                        .update(cx, |reader, cx| reader.detach_session(cx));
+                }
+                if let Some(pending) = self.replacement.take() {
+                    pending
+                        .reader
+                        .update(cx, |reader, cx| reader.detach_session(cx));
+                }
                 window.remove_window();
             }
             Leave::Replace(path) => self.replace_path(path, cx),

@@ -4,6 +4,7 @@ use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{KeyContext, TestAppContext};
 use std::collections::HashSet;
 
+mod panes;
 mod presets;
 
 #[test]
@@ -957,7 +958,8 @@ fn overlapping_prefixes_and_duplicate_slots_are_reported() {
         ("'", "' a"),
         ("d", "d m a"),
         ("d m", "d m a"),
-        ("g", "g a"),
+        ("g", "g w v"),
+        ("g w", "g w v"),
         ("a", "a a"),
     ] {
         assert_eq!(

@@ -1,11 +1,12 @@
 //! Per-window composition and native file-open routing.
 //!
-//! The reader owns the active document and its load/restoration lifecycle.
-//! This owner mounts it once and handles commands shared by all focused regions.
+//! Retained readers own pane-local reading state and join one document session.
+//! This owner arranges them and routes commands shared by focused regions.
 
 mod chrome;
 pub mod command_palette;
 mod jumplist;
+mod panes;
 mod saving;
 pub mod sidebar;
 
@@ -47,12 +48,27 @@ use saving::Leave;
 pub use saving::{Save, SaveAs};
 use sidebar::{ReaderSidebar, SidebarPanel};
 
-gpui_kit::actions!(kver, [OpenPdf]);
+gpui_kit::actions!(
+    kver,
+    [
+        OpenPdf,
+        SplitSideBySide,
+        SplitStacked,
+        SwitchPane,
+        ClosePane,
+        KeepOnlyPane
+    ]
+);
 
 pub struct DocumentWindow {
     window: AnyWindowHandle,
     reader: Entity<ReaderView>,
     jumplist: Jumplist,
+    other_pane: Option<panes::Pane>,
+    pane_subscriptions: Vec<Subscription>,
+    split: panes::Split,
+    replacement: Option<panes::Replacement>,
+    refit_pending: bool,
     file_picker: Option<Task<()>>,
     recent: Option<Entity<RecentPicker>>,
     recent_subscription: Option<Subscription>,
@@ -67,11 +83,7 @@ pub struct DocumentWindow {
     save_prompt_open: bool,
     save_observation: Option<Subscription>,
     pending_leave: Option<Leave>,
-    _reader_observation: Subscription,
-    _reader_focus_subscription: Subscription,
     _settings_observation: Subscription,
-    _document_subscription: Subscription,
-    _jump_subscription: Subscription,
     _appearance_subscription: Subscription,
     _activation_subscription: Subscription,
 }
@@ -158,38 +170,7 @@ impl DocumentWindow {
         });
         let owner = cx.weak_entity();
         windows::register_document(window.window_handle(), owner, cx);
-        let reader_focus_subscription = cx.on_focus(
-            &reader.read(cx).focus_handle(cx),
-            window,
-            |this, window, cx| {
-                this.refresh_navigation_menu(window, cx);
-                // A document-owned modal restores focus just before it unmounts.
-                // Re-evaluate after its dismissal so its native menu item is
-                // not left disabled for the rest of the reader session.
-                let owner = cx.weak_entity();
-                window.on_next_frame(move |window, cx| {
-                    let _ = owner.update(cx, |this, cx| this.refresh_navigation_menu(window, cx));
-                });
-            },
-        );
-        let document_subscription =
-            cx.subscribe_in(&reader, window, |this, _, event, window, cx| {
-                this.on_document_event(event, window, cx);
-            });
-        let jump_subscription =
-            cx.subscribe_in(&reader, window, |this, _, jump: &JumpEvent, window, cx| {
-                if this.reader.read(cx).jump_location().as_ref() == Some(&jump.to) {
-                    this.jumplist.record(jump);
-                    this.refresh_navigation_menu(window, cx);
-                    cx.notify();
-                }
-            });
-        let reader_observation = cx.observe_in(&reader, window, |this, reader, window, cx| {
-            chrome::sync_window_identity(reader.read(cx), window, cx);
-            this.refresh_navigation_menu(window, cx);
-            this.offer_external_change(window, cx);
-            cx.notify();
-        });
+        let pane_subscriptions = Self::observe_pane(&reader, window, cx);
         let settings = settings_ui::state(cx);
         let settings_observation = cx.observe_in(&settings, window, |this, _, window, cx| {
             this.schedule_refit(window, cx);
@@ -198,6 +179,11 @@ impl DocumentWindow {
             window: window.window_handle(),
             reader,
             jumplist: Jumplist::default(),
+            other_pane: None,
+            pane_subscriptions,
+            split: panes::Split::default(),
+            replacement: None,
+            refit_pending: false,
             file_picker: None,
             recent: None,
             recent_subscription: None,
@@ -212,11 +198,7 @@ impl DocumentWindow {
             save_prompt_open: false,
             save_observation: None,
             pending_leave: None,
-            _reader_observation: reader_observation,
-            _reader_focus_subscription: reader_focus_subscription,
             _settings_observation: settings_observation,
-            _document_subscription: document_subscription,
-            _jump_subscription: jump_subscription,
             _appearance_subscription: appearance_subscription,
             _activation_subscription: activation_subscription,
         }
@@ -266,10 +248,23 @@ impl DocumentWindow {
         }
     }
 
-    fn schedule_refit(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let reader = self.reader.downgrade();
+    fn schedule_refit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refit_pending {
+            return;
+        }
+        self.refit_pending = true;
+        let owner = cx.weak_entity();
         window.on_next_frame(move |_, cx| {
-            let _ = reader.update(cx, |reader, cx| reader.sync_viewport(cx));
+            let _ = owner.update(cx, |this, cx| {
+                this.refit_pending = false;
+                this.reader
+                    .update(cx, |reader, cx| reader.sync_viewport(cx));
+                if let Some(other) = &this.other_pane {
+                    other
+                        .reader
+                        .update(cx, |reader, cx| reader.sync_viewport(cx));
+                }
+            });
         });
         cx.notify();
     }
@@ -489,6 +484,15 @@ impl DocumentWindow {
                     })
                     .unwrap_or_else(|| self.reader.read(cx).annotation_edit_available(cx)),
         );
+        let (side_by_side, stacked, has_split) = self.pane_availability(window, cx);
+        let accepts_pane_shortcut =
+            accepts_shortcut && self.reader.read(cx).focus_handle(cx).is_focused(window);
+        menu::set_pane_availability(
+            cx,
+            accepts_pane_shortcut && side_by_side,
+            accepts_pane_shortcut && stacked,
+            accepts_pane_shortcut && has_split,
+        );
         menu::refresh_navigation(
             cx,
             accepts_shortcut && self.jumplist.can_back(),
@@ -585,6 +589,10 @@ impl DocumentWindow {
         self.save_prompt_open = false;
         self.save_observation = None;
         self.initial_link_destination = None;
+        if self.other_pane.is_some() {
+            self.stage_replacement(path, cx);
+            return;
+        }
         let target = path.clone();
         self.reader
             .update(cx, |reader, cx| reader.open_path(path, cx));
@@ -736,7 +744,14 @@ impl DocumentWindow {
                             window: window.window_handle(),
                         };
                         match destination {
-                            Ok(None) => this.recent_open = Some(pending),
+                            Ok(None) => {
+                                if let Some(replacement) = &mut this.replacement
+                                    && replacement.path == pending.path
+                                {
+                                    replacement.recent_request = Some(pending.request);
+                                }
+                                this.recent_open = Some(pending);
+                            }
                             Ok(Some(destination)) => destination.update(cx, |document, cx| {
                                 document.recent_open = Some(PendingRecentOpen {
                                     generation: document.reader.read(cx).document_generation(),
@@ -749,6 +764,7 @@ impl DocumentWindow {
                     RecentPickerEvent::Closed => {
                         this.recent = None;
                         this.recent_subscription = None;
+                        this.restore_focus(window, cx);
                     }
                 }
                 this.refresh_navigation_menu(window, cx);
@@ -878,6 +894,7 @@ impl Render for DocumentWindow {
                 chrome::application_menu(
                     &self.reader,
                     window.viewport_size().width < window.rem_size() * 40.,
+                    self.pane_availability(window, cx),
                 )
                 .into_any_element()
             }),
@@ -912,6 +929,21 @@ impl Render for DocumentWindow {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(|this, _: &OpenPdf, _, cx| this.open_dialog(cx)))
+            .on_action(cx.listener(|this, _: &SplitSideBySide, window, cx| {
+                this.arrange_panes(panes::Orientation::SideBySide, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SplitStacked, window, cx| {
+                this.arrange_panes(panes::Orientation::Stacked, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SwitchPane, window, cx| this.switch_pane(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ClosePane, window, cx| this.remove_pane(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &KeepOnlyPane, window, cx| {
+                    this.remove_pane(true, window, cx)
+                }),
+            )
             .on_action(|action: &menu::NativeMenuAction, window, cx| action.dispatch(window, cx))
             .on_action(cx.listener(|this, _: &ShowRecent, window, cx| this.show_recent(window, cx)))
             .on_action(
@@ -1034,13 +1066,7 @@ impl Render for DocumentWindow {
                             .min_w_0()
                             .min_h_0()
                             .children(toolbar)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .min_w_0()
-                                    .child(self.reader.clone()),
-                            )
+                            .child(self.render_panes(cx))
                             .children(statusbar),
                     ),
             )
@@ -1061,6 +1087,9 @@ impl Render for DocumentWindow {
                         has_matches: self.has_matches(cx),
                         can_back: self.jumplist.can_back(),
                         can_forward: self.jumplist.can_forward(),
+                        split_side_by_side: self.pane_availability(window, cx).0,
+                        split_stacked: self.pane_availability(window, cx).1,
+                        has_split: self.other_pane.is_some(),
                     },
                     cx,
                 ))

@@ -2,6 +2,31 @@
 # No bindings are inherited from Standard.
 
 [[keyboard.bindings]]
+keys = "ctrl-tab"
+context = "reader"
+command = "switch-pane"
+[[keyboard.bindings]]
+keys = "g w v"
+context = "reader"
+command = "split-side-by-side"
+[[keyboard.bindings]]
+keys = "g w s"
+context = "reader"
+command = "split-stacked"
+[[keyboard.bindings]]
+keys = "g w w"
+context = "reader"
+command = "switch-pane"
+[[keyboard.bindings]]
+keys = "g w c"
+context = "reader"
+command = "close-pane"
+[[keyboard.bindings]]
+keys = "g w o"
+context = "reader"
+command = "keep-only-pane"
+
+[[keyboard.bindings]]
 keys = "f"
 context = "reader"
 command = "follow-link"

@@ -1,6 +1,8 @@
 //! Window chrome is value-like presentation of the active document's identity.
 
-use gpui_kit::{App, Entity, SharedString, Window, div, prelude::*, px};
+use gpui_kit::{
+    App, Entity, FocusHandle, Focusable as _, SharedString, Window, div, prelude::*, px,
+};
 use gpui_kit::{
     assets::IconName,
     base::{Disableable, TestSupportExt as _},
@@ -16,7 +18,10 @@ use gpui_kit::{
 use std::path::Path;
 
 use super::sidebar::ToggleSidebar;
-use super::{NavigateBack, NavigateForward, OpenPdf, Save, SaveAs};
+use super::{
+    ClosePane, KeepOnlyPane, NavigateBack, NavigateForward, OpenPdf, Save, SaveAs, SplitSideBySide,
+    SplitStacked, SwitchPane,
+};
 use crate::{
     pdf::annotations::{HighlightColor, MarkupKind},
     reader::{
@@ -28,7 +33,9 @@ use crate::{
 pub(super) fn application_menu(
     reader: &Entity<ReaderView>,
     compact: bool,
+    pane_availability: (bool, bool, bool),
 ) -> impl IntoElement + use<> {
+    let (side_by_side, stacked, has_split) = pane_availability;
     let reader = reader.downgrade();
     Button::new("application-menu")
         .when(!compact, |button| button.label("Kver"))
@@ -42,6 +49,7 @@ pub(super) fn application_menu(
                 return menu;
             };
             let reader = reader.read(cx);
+            let focus = reader.focus_handle(cx);
             menu.item(application_menu_item(
                 "New Window",
                 crate::app::windows::NewWindow,
@@ -70,6 +78,37 @@ pub(super) fn application_menu(
                 true,
             ))
             .separator()
+            .item(pane_menu_item(
+                "Split side by side",
+                SplitSideBySide,
+                side_by_side,
+                focus.clone(),
+            ))
+            .item(pane_menu_item(
+                "Split top and bottom",
+                SplitStacked,
+                stacked,
+                focus.clone(),
+            ))
+            .item(pane_menu_item(
+                "Switch pane",
+                SwitchPane,
+                has_split,
+                focus.clone(),
+            ))
+            .item(pane_menu_item(
+                "Close pane",
+                ClosePane,
+                has_split,
+                focus.clone(),
+            ))
+            .item(pane_menu_item(
+                "Keep only this pane",
+                KeepOnlyPane,
+                has_split,
+                focus.clone(),
+            ))
+            .separator()
             .item(application_menu_item(
                 "Settings…",
                 crate::settings_ui::ShowSettings,
@@ -87,6 +126,22 @@ pub(super) fn application_menu(
                 true,
             ))
         })
+}
+
+fn pane_menu_item(
+    label: &'static str,
+    action: impl gpui_kit::Action,
+    enabled: bool,
+    focus: FocusHandle,
+) -> PopupMenuItem {
+    let dispatch = action.boxed_clone();
+    // Only an explicitly chosen pane command transfers ownership to the reader.
+    // Setting the whole menu's action_context also changes Escape restoration
+    // from Find inputs and the keyboard-focused application-menu button.
+    application_menu_item(label, action, enabled).on_click(move |_, window, cx| {
+        window.focus(&focus, cx);
+        window.dispatch_action(dispatch.boxed_clone(), cx);
+    })
 }
 
 fn application_menu_item(

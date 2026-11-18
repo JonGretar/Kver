@@ -44,6 +44,7 @@ pub use marks::{
 pub(crate) use marks::{LocalMarks, MarksView};
 use navigation::{GAP, PAGE_PADDING, PageLayout, Position};
 pub use navigation::{ReadingMode, ZoomMode};
+pub(crate) use pane::PaneActivation;
 use rendering::{Completion, PageRasters, Schedule};
 use selection::Selection;
 
@@ -934,6 +935,8 @@ impl ReaderView {
     }
 
     pub(crate) fn detach_session(&mut self, cx: &mut Context<Self>) {
+        self.cancel_pane_interaction(cx);
+        self.page_text = page_text::PageTexts::default();
         if let Some(session) = self.session.take() {
             let participant = cx.entity_id();
             session.update(cx, |session, _| session.detach(participant));
@@ -2366,6 +2369,9 @@ impl Render for ReaderView {
                                 cx.listener(
                                     move |this, event: &gpui::MouseDownEvent, window, cx| {
                                         // Following a link must not begin a selection in its page.
+                                        // It still activates the pointer pane before any
+                                        // destination event is emitted on mouse-up.
+                                        cx.emit(pane::PaneActivation);
                                         if event.modifiers.alt {
                                             this.place_ruler(index, event.position, cx);
                                             window.focus(&this.focus, cx);
@@ -2529,6 +2535,15 @@ impl Render for ReaderView {
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, _, cx| this.finish_pointer_gesture(cx)),
             )
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(|this, _, window, cx| {
+                    // Context commands belong to the pointer pane, even if its
+                    // previous selection was made before another pane activated.
+                    cx.emit(pane::PaneActivation);
+                    window.focus(&this.focus, cx);
+                }),
+            )
             .on_action(cx.listener(|this, _: &NextPage, _, cx| {
                 if !this.pages.is_empty() {
                     this.next_page(cx);
@@ -2605,9 +2620,6 @@ impl Render for ReaderView {
             .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .when(self.selected_page_annotation(cx).is_some(), |reader| {
-                reader.child(self.render_annotation_controls(cx))
-            })
             .child(
                 div()
                     .id("page")
@@ -2765,6 +2777,12 @@ impl Render for ReaderView {
                 }
             })
             .child(self.render_annotation_choice(cx))
+            .when(
+                self.record_active
+                    && !self.hints.is_active()
+                    && self.selected_page_annotation(cx).is_some(),
+                |reader| reader.child(self.render_annotation_controls(cx)),
+            )
             .children(self.render_hint_input(cx))
     }
 }

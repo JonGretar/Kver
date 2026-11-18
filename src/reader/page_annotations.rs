@@ -242,6 +242,14 @@ impl ReaderView {
         div()
             .id("selected-highlight-controls")
             .test_support()
+            // Contextual chrome must not refit or scroll either reading pane
+            // when activation changes which selection is being edited.
+            .absolute()
+            .top_0()
+            .left_0()
+            .w_full()
+            .bg(cx.theme().background)
+            .occlude()
             .key_context(crate::key_context::READER)
             .flex()
             .flex_wrap()

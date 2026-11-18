@@ -343,6 +343,18 @@ impl ResolvedKeymap {
                         None => exclusion,
                     });
                 }
+                // Hint letters and prefixes belong exclusively to acquisition.
+                // Modified pane-switch shortcuts still cancel it, including
+                // user overrides, without exposing ordinary reader bindings.
+                let modifiers = slot.sequence[0].modifiers;
+                if action.name() == SwitchPane.name()
+                    && slot.entry.context == Context::Reader
+                    && (modifiers.platform || modifiers.control || modifiers.alt)
+                {
+                    predicate = predicate.map(|reader| {
+                        format!("({reader}) || {}", crate::key_context::READER_HINTS)
+                    });
+                }
                 let predicate = predicate.as_deref().map(|text| {
                     Rc::new(KeyBindingContextPredicate::parse(text).expect("product context"))
                 });

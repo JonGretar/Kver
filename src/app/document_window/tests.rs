@@ -16,6 +16,7 @@ mod lifecycle;
 mod links;
 mod opening;
 mod palette;
+mod pane_interaction;
 mod panes;
 mod recent_history;
 mod recent_picker;

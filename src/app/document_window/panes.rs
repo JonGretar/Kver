@@ -76,7 +76,7 @@ impl Render for ResizePanes {
 impl DocumentWindow {
     fn accepts_pane_command(&self, window: &mut Window, cx: &mut App) -> bool {
         self.palette.is_some()
-            || (self.reader.read(cx).focus_handle(cx).is_focused(window)
+            || (self.reader.read(cx).accepts_pane_command(window)
                 && self.recent.is_none()
                 && !window.has_active_dialog(cx))
     }
@@ -88,6 +88,13 @@ impl DocumentWindow {
     ) -> Vec<Subscription> {
         let id = reader.entity_id();
         vec![
+            cx.subscribe_in(
+                reader,
+                window,
+                |this, source, _: &crate::reader::PaneActivation, window, cx| {
+                    this.activate_pane(source.entity_id(), window, cx);
+                },
+            ),
             cx.on_focus(
                 &reader.read(cx).focus_handle(cx),
                 window,
@@ -472,7 +479,7 @@ impl DocumentWindow {
                             if discard && let Some(origin) = &origin {
                                 origin.update(cx, |session, cx| session.discard(cx));
                             }
-                            let reader_focused = this.reader.read(cx).focus_handle(cx).is_focused(window);
+                            let reader_focused = this.reader.read(cx).accepts_pane_command(window);
                             if let Some(other) = this.other_pane.take() {
                                 other.reader.update(cx, |reader, cx| reader.retire_pane(cx));
                             }

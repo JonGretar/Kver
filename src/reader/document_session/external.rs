@@ -40,6 +40,9 @@ impl DocumentSession {
     /// Activation verifies bytes even when an external writer preserves timestamps.
     /// Polling normally checks metadata only, avoiding repeated reads of large PDFs.
     pub(crate) fn check_external(&mut self, force: bool, discard: bool, cx: &mut Context<Self>) {
+        if self.is_preview() {
+            return;
+        }
         if self.is_saving() || (!force && !discard && self.external_conflict && self.is_dirty()) {
             return;
         }

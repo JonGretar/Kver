@@ -162,7 +162,7 @@ fn explicit_new_window_preserves_dirty_source_split(cx: &mut TestAppContext) {
             cx,
             &document.downgrade(),
             windows::OpenRequest {
-                path: Some("examples/field-guide.pdf".into()),
+                target: Some(windows::OpenTarget::File("examples/field-guide.pdf".into())),
                 mode: windows::OpenMode::New,
             },
         )

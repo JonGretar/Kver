@@ -5,9 +5,28 @@ fn hint_window(
     cx: &mut TestAppContext,
     annotation: u32,
 ) -> (tempfile::TempDir, AnyWindowHandle, Entity<DocumentWindow>) {
+    link_window(cx, annotation, None)
+}
+
+fn link_window(
+    cx: &mut TestAppContext,
+    annotation: u32,
+    url: Option<&str>,
+) -> (tempfile::TempDir, AnyWindowHandle, Entity<DocumentWindow>) {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source.pdf");
     let mut pdf = lopdf::Document::load_mem(&pdf::linked_fixture()).unwrap();
+    if let Some(url) = url {
+        pdf.get_object_mut((annotation, 0))
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .get_mut(b"A")
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .set("URI", lopdf::Object::string_literal(url));
+    }
     pdf.get_object_mut((3, 0))
         .unwrap()
         .as_dict_mut()
@@ -94,17 +113,34 @@ fn link_hints_open_same_and_other_documents_in_new_windows(cx: &mut TestAppConte
 
 #[gpui_kit::test]
 fn web_links_open_browser_from_both_hint_commands_and_pointer(cx: &mut TestAppContext) {
-    let (_root, window, _document) = hint_window(cx, 11);
+    let url = crate::app::remote_pdf::tests::serve(b"<html>".to_vec(), 3);
+    let (_root, window, _document) = link_window(cx, 11, Some(url.as_str()));
     for key in ["f", "shift-f"] {
         choose_link(cx, window, key);
-        assert_eq!(cx.opened_url().as_deref(), Some("https://example.org/"));
+        assert_eq!(cx.opened_url().as_deref(), Some(url.as_str()));
         assert_eq!(cx.update(|cx| cx.windows().len()), 1);
     }
     cx.update_window(window, |_, frame, cx| {
         frame.click("pdf-link-0-0", cx);
     })
     .unwrap();
-    assert_eq!(cx.opened_url().as_deref(), Some("https://example.org/"));
+    cx.run_until_parked();
+    assert_eq!(cx.opened_url().as_deref(), Some(url.as_str()));
+}
+
+#[gpui_kit::test]
+fn clicking_a_remote_pdf_opens_it_without_leaving_the_source(cx: &mut TestAppContext) {
+    let pdf = std::fs::read("examples/readme-sample.pdf").unwrap();
+    let url = crate::app::remote_pdf::tests::serve(pdf, 1);
+    let (_root, window, source) = link_window(cx, 11, Some(url.as_str()));
+    cx.update_window(window, |_, frame, cx| frame.click("pdf-link-0-0", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(cx.opened_url(), None);
+    assert_eq!(cx.update(|cx| cx.windows().len()), 2);
+    source.read_with(cx, |source, cx| {
+        assert_eq!(source.reader.read(cx).page_index(), 0)
+    });
 }
 
 #[gpui_kit::test]

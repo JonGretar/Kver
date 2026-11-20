@@ -100,6 +100,7 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "quit",
     "new-window",
     "open-pdf",
+    "open-url",
     "save-as",
     "save",
     "show-recent",
@@ -192,6 +193,19 @@ pub fn install(cx: &mut App) {
         }
     });
     cx.on_action(|_: &Quit, cx| super::windows::request_quit(cx));
+    cx.on_action(|_: &super::document_window::OpenUrl, cx| {
+        if cx.windows().is_empty() {
+            match super::windows::open(cx, None) {
+                Ok(document) => {
+                    let handle = document.read(cx).window_handle();
+                    let _ = cx.update_window(handle, |_, window, cx| {
+                        document.update(cx, |document, cx| document.prompt_url(window, cx));
+                    });
+                }
+                Err(error) => eprintln!("Cannot open window: {error}"),
+            }
+        }
+    });
     cx.on_action(|_: &OpenPdf, cx| {
         if cx.windows().is_empty() {
             match super::windows::open(cx, None) {
@@ -232,6 +246,7 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 Menu::new("File").items([
                     MenuItem::action("New Window", NewWindow),
                     MenuItem::action("Open PDF…", OpenPdf),
+                    MenuItem::action("Open URL…", super::document_window::OpenUrl),
                     MenuItem::action("Open Recent…", ShowRecent),
                     MenuItem::action("Save", Save).disabled(!state.save_available.get()),
                     MenuItem::action("Save As…", SaveAs).disabled(!state.save_as_available.get()),

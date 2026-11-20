@@ -37,6 +37,68 @@ fn file_picker_reuse_targets_the_invoking_reader_not_the_active_one(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+fn open_url_dialog_accepts_a_pdf_by_keyboard(cx: &mut TestAppContext) {
+    let root = configure(cx, OpenFiles::Reuse);
+    let paths = AppPaths::for_locations(root.path().join("config.toml"), root.path().join("data"));
+    cx.update(|cx| crate::reading_history::install(cx, Some(paths.clone())));
+    let url = crate::app::remote_pdf::tests::serve(
+        std::fs::read("examples/readme-sample.pdf").unwrap(),
+        1,
+    );
+    let (window, document) = open(cx, None);
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.dispatch_action(Box::new(OpenUrl), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        assert!(frame.find("url-open").visible());
+    })
+    .unwrap();
+    cx.simulate_input(window, url.as_str());
+    cx.update_window(window, |_, frame, cx| frame.press("enter", cx))
+        .unwrap();
+    cx.run_until_parked();
+    document.read_with(cx, |document, cx| {
+        let reader = document.reader.read(cx);
+        assert_eq!(reader.page_count(), Some(100));
+        assert!(reader.record_path().is_none());
+        assert!(reader.is_preview(cx));
+        assert!(reader.save_available(cx));
+    });
+    assert!(!paths.local_data().join("Downloads").exists());
+    let store = crate::reading_history::RecentStore::new(&paths);
+    assert!(store.search("").unwrap().is_empty());
+    cx.update_window(window, |_, frame, cx| {
+        frame.render_frame(cx);
+        frame.dispatch_action(Box::new(Save), cx)
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let saved = root.path().join("saved.pdf");
+    cx.simulate_new_path_selection(|_| Some(saved.clone()));
+    cx.run_until_parked();
+    assert_eq!(
+        std::fs::read(&saved).unwrap(),
+        std::fs::read("examples/readme-sample.pdf").unwrap()
+    );
+    document.read_with(cx, |document, cx| {
+        let reader = document.reader.read(cx);
+        assert!(!reader.is_preview(cx));
+        assert_eq!(
+            reader.record_path(),
+            Some(saved.canonicalize().unwrap().as_path())
+        );
+    });
+    let recent = store.search("").unwrap();
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].path, saved.canonicalize().unwrap());
+}
+
+#[gpui_kit::test]
 fn file_picker_new_window_preserves_both_existing_readers(cx: &mut TestAppContext) {
     let _root = configure(cx, OpenFiles::NewWindow);
     let original = PathBuf::from("examples/readme-sample.pdf");

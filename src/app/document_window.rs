@@ -6,6 +6,7 @@
 mod chrome;
 pub mod command_palette;
 mod jumplist;
+mod open_url;
 mod panes;
 mod saving;
 pub mod sidebar;
@@ -26,11 +27,11 @@ use super::{
 };
 use crate::{
     reader::{
-        Continuous, Copy, DeleteLocalMark, DocumentEvent, FitPage, FitWidth, JumpEvent,
-        JumpLocalMark, MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage, ReaderView,
-        ScrollDown, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark, ShowAnnotations,
-        ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks, ShowSetMark, SinglePage,
-        ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
+        Continuous, Copy, DeleteLocalMark, DocumentEvent, DocumentSource, FitPage, FitWidth,
+        JumpEvent, JumpLocalMark, MarksView, NextMatch, NextPage, PreviousMatch, PreviousPage,
+        ReaderView, ScrollDown, ScrollScreenDown, ScrollScreenUp, ScrollUp, SetLocalMark,
+        ShowAnnotations, ShowContents, ShowDeleteMark, ShowFind, ShowJumpMark, ShowMarks,
+        ShowSetMark, SinglePage, ToggleSidebar, UseDefaultReadingMode, ZoomIn, ZoomOut,
     },
     reading_history::{
         ShowRecent,
@@ -52,6 +53,7 @@ gpui_kit::actions!(
     kver,
     [
         OpenPdf,
+        OpenUrl,
         SplitSideBySide,
         SplitStacked,
         SwitchPane,
@@ -70,6 +72,7 @@ pub struct DocumentWindow {
     replacement: Option<panes::Replacement>,
     refit_pending: bool,
     file_picker: Option<Task<()>>,
+    remote_pending: bool,
     recent: Option<Entity<RecentPicker>>,
     recent_subscription: Option<Subscription>,
     recent_open: Option<PendingRecentOpen>,
@@ -124,11 +127,11 @@ struct LinkedOpen {
 
 impl DocumentWindow {
     pub fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_with_page(path, None, window, cx)
+        Self::new_with_page(path.map(DocumentSource::File), None, window, cx)
     }
 
     pub(crate) fn new_with_page(
-        path: Option<PathBuf>,
+        source: Option<DocumentSource>,
         page: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -159,7 +162,7 @@ impl DocumentWindow {
                 this.offer_external_change(window, cx);
             }
         });
-        let reader = cx.new(|cx| ReaderView::new(path, window.scale_factor(), cx));
+        let reader = cx.new(|cx| ReaderView::from_source(source, window.scale_factor(), cx));
         chrome::sync_window_identity(reader.read(cx), window, cx);
         let owner = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
@@ -185,6 +188,7 @@ impl DocumentWindow {
             replacement: None,
             refit_pending: false,
             file_picker: None,
+            remote_pending: false,
             recent: None,
             recent_subscription: None,
             recent_open: None,
@@ -611,19 +615,25 @@ impl DocumentWindow {
     }
 
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.open_source(DocumentSource::File(path), cx);
+    }
+
+    fn open_source(&mut self, source: DocumentSource, cx: &mut Context<Self>) {
+        self.remote_pending = false;
+        self.linked_open_request = self.linked_open_request.wrapping_add(1);
         if self.reader.read(cx).is_dirty(cx) || self.reader.read(cx).is_saving(cx) {
             let owner = cx.weak_entity();
             let window = self.window;
             cx.defer(move |cx| {
                 let _ = cx.update_window(window, |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| {
-                        this.request_leave(Leave::Replace(path), window, cx)
+                        this.request_leave(Leave::Replace(source), window, cx)
                     });
                 });
             });
             return;
         }
-        self.replace_path(path, cx);
+        self.replace_source(source, cx);
     }
 
     /// File-open commands use the shared preference, but reuse this invoking
@@ -641,19 +651,19 @@ impl DocumentWindow {
         }
     }
 
-    fn replace_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn replace_source(&mut self, source: DocumentSource, cx: &mut Context<Self>) {
         self.file_picker = None;
         self.save_picker = None;
         self.save_prompt_open = false;
         self.save_observation = None;
         self.initial_link_destination = None;
         if self.other_pane.is_some() {
-            self.stage_replacement(path, cx);
+            self.stage_replacement(source, cx);
             return;
         }
-        let target = path.clone();
+        let target = source.name_or_path(cx);
         self.reader
-            .update(cx, |reader, cx| reader.open_path(path, cx));
+            .update(cx, |reader, cx| reader.open_source(source, cx));
         if let Some(pending) = &mut self.recent_open
             && pending.path == target
         {
@@ -841,6 +851,15 @@ impl DocumentWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let DocumentEvent::OpenWebLink { generation, url } = event {
+            if self.reader.read(cx).document_generation() == *generation {
+                match super::remote_pdf::parse_url(url) {
+                    Ok(url) => self.open_remote_pdf(url, windows::OpenMode::New, true, cx),
+                    Err(error) => window.push_notification(Notification::warning(error), cx),
+                }
+            }
+            return;
+        }
         if let DocumentEvent::OpenDestinationWindow {
             generation,
             destination,
@@ -849,10 +868,14 @@ impl DocumentWindow {
             if *generation != self.reader.read(cx).document_generation() {
                 return;
             }
-            let Some(path) = self.reader.read(cx).path().map(PathBuf::from) else {
+            let Some(session) = self.reader.read(cx).session() else {
                 return;
             };
-            match windows::open_link(cx, path, destination.page()) {
+            match windows::open_source(
+                cx,
+                Some(DocumentSource::Session(session)),
+                Some(destination.page()),
+            ) {
                 Ok(document) => document.update(cx, |document, _| {
                     document.initial_link_destination = Some(*destination);
                 }),
@@ -876,6 +899,7 @@ impl DocumentWindow {
             | DocumentEvent::Opened { generation, .. }
             | DocumentEvent::Updated { generation } => *generation,
             DocumentEvent::OpenLinkedDocument { .. }
+            | DocumentEvent::OpenWebLink { .. }
             | DocumentEvent::OpenDestinationWindow { .. } => unreachable!(),
         };
         if generation != self.reader.read(cx).document_generation() {
@@ -987,6 +1011,7 @@ impl Render for DocumentWindow {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(|this, _: &OpenPdf, _, cx| this.open_dialog(cx)))
+            .on_action(cx.listener(|this, _: &OpenUrl, window, cx| this.prompt_url(window, cx)))
             .on_action(cx.listener(|this, _: &SplitSideBySide, window, cx| {
                 this.arrange_panes(panes::Orientation::SideBySide, window, cx)
             }))

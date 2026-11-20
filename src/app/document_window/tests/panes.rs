@@ -454,7 +454,7 @@ fn hidden_same_session_replacement_cannot_bypass_last_window_unsaved_protection(
     press(cx, handle, "secondary-\\");
     let pending = document.update(cx, |d, cx| {
         let path = d.reader.read(cx).path().unwrap().to_path_buf();
-        d.stage_replacement(path, cx);
+        d.stage_replacement(DocumentSource::File(path), cx);
         d.replacement.as_ref().unwrap().reader.clone()
     });
     // Act in the real interval after the staged reader has joined the session

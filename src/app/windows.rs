@@ -10,6 +10,7 @@ use gpui_kit::{
 };
 
 use super::document_window::DocumentWindow;
+use crate::reader::DocumentSource;
 use crate::{settings::OpenFiles, settings_ui};
 
 gpui::actions!(kver, [CloseWindow, NewWindow, NextWindow, PreviousWindow]);
@@ -33,8 +34,14 @@ impl OpenMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum OpenTarget {
+    File(PathBuf),
+    Url(url::Url),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OpenRequest {
-    pub(crate) path: Option<PathBuf>,
+    pub(crate) target: Option<OpenTarget>,
     pub(crate) mode: OpenMode,
 }
 
@@ -81,20 +88,28 @@ pub(crate) fn open_request(
     request: OpenRequest,
 ) {
     let reuse = request.mode.resolve(cx) == OpenFiles::Reuse;
-    if let Some(path) = request.path {
-        if reuse && let Some((handle, document)) = most_recent(cx) {
-            if let Err(error) = cx.update_window(handle, |_, window, cx| {
-                window.activate_window();
-                document.update(cx, |document, cx| document.open_path(path, cx));
-            }) {
-                eprintln!("Cannot reuse window: {error}");
-            }
-        } else if request.mode == OpenMode::New {
-            if let Err(error) = open(cx, Some(path)) {
-                eprintln!("Cannot open window: {error}");
-            }
+    if let Some(target) = request.target {
+        let existing = if reuse {
+            most_recent(cx).map(|(_, document)| document)
         } else {
-            open_in_new_window(cx, initial, path);
+            initial
+                .upgrade()
+                .filter(|document| request.mode != OpenMode::New && document.read(cx).is_empty(cx))
+        };
+        match existing.map_or_else(|| open(cx, None), Ok) {
+            Ok(document) => {
+                let handle = document.read(cx).window_handle();
+                let _ = cx.update_window(handle, |_, window, cx| {
+                    window.activate_window();
+                    document.update(cx, |document, cx| match target {
+                        OpenTarget::File(path) => document.open_path(path, cx),
+                        OpenTarget::Url(url) => {
+                            document.open_remote_pdf(url, OpenMode::Reuse, false, cx)
+                        }
+                    });
+                });
+            }
+            Err(error) => eprintln!("Cannot open window: {error}"),
         }
     } else if request.mode != OpenMode::New
         && let Some((handle, _)) = most_recent(cx)
@@ -164,21 +179,10 @@ pub fn open_requested_path(cx: &mut App, initial: &WeakEntity<DocumentWindow>, p
         cx,
         initial,
         OpenRequest {
-            path: Some(path),
+            target: Some(OpenTarget::File(path)),
             mode: OpenMode::Default,
         },
     );
-}
-
-fn open_in_new_window(cx: &mut App, initial: &WeakEntity<DocumentWindow>, path: PathBuf) {
-    if let Some(document) = initial.upgrade()
-        && document.read(cx).reader().read(cx).path().is_none()
-    {
-        document.update(cx, |document, cx| document.open_path(path, cx));
-    } else if let Err(error) = open(cx, Some(path)) {
-        eprintln!("Cannot open window: {error}");
-    }
-    cx.activate(true);
 }
 
 /// Dock activation while windowless opens one empty reader.
@@ -191,7 +195,7 @@ pub fn reopen(cx: &mut App) {
 }
 
 pub fn open(cx: &mut App, path: Option<PathBuf>) -> Result<Entity<DocumentWindow>, String> {
-    open_with_page(cx, path, None)
+    open_source(cx, path.map(DocumentSource::File), None)
 }
 
 pub(crate) fn open_link(
@@ -199,12 +203,12 @@ pub(crate) fn open_link(
     path: PathBuf,
     page: usize,
 ) -> Result<Entity<DocumentWindow>, String> {
-    open_with_page(cx, Some(path), Some(page))
+    open_source(cx, Some(DocumentSource::File(path)), Some(page))
 }
 
-fn open_with_page(
+pub(super) fn open_source(
     cx: &mut App,
-    path: Option<PathBuf>,
+    source: Option<DocumentSource>,
     page: Option<usize>,
 ) -> Result<Entity<DocumentWindow>, String> {
     let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
@@ -217,7 +221,7 @@ fn open_with_page(
             ..TitleBar::window_options()
         },
         cx,
-        |window, cx| cx.new(|cx| DocumentWindow::new_with_page(path, page, window, cx)),
+        |window, cx| cx.new(|cx| DocumentWindow::new_with_page(source, page, window, cx)),
     )
     .map_err(|error| error.to_string())?;
     cx.update_window(handle, |_, window, _| window.activate_window())
@@ -271,7 +275,7 @@ mod tests {
                 cx,
                 &first.downgrade(),
                 OpenRequest {
-                    path: Some("examples/selection-sample.pdf".into()),
+                    target: Some(OpenTarget::File("examples/selection-sample.pdf".into())),
                     mode: OpenMode::Reuse,
                 },
             );
@@ -315,7 +319,7 @@ mod tests {
                 cx,
                 &initial.downgrade(),
                 OpenRequest {
-                    path: Some("examples/field-guide.pdf".into()),
+                    target: Some(OpenTarget::File("examples/field-guide.pdf".into())),
                     mode: OpenMode::Default,
                 },
             )
@@ -331,7 +335,7 @@ mod tests {
                 cx,
                 &initial.downgrade(),
                 OpenRequest {
-                    path: Some("examples/readme-sample.pdf".into()),
+                    target: Some(OpenTarget::File("examples/readme-sample.pdf".into())),
                     mode: OpenMode::New,
                 },
             );
@@ -340,7 +344,7 @@ mod tests {
                 cx,
                 &initial.downgrade(),
                 OpenRequest {
-                    path: Some("examples/selection-sample.pdf".into()),
+                    target: Some(OpenTarget::File("examples/selection-sample.pdf".into())),
                     mode: OpenMode::Reuse,
                 },
             );
@@ -361,7 +365,7 @@ mod tests {
                 cx,
                 &initial,
                 OpenRequest {
-                    path: None,
+                    target: None,
                     mode: OpenMode::Default,
                 },
             );
@@ -370,7 +374,7 @@ mod tests {
                 cx,
                 &initial,
                 OpenRequest {
-                    path: None,
+                    target: None,
                     mode: OpenMode::New,
                 },
             );
@@ -386,7 +390,7 @@ mod tests {
                 cx,
                 &initial,
                 OpenRequest {
-                    path: Some("examples/readme-sample.pdf".into()),
+                    target: Some(OpenTarget::File("examples/readme-sample.pdf".into())),
                     mode: OpenMode::Reuse,
                 },
             );

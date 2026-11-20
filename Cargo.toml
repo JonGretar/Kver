@@ -7,7 +7,7 @@ license = "MIT"
 
 [features]
 default = ["gui"]
-gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:interprocess", "dep:objc2", "dep:objc2-foundation"]
+gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:interprocess", "dep:objc2", "dep:objc2-foundation", "dep:ureq"]
 screenshot = ["gui", "gpui-kit/test-support"]
 
 [[bin]]
@@ -41,6 +41,8 @@ rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }
 url = "2"
 interprocess = { version = "2.4.8", default-features = false, optional = true }
+# Streaming HTTP with Rustls; no browser, subprocess, or async runtime required.
+ureq = { version = "3.3", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Native Sparkle/quit bridges; these versions are already used by the GUI stack.

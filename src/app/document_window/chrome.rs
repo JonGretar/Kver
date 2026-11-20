@@ -56,6 +56,7 @@ pub(super) fn application_menu(
                 true,
             ))
             .item(application_menu_item("Open PDF…", OpenPdf, true))
+            .item(application_menu_item("Open URL…", super::OpenUrl, true))
             .item(application_menu_item(
                 "Open Recent…",
                 crate::reading_history::ShowRecent,

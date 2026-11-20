@@ -221,7 +221,7 @@ macro_rules! commands {
     };
 }
 commands! {
-        "open-pdf" => OpenPdf, "show-recent" => ShowRecent,
+        "open-pdf" => OpenPdf, "open-url" => crate::app::document_window::OpenUrl, "show-recent" => ShowRecent,
         "new-window" => NewWindow, "close-window" => CloseWindow,
         "next-window" => NextWindow, "previous-window" => PreviousWindow,
         "split-side-by-side" => SplitSideBySide, "split-stacked" => SplitStacked,

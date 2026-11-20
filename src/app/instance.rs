@@ -17,7 +17,7 @@ use interprocess::local_socket::{
     GenericFilePath, Listener, ListenerNonblockingMode, ListenerOptions, Stream, prelude::*,
 };
 
-use super::windows::{OpenMode, OpenRequest};
+use super::windows::{OpenMode, OpenRequest, OpenTarget};
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(50);
@@ -270,11 +270,17 @@ fn invalid(message: &str) -> io::Error {
 }
 
 fn write_request(writer: &mut impl Write, request: &OpenRequest) -> io::Result<()> {
-    let path = request.path.as_deref().map(encode_path).unwrap_or_default();
+    // Use a distinct magic for URL requests. Local requests remain compatible
+    // with older running instances; they cannot mistake a URL for a filename.
+    let (magic, path) = match &request.target {
+        Some(OpenTarget::File(path)) => (MAGIC, encode_path(path)),
+        Some(OpenTarget::Url(url)) => (b"KURL\x01", url.as_str().as_bytes().to_vec()),
+        None => (MAGIC, Vec::new()),
+    };
     if path.len() > MAX_PATH {
         return Err(invalid("PDF path is too long"));
     }
-    writer.write_all(MAGIC)?;
+    writer.write_all(magic)?;
     writer.write_all(&[match request.mode {
         OpenMode::Default => 0,
         OpenMode::New => 1,
@@ -287,7 +293,8 @@ fn write_request(writer: &mut impl Write, request: &OpenRequest) -> io::Result<(
 fn read_request(reader: &mut impl Read) -> io::Result<OpenRequest> {
     let mut header = [0; 10];
     reader.read_exact(&mut header)?;
-    if &header[..5] != MAGIC {
+    let remote = &header[..5] == b"KURL\x01";
+    if !remote && &header[..5] != MAGIC {
         return Err(invalid("unsupported CLI protocol version"));
     }
     let mode = match header[5] {
@@ -300,7 +307,14 @@ fn read_request(reader: &mut impl Read) -> io::Result<OpenRequest> {
     if length > MAX_PATH {
         return Err(invalid("PDF path is too long"));
     }
-    let path = if length == 0 {
+    let target = if remote {
+        let mut bytes = vec![0; length];
+        reader.read_exact(&mut bytes)?;
+        let value = std::str::from_utf8(&bytes).map_err(|_| invalid("invalid URL encoding"))?;
+        Some(OpenTarget::Url(
+            super::remote_pdf::parse_url(value).map_err(|_| invalid("invalid PDF URL"))?,
+        ))
+    } else if length == 0 {
         None
     } else {
         let mut bytes = vec![0; length];
@@ -309,9 +323,9 @@ fn read_request(reader: &mut impl Read) -> io::Result<OpenRequest> {
         if !path.is_absolute() {
             return Err(invalid("CLI paths must be absolute"));
         }
-        Some(path)
+        Some(OpenTarget::File(path))
     };
-    Ok(OpenRequest { path, mode })
+    Ok(OpenRequest { target, mode })
 }
 
 #[cfg(unix)]
@@ -386,7 +400,9 @@ mod tests {
                     forward(
                         stream,
                         &OpenRequest {
-                            path: Some(std::path::absolute("space # % æ.pdf").unwrap()),
+                            target: Some(OpenTarget::File(
+                                std::path::absolute("space # % æ.pdf").unwrap(),
+                            )),
                             mode: OpenMode::Reuse,
                         },
                     )
@@ -432,7 +448,9 @@ mod tests {
         let (tx, rx) = async_channel::unbounded();
         let server = primary(data.path()).start(tx).unwrap();
         let request = OpenRequest {
-            path: Some(std::path::absolute("space # % æ.pdf").unwrap()),
+            target: Some(OpenTarget::File(
+                std::path::absolute("space # % æ.pdf").unwrap(),
+            )),
             mode: OpenMode::Reuse,
         };
         for _ in 0..2 {
@@ -462,7 +480,7 @@ mod tests {
         write_request(
             &mut bytes,
             &OpenRequest {
-                path: Some("relative.pdf".into()),
+                target: Some(OpenTarget::File("relative.pdf".into())),
                 mode: OpenMode::Default,
             },
         )
@@ -481,10 +499,16 @@ mod tests {
                     .unwrap(),
             ));
         }
-        for path in paths {
+        let targets = paths
+            .into_iter()
+            .map(|path| path.map(OpenTarget::File))
+            .chain([Some(OpenTarget::Url(
+                url::Url::parse("https://example.org/pdf?q=1").unwrap(),
+            ))]);
+        for target in targets {
             for mode in [OpenMode::Default, OpenMode::New, OpenMode::Reuse] {
                 let request = OpenRequest {
-                    path: path.clone(),
+                    target: target.clone(),
                     mode,
                 };
                 let mut bytes = Vec::new();

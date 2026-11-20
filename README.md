@@ -83,7 +83,8 @@ Native testing needs contributors—see [the per-OS acceptance gaps](https://git
    For keyboard selection, choose **Visual select…** from the command palette
    (`v` in Vim), then type the first and last word's two-letter hints.
    Use **Visual select line…** (`V` in Vim) to include complete endpoint lines,
-   even when their beginnings or ends are clipped.
+   even when their beginnings or ends are clipped. In Vim, press `y` to copy
+   the selected text.
 4. **Discover commands.** Press Command-Shift-P to open the command palette. It shows
    available commands and their shortcut hints.
 5. **Make it yours.** Open **Kver → Settings…** (Command-,) for appearance,
@@ -91,11 +92,14 @@ Native testing needs contributors—see [the per-OS acceptance gaps](https://git
 
 These shortcuts use the Standard preset on macOS. Choose **Vim** in
 **Settings → Keyboard** for Vim-style navigation; that page shows the active
-shortcuts. See [Customize keyboard shortcuts](docs/keybindings.md) for
+shortcuts. Choose **Help → Open Vim Tutor** or search for **Open Vim Tutor**
+in the command palette. Kver opens the online workbook in a separate window.
+You can also download the [Vim Tutor PDF](examples/vim-tutor.pdf) for offline
+practice. See [Customize keyboard shortcuts](docs/keybindings.md) for
 configuration examples.
 
 On Linux and Windows, open the **Kver** menu in the title bar for file and
-window commands, Settings, About, and Quit. Its shortcut hints follow your
+window commands, Settings, Help, About, and Quit. Its shortcut hints follow your
 current keyboard configuration.
 
 ### Opening from the terminal

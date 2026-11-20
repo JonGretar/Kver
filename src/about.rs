@@ -9,9 +9,8 @@ use gpui_kit::{
     WindowBounds, WindowOptions, div, img, px, size,
 };
 
-use crate::reader_windows::CloseWindow;
+use crate::{app::commands::PROJECT_URL, reader_windows::CloseWindow};
 
-const PROJECT_URL: &str = "https://github.com/JonGretar/Kver";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 gpui::actions!(kver, [CloseAbout]);

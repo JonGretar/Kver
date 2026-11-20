@@ -3,6 +3,36 @@ use super::*;
 use crate::{app::keymap::install as bind_reader_keys, reader::ZoomMode};
 
 #[gpui_kit::test]
+fn palette_dispatches_open_vim_tutor_from_an_empty_reader(cx: &mut TestAppContext) {
+    use crate::app::commands::OpenVimTutor;
+
+    setup(cx);
+    cx.update(|cx| {
+        cx.on_action(|_: &OpenVimTutor, cx| cx.open_url("https://example.org/tutor"));
+    });
+    let (handle, document) = open(cx, None);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("secondary-shift-p", cx);
+        window.render_frame(cx);
+        window.input("vim tutor", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://example.org/tutor")
+    );
+    assert!(!document.read_with(cx, |document, _| document.palette_open()));
+}
+
+#[gpui_kit::test]
 fn vim_palette_and_find_keys_stay_in_the_reader_context(cx: &mut TestAppContext) {
     setup(cx);
     cx.update(|cx| {

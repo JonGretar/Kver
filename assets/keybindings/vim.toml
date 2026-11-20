@@ -227,6 +227,10 @@ context = "reader"
 command = "copy"
 platform = ["linux", "windows"]
 [[keyboard.bindings]]
+keys = "y"
+context = "reader"
+command = "copy"
+[[keyboard.bindings]]
 keys = "down"
 context = "reader"
 command = "read-down"

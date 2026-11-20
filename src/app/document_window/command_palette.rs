@@ -21,6 +21,7 @@ use super::{
 use crate::{
     app::windows::{NewWindow, NextWindow, PreviousWindow},
     app::{
+        commands::{OPEN_VIM_TUTOR_LABEL, OpenVimTutor},
         keymap::{self, Context as KeyContext},
         shortcut_label,
     },
@@ -88,6 +89,7 @@ impl CommandPalette {
         let mut items = vec![
             command("Open PDF…", OpenPdf, true),
             command("Open URL…", super::OpenUrl, true),
+            command(OPEN_VIM_TUTOR_LABEL, OpenVimTutor, true),
             reader_command("Follow link…", crate::reader::FollowLink, has_document, cx),
             reader_command(
                 "Follow link in new window…",

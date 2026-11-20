@@ -24,6 +24,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Zoom PDF pages with a touchpad pinch, or hold Command on macOS / Ctrl on
   Linux and Windows while scrolling. Zoom follows the pointer and keeps page
   images visible while sharper replacements render.
+- Learn the Vim preset with the [Vim Tutor PDF](examples/vim-tutor.pdf), a
+  hands-on workbook for navigation, selection, links, splits, and markup.
+  Open it from Help or the command palette. Help also links to the Kver website.
+- Press `y` in the Vim reader to copy selected text to the clipboard.
 
 ### Fixed
 

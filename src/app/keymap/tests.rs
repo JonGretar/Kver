@@ -1090,12 +1090,13 @@ fn vim_defaults_keep_application_commands_without_leaking_reader_keys_to_other_c
             ("shift-w", "kver::FitPage"),
             ("s", "kver::SinglePage"),
             ("c", "kver::Continuous"),
+            ("y", "kver::Copy"),
         ] {
             assert_eq!(map.action(keys, Context::Reader), Some(action), "{keys}");
             assert_eq!(map.action(keys, Context::Contents), None, "{keys}");
             assert_eq!(map.action(keys, Context::Global), None, "{keys}");
         }
-        for key in ["o", "shift-o", "/", ":"] {
+        for key in ["o", "shift-o", "/", ":", "y"] {
             assert_eq!(map.action(key, Context::Sidebar), None, "{key}");
             assert_eq!(map.action(key, Context::Settings), None, "{key}");
         }
@@ -1103,7 +1104,7 @@ fn vim_defaults_keep_application_commands_without_leaking_reader_keys_to_other_c
         for key in ["cmd-f", "cmd-b", "cmd-g", "cmd-shift-g", "cmd-t", "p"] {
             assert_eq!(map.action(key, Context::Reader), None, "{key}");
         }
-        for key in ["o", "shift-o", "/", ":"] {
+        for key in ["o", "shift-o", "/", ":", "y"] {
             assert_eq!(standard.action(key, Context::Reader), None, "{key}");
         }
         assert_eq!(
@@ -1152,6 +1153,7 @@ fn vim_install_keeps_native_menu_accelerators_modified(cx: &mut TestAppContext) 
             (&PreviousPage as &dyn gpui_kit::Action, "cmd-alt-left"),
             (&CloseWindow as &dyn gpui_kit::Action, "cmd-w"),
             (&Quit as &dyn gpui_kit::Action, "cmd-q"),
+            (&crate::reader::Copy as &dyn gpui_kit::Action, "cmd-c"),
         ] {
             let first = bindings.bindings_for_action(action).next().unwrap();
             assert_eq!(

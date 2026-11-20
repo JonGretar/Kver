@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-20
+
+Read two places in the same PDF at once, open PDFs from the web, and learn
+Kver’s keyboard controls with the built-in Vim Tutor.
+
 ### Added
 
 - Open HTTP(S) PDFs with **Open URL…**, from the command line, or by following
@@ -24,9 +29,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Zoom PDF pages with a touchpad pinch, or hold Command on macOS / Ctrl on
   Linux and Windows while scrolling. Zoom follows the pointer and keeps page
   images visible while sharper replacements render.
-- Learn the Vim preset with the [Vim Tutor PDF](examples/vim-tutor.pdf), a
-  hands-on workbook for navigation, selection, links, splits, and markup.
-  Open it from Help or the command palette. Help also links to the Kver website.
+- Learn the Vim preset with the built-in **Vim Tutor**, a hands-on PDF workbook
+  for navigation, selection, links, splits, and markup. Open it from Help or
+  the command palette. Help also links to the Kver website.
 - Press `y` in the Vim reader to copy selected text to the clipboard.
 
 ### Fixed

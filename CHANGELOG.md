@@ -14,6 +14,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   with a draggable divider or manage them from the keyboard. Shared Find,
   Contents, marks, copy, annotation controls, and visible-content hints follow
   the active pane; document edits, saving, and undo remain shared.
+- Follow links within a PDF in the other pane with `g w f` in Vim,
+  **Follow link in split…** in the command palette, or Command-click on macOS
+  / Ctrl-click on Linux and Windows. Kver opens a side-by-side split if needed
+  and moves focus to the destination pane.
 - Zoom PDF pages with a touchpad pinch, or hold Command on macOS / Ctrl on
   Linux and Windows while scrolling. Zoom follows the pointer and keeps page
   images visible while sharper replacements render.

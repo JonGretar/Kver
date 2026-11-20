@@ -116,7 +116,7 @@ by the current keyboard configuration:
 | Split reading | `split-side-by-side`, `split-stacked`, `switch-pane`, `close-pane`, `keep-only-pane` |
 | Reading ruler | `toggle-reading-ruler`, `next-ruler-line`, `previous-ruler-line` |
 | Text selection | `visual-select`, `visual-select-line` |
-| Links | `follow-link`, `follow-link-in-new-window` |
+| Links | `follow-link`, `follow-link-in-new-window`, `follow-link-in-split` |
 | Find and sidebar | `show-find`, `next-match`, `previous-match`, `show-contents`, `toggle-sidebar`, `activate-outline`, `select-down`, `select-up` |
 | Marks | `show-marks`, `set-local-mark`, `jump-local-mark`, `delete-local-mark` |
 | Text markup | `apply-markup`, `highlight`, `underline`, `strikethrough`, `squiggly-underline`, `show-annotations`, `undo-annotation`, `redo-annotation`, `delete-highlight`, `recolor-highlight-yellow`, `recolor-highlight-green`, `recolor-highlight-blue`, `recolor-highlight-pink`, `recolor-highlight-red` |
@@ -127,6 +127,12 @@ corrects and Escape cancels. Same-document links navigate in place with `f`
 and open in another window with `F`. Links to another local PDF always open
 in a new window. HTTP(S) links open in the default browser with either
 command, just as they do when clicked; Kver does not download them.
+
+To open a link within the same PDF in the other pane, use **Follow link in
+split…** in the command palette, or press `g w f` in Vim and type the link
+hint. You can also Command-click on macOS or Ctrl-click on Linux and Windows.
+Kver reuses the other pane if one is open, or creates a side-by-side split.
+Focus moves to the destination pane without changing your place in the source pane.
 
 `read-down` and `read-up` follow lines with the reading ruler on and scroll
 with it off. `select-down` and `select-up` move the focused sidebar list's

@@ -60,7 +60,7 @@ struct Session {
 
 enum Mode {
     Words(Filter),
-    Links { new_window: bool },
+    Links(LinkDisposition),
 }
 
 enum State {
@@ -123,11 +123,11 @@ impl ReaderView {
 
     pub(super) fn begin_link_hints(
         &mut self,
-        new_window: bool,
+        disposition: LinkDisposition,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.begin_hints(Mode::Links { new_window }, window, cx);
+        self.begin_hints(Mode::Links(disposition), window, cx);
     }
 
     fn begin_hints(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
@@ -151,7 +151,7 @@ impl ReaderView {
         window.focus(&focus, cx);
         if matches!(
             self.hints.active.as_ref().map(|s| &s.mode),
-            Some(Mode::Links { .. })
+            Some(Mode::Links(_))
         ) {
             self.schedule_links(cx);
         } else {
@@ -222,7 +222,7 @@ impl ReaderView {
         }
         if matches!(
             self.hints.active.as_ref().map(|s| &s.mode),
-            Some(Mode::Links { .. })
+            Some(Mode::Links(_))
         ) {
             self.prepare_link_hints(window, cx);
             return;
@@ -416,7 +416,7 @@ impl ReaderView {
 
     pub(super) fn render_hint_input(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let session = self.hints.active.as_ref()?;
-        let link_mode = matches!(session.mode, Mode::Links { .. });
+        let link_mode = matches!(session.mode, Mode::Links(_));
         let prompt = if link_mode {
             "Choose link"
         } else {
@@ -485,11 +485,11 @@ impl ReaderView {
                         .min_w_0()
                         .truncate()
                         .text_color(cx.theme().muted_foreground)
-                        .child(if let Mode::Links { new_window } = session.mode {
-                            if new_window {
-                                "Follow in new window"
-                            } else {
-                                "Follow link"
+                        .child(if let Mode::Links(disposition) = session.mode {
+                            match disposition {
+                                LinkDisposition::CurrentPane => "Follow link",
+                                LinkDisposition::NewWindow => "Follow in new window",
+                                LinkDisposition::OtherPane => "Follow link in split",
                             }
                         } else if line_mode {
                             "Lines"
@@ -597,7 +597,10 @@ impl ReaderView {
                             State::Links(snapshot) => Some(snapshot.clone()),
                             _ => None,
                         };
-                        let new_window = matches!(session.mode, Mode::Links { new_window: true });
+                        let link_disposition = match session.mode {
+                            Mode::Links(disposition) => Some(disposition),
+                            Mode::Words(_) => None,
+                        };
                         let outcome = if let Some(links) = &links {
                             session.input.key(&event.keystroke.key, Some(links))
                         } else {
@@ -612,7 +615,8 @@ impl ReaderView {
                                 }
                             }
                             hint::Outcome::Chosen(index) => {
-                                if let Some(links) = links {
+                                if let (Some(links), Some(disposition)) = (links, link_disposition)
+                                {
                                     let &(page, link) = links.labels()[index].target().id();
                                     reader.finish_hints();
                                     window.focus(&reader.focus, cx);
@@ -620,7 +624,7 @@ impl ReaderView {
                                         reader.document_generation,
                                         page,
                                         link,
-                                        new_window,
+                                        disposition,
                                         cx,
                                     );
                                 }

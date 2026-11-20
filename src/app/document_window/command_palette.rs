@@ -95,6 +95,12 @@ impl CommandPalette {
                 cx,
             ),
             reader_command(
+                "Follow link in split…",
+                crate::reader::FollowLinkInSplit,
+                has_document,
+                cx,
+            ),
+            reader_command(
                 "Visual select…",
                 crate::reader::VisualSelect,
                 has_document,

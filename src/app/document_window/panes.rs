@@ -217,22 +217,74 @@ impl DocumentWindow {
         } {
             return;
         }
-        if self.other_pane.is_none() {
-            let source = self.reader.clone();
-            let reader = source.update(cx, |source, cx| cx.new(|cx| source.duplicate(cx)));
-            let subscriptions = Self::observe_pane(&reader, window, cx);
-            self.other_pane = Some(Pane {
-                reader,
-                jumplist: Jumplist::default(),
-                subscriptions,
-            });
-            self.split.active_first = true;
+        if self.ensure_other_pane(window, cx) {
             self.focus_other_pane(window, cx);
         }
+        self.set_split_orientation(orientation, window, cx);
+    }
+
+    fn ensure_other_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.other_pane.is_some() {
+            return false;
+        }
+        let source = self.reader.clone();
+        let reader = source.update(cx, |source, cx| cx.new(|cx| source.duplicate(cx)));
+        let subscriptions = Self::observe_pane(&reader, window, cx);
+        self.other_pane = Some(Pane {
+            reader,
+            jumplist: Jumplist::default(),
+            subscriptions,
+        });
+        self.split.active_first = true;
+        true
+    }
+
+    fn set_split_orientation(
+        &mut self,
+        orientation: Orientation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.split.orientation = orientation;
         self.split.fraction = 0.5;
         self.schedule_refit(window, cx);
         cx.notify();
+    }
+
+    pub(super) fn open_destination_in_split(
+        &mut self,
+        generation: u64,
+        destination: crate::pdf::OutlineDestination,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let source = self.reader.read(cx);
+        if generation != source.document_generation()
+            || source
+                .page_count()
+                .is_none_or(|count| destination.page() >= count)
+            || self.replacement.is_some()
+        {
+            return;
+        }
+        if self.other_pane.is_none() && !self.pane_availability(window, cx).0 {
+            self.reader.update(cx, |reader, cx| {
+                reader.report_link_error(
+                    "Enlarge the window to open the link side by side.".into(),
+                    cx,
+                );
+            });
+            return;
+        }
+        if self.ensure_other_pane(window, cx) {
+            self.set_split_orientation(Orientation::SideBySide, window, cx);
+        }
+        if let Some(pane) = &self.other_pane {
+            pane.reader.update(cx, |reader, cx| {
+                reader.open_split_destination(destination, cx);
+            });
+            self.focus_other_pane(window, cx);
+        }
     }
 
     pub(super) fn switch_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {

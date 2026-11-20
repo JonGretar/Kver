@@ -236,6 +236,7 @@ commands! {
         "visual-select-line" => crate::reader::VisualSelectLine,
         "follow-link" => crate::reader::FollowLink,
         "follow-link-in-new-window" => crate::reader::FollowLinkInNewWindow,
+        "follow-link-in-split" => crate::reader::FollowLinkInSplit,
         "apply-markup" => crate::reader::ApplyMarkup,
         "highlight" => Highlight,
         "underline" => crate::reader::Underline,

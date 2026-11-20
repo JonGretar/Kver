@@ -11,7 +11,7 @@ use gpui_kit::{
     },
     prelude::*,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use super::{DocumentWindow, windows};
 use crate::reader::document_session::{Destination, DocumentSession, SaveError};
@@ -20,7 +20,7 @@ gpui_kit::actions!(kver, [Save, SaveAs]);
 
 pub(super) enum Leave {
     Close,
-    Replace(PathBuf),
+    Replace(crate::reader::DocumentSource),
     Quit,
 }
 
@@ -31,7 +31,7 @@ impl DocumentWindow {
             crate::app::quit_guard::cancel_request();
         }
         self.save_prompt_open = false;
-        if let Some(Leave::Replace(path)) = pending
+        if let Some(Leave::Replace(crate::reader::DocumentSource::File(path))) = pending
             && self
                 .recent_open
                 .as_ref()
@@ -128,7 +128,7 @@ impl DocumentWindow {
                 }
                 window.remove_window();
             }
-            Leave::Replace(path) => self.replace_path(path, cx),
+            Leave::Replace(source) => self.replace_source(source, cx),
             Leave::Quit => cx.defer(windows::request_quit),
         }
     }
@@ -233,6 +233,10 @@ impl DocumentWindow {
             }
             return;
         }
+        if session.read(cx).is_preview() {
+            self.save_as(window, cx);
+            return;
+        }
         if !session.read(cx).is_dirty() {
             if let Some(intent) = self.pending_leave.take() {
                 self.request_leave(intent, window, cx);
@@ -255,19 +259,36 @@ impl DocumentWindow {
         let Some(session) = self.reader.read(cx).session() else {
             return;
         };
-        if let Some(reason) = session.read(cx).editing_rejection() {
+        if !(session.read(cx).is_preview() && !session.read(cx).is_dirty())
+            && let Some(reason) = session.read(cx).editing_rejection()
+        {
             window.push_notification(Notification::warning(reason.to_owned()), cx);
             self.cancel_pending_leave(cx);
             return;
         }
         let generation = self.reader.read(cx).document_generation();
         self.save_prompt_open = true;
-        let suggested = format!(
-            "{}-annotated.pdf",
-            source.file_stem().unwrap_or_default().to_string_lossy()
-        );
+        let preview = session.read(cx).is_preview();
+        let suggested = if preview {
+            source
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            format!(
+                "{}-annotated.pdf",
+                source.file_stem().unwrap_or_default().to_string_lossy()
+            )
+        };
+        let folder = directories::UserDirs::new()
+            .filter(|_| preview)
+            .map(|dirs| dirs.document_dir().unwrap_or(dirs.home_dir()).to_owned());
         let choice = cx.prompt_for_new_path(
-            source.parent().unwrap_or(std::path::Path::new(".")),
+            folder
+                .as_deref()
+                .or_else(|| source.parent())
+                .unwrap_or(std::path::Path::new(".")),
             Some(&suggested),
         );
         self.save_picker = Some(cx.spawn(async move |this, cx| {
@@ -275,7 +296,7 @@ impl DocumentWindow {
                 Ok(Ok(Some(path))) => {
                     cx.background_spawn(async move {
                         let destination = Destination::inspect(path)?;
-                        if destination.is_source(&source) {
+                        if !preview && destination.is_source(&source) {
                             return Err("Use Save to update the current PDF; Save As needs a different filename.".into());
                         }
                         Ok(Arc::new(destination))

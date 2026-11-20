@@ -110,7 +110,7 @@ by the current keyboard configuration:
 
 | Task | Commands |
 | --- | --- |
-| Application and windows | `open-pdf`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
+| Application and windows | `open-pdf`, `open-url`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `read-down`, `read-up`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
 | Split reading | `split-side-by-side`, `split-stacked`, `switch-pane`, `close-pane`, `keep-only-pane` |
@@ -125,8 +125,8 @@ by the current keyboard configuration:
 in both presets. Type a visible link's two-letter hint to follow it; Backspace
 corrects and Escape cancels. Same-document links navigate in place with `f`
 and open in another window with `F`. Links to another local PDF always open
-in a new window. HTTP(S) links open in the default browser with either
-command, just as they do when clicked; Kver does not download them.
+in a new window. Following or clicking an HTTP(S) link opens a PDF in a new
+Kver window; links to web pages open in the default browser.
 
 To open a link within the same PDF in the other pane, use **Follow link in
 split…** in the command palette, or press `g w f` in Vim and type the link

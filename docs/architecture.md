@@ -43,6 +43,8 @@ domain terms.
 - **Document session:** shared immutable PDF baseline, annotation catalog,
   editing history, dirty state, and serialized save/reload operations.
   Readers opening the same canonical path join the same session.
+  A web PDF starts in its own memory-backed session and gains a filesystem
+  identity only after a successful save.
 - **Reader:** pane-local navigation, zoom, reading mode, ruler, selection, and
   viewport resources. Closing one reader does not discard another's session.
   Selection and ruler share bounded background page-text access; each retains

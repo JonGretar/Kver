@@ -87,6 +87,7 @@ impl CommandPalette {
         let has_document = available.page_count > 0;
         let mut items = vec![
             command("Open PDF…", OpenPdf, true),
+            command("Open URL…", super::OpenUrl, true),
             reader_command("Follow link…", crate::reader::FollowLink, has_document, cx),
             reader_command(
                 "Follow link in new window…",

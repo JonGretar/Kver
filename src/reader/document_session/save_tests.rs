@@ -21,6 +21,48 @@ pub(super) fn region(top: f64) -> Vec<Quad> {
 }
 
 #[gpui_kit::test]
+fn edited_web_preview_only_writes_the_chosen_destination(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("not-on-disk.pdf");
+    let document = pdf::Document::from_bytes(
+        source.clone(),
+        std::fs::read("examples/selection-sample.pdf").unwrap(),
+    )
+    .unwrap();
+    let session = cx.update(|cx| DocumentSession::preview(Arc::new(document), cx));
+    session.update(cx, |session, cx| session.ensure_annotations(cx));
+    cx.run_until_parked();
+    let output = directory.path().join("saved.pdf");
+    session.update(cx, |session, cx| {
+        session.create_highlight(0, region(734.), cx).unwrap();
+        assert!(session.start_save(cx).is_err());
+        assert!(
+            std::fs::read_dir(directory.path())
+                .unwrap()
+                .next()
+                .is_none()
+        );
+        session
+            .start_save_as(Arc::new(Destination::inspect(output.clone()).unwrap()), cx)
+            .unwrap();
+    });
+    cx.run_until_parked();
+    assert!(!source.exists());
+    assert_eq!(
+        pdf::Document::open(&output)
+            .unwrap()
+            .page_annotations(0, 1)
+            .unwrap()
+            .len(),
+        1
+    );
+    session.read_with(cx, |session, _| {
+        assert!(!session.is_preview());
+        assert!(!session.is_dirty());
+    });
+}
+
+#[gpui_kit::test]
 fn imported_markup_edit_history_and_save_preserve_metadata_for_all_types(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("imported.pdf");

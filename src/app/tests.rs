@@ -5,13 +5,17 @@ use gpui_kit::{Focusable as _, TestAppContext, test::TestWindowExt};
 fn finder_file_urls_preserve_special_characters() {
     let path = std::env::temp_dir().join("PDF space # % æ.pdf");
     let url = url::Url::from_file_path(&path).unwrap();
-    assert_eq!(local_path(url.as_str()), Some(path));
+    assert_eq!(platform_target(url.as_str()), Some(OpenTarget::File(path)));
 }
 
 #[test]
-fn ignore_non_file_and_invalid_urls() {
-    assert_eq!(local_path("https://example.com/book.pdf"), None);
-    assert_eq!(local_path("not a URL"), None);
+fn accept_web_urls_but_ignore_unsupported_and_invalid_urls() {
+    assert!(matches!(
+        platform_target("https://example.com/book.pdf"),
+        Some(OpenTarget::Url(_))
+    ));
+    assert_eq!(platform_target("ftp://example.org/book.pdf"), None);
+    assert_eq!(platform_target("not a URL"), None);
 }
 
 #[gpui_kit::test]

@@ -33,7 +33,7 @@ fn cli_reuse_preserves_unsaved_work_until_the_user_decides(cx: &mut TestAppConte
                 cx,
                 &document.downgrade(),
                 OpenRequest {
-                    path: Some(next.clone()),
+                    target: Some(windows::OpenTarget::File(next.clone())),
                     mode: OpenMode::Reuse,
                 },
             )

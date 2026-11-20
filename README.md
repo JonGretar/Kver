@@ -104,6 +104,9 @@ Run `kver some.pdf` to open a PDF in the most recently active reader, even
 when Kver is already running. Use `kver --new-window some.pdf` to open
 another window instead.
 
+For a PDF on the web, choose **Open URL…** or run `kver 'https://example.org/book.pdf'`.
+Web PDFs stay in memory and out of Open Recent until you choose **Save** and pick a location.
+
 See [Command-line usage](docs/cli.md) for macOS setup, window preferences,
 and available options.
 

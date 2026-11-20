@@ -11,6 +11,7 @@ pub mod keymap;
 pub mod menu;
 mod onboarding;
 pub(crate) mod quit_guard;
+pub(crate) mod remote_pdf;
 pub(crate) mod shortcut_label;
 pub(crate) mod theme;
 pub mod windows;
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use gpui_kit::{App, AppContext as _, platform};
 
 use crate::{assets::ReaderAssets, reading_history, settings::AppPaths, settings_ui};
+use windows::OpenTarget;
 
 /// Matches the Linux desktop entry basename, icon and X11 WM_CLASS.
 #[cfg(target_os = "linux")]
@@ -35,9 +37,9 @@ fn run_primary(request: windows::OpenRequest, primary: instance::Primary) -> Res
     let application = platform::application().with_assets(ReaderAssets);
     application.on_open_urls(move |urls| {
         for url in urls {
-            if let Some(path) = local_path(&url) {
+            if let Some(target) = platform_target(&url) {
                 let _ = requests.try_send(windows::OpenRequest {
-                    path: Some(path),
+                    target: Some(target),
                     mode: windows::OpenMode::Default,
                 });
             }
@@ -77,7 +79,12 @@ fn run_primary(request: windows::OpenRequest, primary: instance::Primary) -> Res
                 (Err(error), _) => startup_error = Some(error),
                 _ => {}
             }
-            let initial = cx.update(|cx| start_reader(cx, paths, request.path, startup_error));
+            let (path, remote) = match request.target {
+                Some(OpenTarget::File(path)) => (Some(path), None),
+                Some(OpenTarget::Url(url)) => (None, Some(url)),
+                None => (None, None),
+            };
+            let initial = cx.update(|cx| start_reader(cx, paths, path, startup_error));
             let Some(initial) = initial else { return };
             // Requests received during startup must see the configured window
             // policy, not the temporary defaults used while settings load.
@@ -85,6 +92,18 @@ fn run_primary(request: windows::OpenRequest, primary: instance::Primary) -> Res
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(10))
                     .await;
+            }
+            if let Some(url) = remote {
+                cx.update(|cx| {
+                    windows::open_request(
+                        cx,
+                        &initial,
+                        windows::OpenRequest {
+                            target: Some(OpenTarget::Url(url)),
+                            mode: windows::OpenMode::Reuse,
+                        },
+                    );
+                });
             }
             while let Ok(request) = incoming.recv().await {
                 cx.update(|cx| windows::open_request(cx, &initial, request));
@@ -158,8 +177,13 @@ fn initialize_services(cx: &mut App, paths: Option<AppPaths>) {
     menu::install(cx);
 }
 
-fn local_path(url: &str) -> Option<PathBuf> {
-    url::Url::parse(url).ok()?.to_file_path().ok()
+fn platform_target(value: &str) -> Option<OpenTarget> {
+    let url = url::Url::parse(value).ok()?;
+    if url.scheme() == "file" {
+        url.to_file_path().ok().map(OpenTarget::File)
+    } else {
+        remote_pdf::parse_url(value).ok().map(OpenTarget::Url)
+    }
 }
 
 #[cfg(test)]

@@ -26,6 +26,7 @@ older running versions must be quit before using it.
 kver some.pdf                 # Existing window, unless configured otherwise
 kver --new-window some.pdf    # Override the preference
 kver --reuse-window some.pdf  # Use the most recently active reader
+kver 'https://example.org/download?id=42'  # No .pdf suffix required
 kver                         # Activate a reader, or open an empty window
 kver --new-window            # Open an empty window
 ```
@@ -70,6 +71,11 @@ kver --help
 kver --version
 ```
 
-Each invocation accepts at most one PDF path. Help and version commands
+Each invocation accepts at most one PDF path or HTTP(S) URL. Web PDFs open in
+memory (up to 256 MiB) without a download file or reading-history entry.
+Choose **Save** or **Save As** to keep a local PDF. Closing an unedited web PDF
+discards it; if you annotated it, Kver asks whether to save your changes.
+
+Help and version commands
 do not launch or contact the app. Invalid arguments and handoff failures
 return a nonzero exit status.

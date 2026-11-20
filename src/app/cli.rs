@@ -5,10 +5,11 @@ use std::{ffi::OsString, path::PathBuf};
 use crate::settings::AppPaths;
 
 use super::instance::{self, Instance};
-use super::windows::{OpenMode, OpenRequest};
+use super::remote_pdf;
+use super::windows::{OpenMode, OpenRequest, OpenTarget};
 
 const HELP: &str = "\
-Usage: kver [--new-window | --reuse-window] [--] [path/to/document.pdf]
+Usage: kver [--new-window | --reuse-window] [--] [PDF path or HTTP(S) URL]
 
 Open a PDF in Kver, forwarding to the running app when available.
 Relative paths are resolved from this terminal's working directory.
@@ -83,17 +84,26 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, String>
                 _ => {}
             }
         }
-        if path.replace(PathBuf::from(arg)).is_some() {
-            return Err("Expected at most one PDF path. Use kver --help.".into());
+        if path.replace((arg, literal)).is_some() {
+            return Err("Expected at most one PDF path or URL. Use kver --help.".into());
         }
     }
-    let path = path
-        .map(|path| {
-            std::path::absolute(path)
+    let target = path
+        .map(|(arg, literal)| {
+            if !literal
+                && let Some(value) = arg.to_str()
+                && value.split_once("://").is_some_and(|(scheme, _)| {
+                    scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+                })
+            {
+                return remote_pdf::parse_url(value).map(OpenTarget::Url);
+            }
+            std::path::absolute(PathBuf::from(arg))
+                .map(OpenTarget::File)
                 .map_err(|error| format!("Cannot resolve the PDF path: {error}"))
         })
         .transpose()?;
-    Ok(Invocation::Open(OpenRequest { path, mode }))
+    Ok(Invocation::Open(OpenRequest { target, mode }))
 }
 
 #[cfg(test)]
@@ -111,8 +121,10 @@ mod tests {
     fn paths_are_absolute_and_preserve_special_characters() {
         let request = request(&["space # % æ.pdf"]);
         assert_eq!(
-            request.path,
-            Some(std::env::current_dir().unwrap().join("space # % æ.pdf"))
+            request.target,
+            Some(OpenTarget::File(
+                std::env::current_dir().unwrap().join("space # % æ.pdf")
+            ))
         );
         assert_eq!(request.mode, OpenMode::Default);
     }
@@ -121,13 +133,16 @@ mod tests {
     fn explicit_window_modes_and_literal_paths() {
         assert_eq!(request(&["--new-window"]).mode, OpenMode::New);
         assert_eq!(request(&["--reuse-window", "a.pdf"]).mode, OpenMode::Reuse);
-        assert!(request(&[]).path.is_none());
-        assert!(
-            request(&["--", "-book.pdf"])
-                .path
-                .unwrap()
-                .ends_with("-book.pdf")
-        );
+        assert!(request(&[]).target.is_none());
+        assert!(matches!(
+            request(&["--", "-book.pdf"]).target,
+            Some(OpenTarget::File(path)) if path.ends_with("-book.pdf")
+        ));
+        assert!(matches!(
+            request(&["HTTPS://example.org/download?id=42"]).target,
+            Some(OpenTarget::Url(url)) if url.as_str() == "https://example.org/download?id=42"
+        ));
+        assert!(parse(["https://"].map(OsString::from)).is_err());
         assert!(parse(["--new-window", "--reuse-window"].map(OsString::from)).is_err());
         assert!(parse(["--bogus"].map(OsString::from)).is_err());
         assert!(parse(["a.pdf", "b.pdf"].map(OsString::from)).is_err());

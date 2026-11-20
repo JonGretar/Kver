@@ -16,12 +16,16 @@ pub(crate) struct PaneTarget {
 }
 
 impl ReaderView {
-    pub(crate) fn replacement(path: PathBuf, generation: u64, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn replacement(
+        source: DocumentSource,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut pane = Self::new(None, 1., cx);
         pane.record_active = false;
         pane.focus_on_mount = false;
         pane.document_generation = generation;
-        pane.open_path(path, cx);
+        pane.open_source(source, cx);
         pane
     }
 

@@ -39,6 +39,7 @@ impl Global for Sessions {}
 
 pub(crate) struct DocumentSession {
     path: PathBuf,
+    unsaved_preview: bool,
     result: Option<Result<Arc<pdf::Document>, String>>,
     epoch: u64,
     revision: u64,
@@ -72,6 +73,15 @@ pub(crate) struct DocumentSession {
 }
 
 impl DocumentSession {
+    /// Previews have a suggested filename, not a filesystem identity. Two
+    /// downloads with the same name must never join each other's session.
+    pub(crate) fn preview(document: Arc<pdf::Document>, cx: &mut App) -> Entity<Self> {
+        if !cx.has_global::<Sessions>() {
+            cx.set_global(Sessions::default());
+        }
+        cx.new(|cx| Self::new(document.path().to_owned(), Some(document), cx))
+    }
+
     /// `path` has already been canonicalized on a background worker. Membership
     /// is resolved on the UI thread before starting I/O, including concurrent opens.
     /// A failed load has no usable baseline and must not prevent a later retry.
@@ -93,7 +103,7 @@ impl DocumentSession {
                 .is_none()
         {
             return cx.new(|cx| {
-                let mut session = Self::new(path, cx);
+                let mut session = Self::new(path, None, cx);
                 session._load = Task::ready(());
                 session.result = Some(Err(
                     "This destination is being saved. Open it after saving finishes.".into(),
@@ -111,25 +121,39 @@ impl DocumentSession {
             return session;
         }
         let load_path = path.clone();
-        let session = cx.new(|cx| Self::new(load_path, cx));
+        let session = cx.new(|cx| Self::new(load_path, None, cx));
         let registry = &mut cx.global_mut::<Sessions>().open;
         registry.retain(|_, session| session.upgrade().is_some());
         registry.insert(path, session.downgrade());
         session
     }
 
-    fn new(path: PathBuf, cx: &mut Context<Self>) -> Self {
-        let load_path = path.clone();
-        let work = cx.background_executor().spawn(async move {
-            let document = pdf::Document::open(&load_path)?;
-            if document.pages().is_empty() {
-                return Err("PDF has no pages".into());
-            }
-            Ok(Arc::new(document))
-        });
+    fn new(path: PathBuf, preview: Option<Arc<pdf::Document>>, cx: &mut Context<Self>) -> Self {
+        let load = if preview.is_some() {
+            Task::ready(())
+        } else {
+            let load_path = path.clone();
+            cx.spawn(async move |this, cx| {
+                let result = cx
+                    .background_spawn(async move {
+                        let document = pdf::Document::open(&load_path)?;
+                        if document.pages().is_empty() {
+                            return Err("PDF has no pages".into());
+                        }
+                        Ok(Arc::new(document))
+                    })
+                    .await;
+                let _ = this.update(cx, |this: &mut Self, cx| {
+                    this.result = Some(result);
+                    this.watch_external(cx);
+                    cx.notify();
+                });
+            })
+        };
         Self {
             path,
-            result: None,
+            unsaved_preview: preview.is_some(),
+            result: preview.map(Ok),
             epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             revision: 0,
             annotations: None,
@@ -161,14 +185,7 @@ impl DocumentSession {
             external_error: None,
             external_pages: Vec::new(),
             participants: HashSet::new(),
-            _load: cx.spawn(async move |this, cx| {
-                let result = work.await;
-                let _ = this.update(cx, |this, cx| {
-                    this.result = Some(result);
-                    this.watch_external(cx);
-                    cx.notify();
-                });
-            }),
+            _load: load,
         }
     }
 
@@ -186,7 +203,11 @@ impl DocumentSession {
         self.preview_error.as_deref()
     }
 
-    pub(super) fn path(&self) -> &std::path::Path {
+    pub(crate) fn is_preview(&self) -> bool {
+        self.unsaved_preview
+    }
+
+    pub(crate) fn path(&self) -> &std::path::Path {
         &self.path
     }
 
@@ -459,6 +480,9 @@ impl DocumentSession {
     }
 
     pub(crate) fn start_save(&mut self, cx: &mut Context<Self>) -> Result<u64, String> {
+        if self.is_preview() {
+            return Err("Choose a location to save this PDF.".into());
+        }
         self.start_write(None, cx)
     }
 
@@ -470,14 +494,16 @@ impl DocumentSession {
         if self.is_saving() {
             return Err("This document is already being saved.".into());
         }
-        if let Some(reason) = self.editing_rejection() {
+        // An untouched preview is a byte-for-byte copy, not a PDF edit.
+        let copy_original = self.is_preview() && !self.is_dirty();
+        if !copy_original && let Some(reason) = self.editing_rejection() {
             return Err(reason.to_owned());
         }
         let document = self
             .result()
             .and_then(Result::ok)
             .ok_or("Document is not ready.")?;
-        if self.annotations.as_ref().is_none_or(Result::is_err) {
+        if !copy_original && self.annotations.as_ref().is_none_or(Result::is_err) {
             return Err("Document annotations are not ready.".into());
         }
         let path = destination.as_ref().map_or_else(
@@ -501,16 +527,17 @@ impl DocumentSession {
         let snapshot = self
             .annotations()
             .and_then(Result::ok)
-            .ok_or("Document annotations are not ready.")?;
+            .unwrap_or_else(|| self.saved_annotations.clone());
         let saved_snapshot = snapshot.clone();
         let original = self.original_annotations.clone();
         let editing_source = self
             .editing_source
             .clone()
-            .ok_or("Document is not ready.")?;
+            .unwrap_or_else(|| document.clone());
         let revision = self.revision;
         let serial = self.next_serial - 1;
         let source = self.path.clone();
+        let preview = self.is_preview();
         let epoch = self.epoch;
         self.save_ticket += 1;
         let ticket = self.save_ticket;
@@ -523,7 +550,7 @@ impl DocumentSession {
         let work = cx.background_executor().spawn(async move {
             let destination = match destination {
                 Some(destination) => {
-                    if destination.is_source(&source) {
+                    if !preview && destination.is_source(&source) {
                         return Err(SaveError::Failed(
                             "Save As must not replace the source file or one of its aliases."
                                 .into(),
@@ -539,7 +566,11 @@ impl DocumentSession {
                         .ok_or("The loaded file version is unavailable. Use Save As.")?,
                 )?),
             };
-            let bytes = editing_source.with_annotation_edits(&original, &snapshot)?;
+            let bytes = if copy_original {
+                document.bytes().to_vec()
+            } else {
+                editing_source.with_annotation_edits(&original, &snapshot)?
+            };
             // Validate/parse the exact intended output before committing it.
             let saved = pdf::Document::from_bytes(path, bytes)?;
             let metadata = destination.commit(saved.bytes())?;
@@ -559,17 +590,30 @@ impl DocumentSession {
                     registry.remove(&this.path);
                     registry.insert(destination.clone(), owner.clone());
                     this.path = destination;
+                    this.unsaved_preview = false;
+                    if preview && let Some(history) = crate::recent::history(cx) {
+                        let record = history.record(this.path.clone());
+                        cx.spawn(async move |_, _| {
+                            if let Err(error) = record.await {
+                                eprintln!("Could not record saved PDF in Open Recent: {error}");
+                            }
+                        })
+                        .detach();
+                    }
                     if this.revision == revision {
                         this.preview = Some(document.clone());
                         this.preview_work = None;
                     }
                     this.result = Some(Ok(document));
-                    this.saved_annotations = saved_snapshot;
+                    if !copy_original {
+                        this.saved_annotations = saved_snapshot;
+                    }
                     this.update_dirty();
                     this.saved_serial = serial;
                     this.external_conflict = false;
                     this.external_notice = false;
                     this.external_error = None;
+                    this.watch_external(cx);
                     if this.revision != revision {
                         // Save As changes relative-link resolution for every
                         // participant, including newer in-flight preview work.

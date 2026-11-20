@@ -82,6 +82,22 @@ use gpui_kit::{
     },
 };
 
+/// A file needs loading; a preview already has a shared, memory-backed session.
+#[derive(Clone)]
+pub(crate) enum DocumentSource {
+    File(PathBuf),
+    Session(Entity<DocumentSession>),
+}
+
+impl DocumentSource {
+    pub(crate) fn name_or_path(&self, cx: &App) -> PathBuf {
+        match self {
+            Self::File(path) => path.clone(),
+            Self::Session(session) => session.read(cx).path().to_owned(),
+        }
+    }
+}
+
 /// Central PDF surface and pane-local session participation, independent of chrome.
 pub struct ReaderView {
     path: Option<PathBuf>,
@@ -150,6 +166,10 @@ pub(crate) enum DocumentEvent {
         generation: u64,
         path: PathBuf,
         page: usize,
+    },
+    OpenWebLink {
+        generation: u64,
+        url: String,
     },
     OpenDestinationWindow {
         generation: u64,
@@ -237,6 +257,14 @@ struct OpenRestoration {
 
 impl ReaderView {
     pub fn new(path: Option<PathBuf>, display_scale: f32, cx: &mut Context<Self>) -> Self {
+        Self::from_source(path.map(DocumentSource::File), display_scale, cx)
+    }
+
+    pub(crate) fn from_source(
+        source: Option<DocumentSource>,
+        display_scale: f32,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let settings = settings_ui::state(cx);
         cx.observe(&settings, |reader, _, cx| {
             reader.sync_page_colors(cx);
@@ -250,8 +278,11 @@ impl ReaderView {
         })
         .detach();
         let mut reader = Self {
-            path,
-            session: None,
+            path: source.as_ref().map(|source| source.name_or_path(cx)),
+            session: match source {
+                Some(DocumentSource::Session(session)) => Some(session),
+                _ => None,
+            },
             session_wait: None,
             session_observation: None,
             session_epoch: 0,
@@ -308,6 +339,10 @@ impl ReaderView {
 
     /// Replace the active document immediately, before any asynchronous work completes.
     pub fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.open_source(DocumentSource::File(path), cx);
+    }
+
+    pub(crate) fn open_source(&mut self, source: DocumentSource, cx: &mut Context<Self>) {
         self.invalidate_hints(cx);
         self.document_generation += 1;
         self.detach_session(cx);
@@ -326,7 +361,10 @@ impl ReaderView {
         self.page_text = page_text::PageTexts::default();
         self.ruler = ruler::Ruler::default();
         self.links.reset();
-        self.path = Some(path);
+        self.path = Some(source.name_or_path(cx));
+        if let DocumentSource::Session(session) = source {
+            self.session = Some(session);
+        }
         self.ruler_history = ruler_history::RulerHistory::default();
         self.record_path = None;
         self.position_ready = false;
@@ -576,12 +614,20 @@ impl ReaderView {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let history = recent::history(cx);
+        let history = if self.is_preview(cx) {
+            None
+        } else {
+            recent::history(cx)
+        };
         let restoration = OpenRestoration {
             epoch: history.as_ref().map(|history| history.epoch()),
             history,
             restore_position: settings.read(cx).reopen_at_last_position(),
         };
+        if let Some(session) = self.session.clone() {
+            self.attach_session(session, restoration, cx);
+            return;
+        }
         let generation = self.document_generation;
         let work = cx.background_executor().spawn(async move {
             std::fs::canonicalize(&path)
@@ -596,20 +642,7 @@ impl ReaderView {
                 match normalized {
                     Ok(path) => {
                         let session = DocumentSession::join(path, cx);
-                        let participant = cx.entity_id();
-                        session.update(cx, |session, _| session.attach(participant));
-                        let pending = restoration.clone();
-                        this.session_observation =
-                            Some(cx.observe(&session, |this, _, cx| this.sync_shared_session(cx)));
-                        this.session_wait = Some(cx.observe(&session, move |this, source, cx| {
-                            if this.document_generation == generation
-                                && this.session.as_ref() == Some(&source)
-                            {
-                                this.finish_session_load(pending.clone(), cx);
-                            }
-                        }));
-                        this.session = Some(session);
-                        this.finish_session_load(restoration, cx);
+                        this.attach_session(session, restoration, cx);
                     }
                     Err(error) => {
                         this.status = error.clone();
@@ -623,6 +656,26 @@ impl ReaderView {
             });
         })
         .detach();
+    }
+
+    fn attach_session(
+        &mut self,
+        session: Entity<DocumentSession>,
+        restoration: OpenRestoration,
+        cx: &mut Context<Self>,
+    ) {
+        let participant = cx.entity_id();
+        session.update(cx, |session, _| session.attach(participant));
+        let pending = restoration.clone();
+        self.session_observation =
+            Some(cx.observe(&session, |this, _, cx| this.sync_shared_session(cx)));
+        self.session_wait = Some(cx.observe(&session, move |this, source, cx| {
+            if this.session.as_ref() == Some(&source) {
+                this.finish_session_load(pending.clone(), cx);
+            }
+        }));
+        self.session = Some(session);
+        self.finish_session_load(restoration, cx);
     }
 
     fn finish_session_load(&mut self, restoration: OpenRestoration, cx: &mut Context<Self>) {
@@ -706,7 +759,7 @@ impl ReaderView {
                         if let Err(error) = saved_mode {
                             this.status = format!("Reading mode could not be loaded: {error}");
                         }
-                        this.record_path = Some(path.clone());
+                        this.record_path = (!this.is_preview(cx)).then(|| path.clone());
                         if let Some(history) = history {
                             this.load_ruler_anchor(&history, history_epoch.unwrap_or(0), cx);
                             let record =
@@ -1147,15 +1200,22 @@ impl ReaderView {
     }
 
     pub(crate) fn save_available(&self, cx: &App) -> bool {
-        self.is_dirty(cx) && self.save_as_available(cx)
+        (self.is_dirty(cx) || self.is_preview(cx)) && self.save_as_available(cx)
+    }
+
+    pub(crate) fn is_preview(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.read(cx).is_preview())
     }
 
     pub(crate) fn save_as_available(&self, cx: &App) -> bool {
         self.session.as_ref().is_some_and(|session| {
             let session = session.read(cx);
             !session.is_saving()
-                && session.editing_rejection().is_none()
-                && session.annotations().is_some_and(|catalog| catalog.is_ok())
+                && ((session.is_preview() && !session.is_dirty())
+                    || (session.editing_rejection().is_none()
+                        && session.annotations().is_some_and(|catalog| catalog.is_ok())))
         })
     }
 
@@ -1979,6 +2039,13 @@ impl ReaderView {
                 }
             },
             Some(pdf::LinkDestination::AnotherDocument { path, page }) => {
+                if self.is_preview(cx) {
+                    self.report_link_error(
+                        "This web PDF has no local folder for file links.".into(),
+                        cx,
+                    );
+                    return false;
+                }
                 cx.emit(DocumentEvent::OpenLinkedDocument {
                     generation,
                     path,
@@ -1987,7 +2054,7 @@ impl ReaderView {
                 false // Focus stays in the source window until the new one is ready.
             }
             Some(pdf::LinkDestination::WebUrl(url)) => {
-                cx.open_url(&url);
+                cx.emit(DocumentEvent::OpenWebLink { generation, url });
                 false
             }
             None => {
@@ -2374,7 +2441,7 @@ impl Render for ReaderView {
                             )
                         }
                         Some(pdf::LinkDestination::WebUrl(url)) => {
-                            format!("Open {url} in the default browser")
+                            format!("Open {url}")
                         }
                         None => "Unsupported PDF link".to_owned(),
                     };

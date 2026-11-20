@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Open HTTP(S) PDFs with **Open URL…**, from the command line, or by following
+  a link inside a PDF. Web pages still open in the browser when followed from a PDF.
+  Web PDFs stay in memory, without reading history, until explicitly saved.
 - Read two locations in the same PDF side by side or stacked, with independent
   navigation history, zoom, selections, and reading rulers. Resize the panes
   with a draggable divider or manage them from the keyboard. Shared Find,

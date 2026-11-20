@@ -468,20 +468,21 @@ impl DocumentWindow {
             .into_any_element()
     }
 
-    pub(super) fn stage_replacement(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        self.stage_replacement_after_decision(path, false, cx);
+    pub(super) fn stage_replacement(&mut self, source: DocumentSource, cx: &mut Context<Self>) {
+        self.stage_replacement_after_decision(source, false, cx);
     }
 
     pub(super) fn stage_replacement_after_decision(
         &mut self,
-        path: PathBuf,
+        source: DocumentSource,
         discard: bool,
         cx: &mut Context<Self>,
     ) {
+        let target = source.name_or_path(cx);
         if self
             .recent_open
             .as_ref()
-            .is_some_and(|pending| pending.path != path)
+            .is_some_and(|pending| pending.path != target)
             && let Some(pending) = self.recent_open.take()
         {
             let _ = pending
@@ -489,14 +490,13 @@ impl DocumentWindow {
                 .update(cx, |picker, cx| picker.cancel_open(pending.request, cx));
         }
         let recent_request = self.recent_open.as_ref().map(|pending| pending.request);
-        let target = path.clone();
         let origin = self.reader.read(cx).session();
         let revision = origin.as_ref().map(|session| {
             let session = session.read(cx);
             (session.epoch(), session.revision())
         });
         let generation = self.reader.read(cx).document_generation();
-        let reader = cx.new(|cx| ReaderView::replacement(path, generation, cx));
+        let reader = cx.new(|cx| ReaderView::replacement(source, generation, cx));
         let handle = self.window;
         let subscription = cx.subscribe(&reader, move |this, source, event, cx| {
             let DocumentEvent::Opened { result, .. } = event else {

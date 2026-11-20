@@ -1,5 +1,6 @@
 use super::*;
 use crate::pdf;
+use gpui_kit::{Modifiers, px, size};
 
 fn hint_window(
     cx: &mut TestAppContext,
@@ -52,8 +53,12 @@ fn settle(cx: &mut TestAppContext, window: AnyWindowHandle) {
 }
 
 fn choose_link(cx: &mut TestAppContext, window: AnyWindowHandle, key: &str) {
-    cx.update_window(window, |_, frame, cx| frame.press(key, cx))
-        .unwrap();
+    cx.update_window(window, |_, frame, cx| {
+        for stroke in key.split_whitespace() {
+            frame.press(stroke, cx);
+        }
+    })
+    .unwrap();
     settle(cx, window);
     cx.update_window(window, |_, frame, cx| {
         assert!(frame.find("hint-aa").visible());
@@ -82,6 +87,69 @@ fn link_hints_follow_textless_rotated_pdf_and_record_history(cx: &mut TestAppCon
     })
     .unwrap();
     assert_eq!(reader.read_with(cx, |reader, _| reader.page_index()), 0);
+}
+
+#[gpui_kit::test]
+fn link_hints_create_a_split_and_modified_click_reuses_the_other_reader(cx: &mut TestAppContext) {
+    let (_root, window, document) = hint_window(cx, 5);
+    cx.update(|cx| crate::app::keymap::reload(cx, None, crate::app::keymap::Preset::Vim).unwrap());
+    cx.simulate_window_resize(window, size(px(1200.), px(1000.)));
+    settle(cx, window);
+    let first = document.read_with(cx, |document, _| document.reader().clone());
+
+    choose_link(cx, window, "g w f");
+    settle(cx, window);
+    let second = document.read_with(cx, |document, _| {
+        assert_ne!(document.reader(), &first);
+        assert_eq!(document.other_pane.as_ref().unwrap().reader, first);
+        document.reader().clone()
+    });
+    first.read_with(cx, |reader, _| assert_eq!(reader.page_index(), 0));
+    second.read_with(cx, |reader, _| {
+        assert_eq!(reader.page_index(), 1);
+        assert_eq!(reader.scale(), 1.5);
+        assert!((reader.reading_position().1 - 500.).abs() < 1.);
+    });
+    cx.update_window(window, |_, frame, cx| {
+        assert!(second.read(cx).focus_handle(cx).is_focused(frame));
+        let left = frame.find(("reading-pane", first.entity_id())).bounds();
+        let right = frame.find(("reading-pane", second.entity_id())).bounds();
+        assert!(left.right() <= right.left());
+        frame.dispatch_action(Box::new(SplitStacked), cx);
+    })
+    .unwrap();
+    second.update(cx, |reader, cx| {
+        reader.select_page(0, cx);
+        reader.fit_width(cx);
+    });
+    settle(cx, window);
+    let second_bounds = cx
+        .update_window(window, |_, frame, cx| {
+            let top = frame.find(("reading-pane", first.entity_id())).bounds();
+            let bottom = frame.find(("reading-pane", second.entity_id())).bounds();
+            assert!(top.bottom() <= bottom.top());
+            frame
+                .within(("reading-pane", second.entity_id()))
+                .click_with_modifiers("pdf-link-0-0", Modifiers::secondary_key(cx), cx);
+            bottom
+        })
+        .unwrap();
+    settle(cx, window);
+    document.read_with(cx, |document, _| {
+        assert_eq!(document.reader(), &first);
+        assert_eq!(document.other_pane.as_ref().unwrap().reader, second);
+    });
+    assert_eq!(first.read_with(cx, |reader, _| reader.page_index()), 1);
+    assert_eq!(second.read_with(cx, |reader, _| reader.page_index()), 0);
+    cx.update_window(window, |_, frame, cx| {
+        assert!(first.read(cx).focus_handle(cx).is_focused(frame));
+        assert_eq!(
+            frame.find(("reading-pane", second.entity_id())).bounds(),
+            second_bounds
+        );
+    })
+    .unwrap();
+    assert_eq!(cx.update(|cx| cx.windows().len()), 1);
 }
 
 #[gpui_kit::test]

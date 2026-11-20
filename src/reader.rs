@@ -110,6 +110,7 @@ pub struct ReaderView {
     position_ready: bool,
     position_touched: bool,
     pending_restore: Option<ReadingPosition>,
+    pending_split_destination: Option<(u64, pdf::OutlineDestination)>,
     recorded_position: Option<ReadingPosition>,
     scale: f32,
     zoom_mode: ZoomMode,
@@ -174,9 +175,20 @@ pub(crate) enum DocumentEvent {
         generation: u64,
         destination: pdf::OutlineDestination,
     },
+    OpenDestinationSplit {
+        generation: u64,
+        destination: pdf::OutlineDestination,
+    },
     Updated {
         generation: u64,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LinkDisposition {
+    CurrentPane,
+    NewWindow,
+    OtherPane,
 }
 
 impl gpui::EventEmitter<DocumentEvent> for ReaderView {}
@@ -279,6 +291,7 @@ impl ReaderView {
             position_ready: false,
             position_touched: false,
             pending_restore: None,
+            pending_split_destination: None,
             recorded_position: None,
             scale: 1.0,
             zoom_mode: ZoomMode::Fixed,
@@ -1827,6 +1840,13 @@ impl ReaderView {
         self.selected_page = refit.selected_page;
         self.page_index = refit.page;
         self.apply_fit(refit.page, refit.position, (width, height), refit.anchor);
+        if width > 0.0
+            && self.scroll.bounds().size.height > px(0.0)
+            && let Some((generation, destination)) = self.pending_split_destination.take()
+            && generation == self.document_generation
+        {
+            self.navigate_outline(destination, cx);
+        }
         self.record_position(cx);
         self.last_viewport = self.viewport();
         self.schedule(cx);
@@ -1981,22 +2001,13 @@ impl ReaderView {
         self.emit_jump(before, cx);
         cx.notify();
     }
-    fn activate_link(
-        &mut self,
-        generation: u64,
-        page: usize,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        self.follow_link(generation, page, index, false, cx)
-    }
 
     fn follow_link(
         &mut self,
         generation: u64,
         page: usize,
         index: usize,
-        new_window: bool,
+        disposition: LinkDisposition,
         cx: &mut Context<Self>,
     ) -> bool {
         if generation != self.document_generation {
@@ -2006,18 +2017,27 @@ impl ReaderView {
             return false;
         };
         match link.target().cloned() {
-            Some(pdf::LinkDestination::SameDocument(destination)) if new_window => {
-                cx.emit(DocumentEvent::OpenDestinationWindow {
-                    generation,
-                    destination,
-                });
-                false
-            }
-            Some(pdf::LinkDestination::SameDocument(destination)) => {
-                self.selection.clear();
-                self.navigate_outline(destination, cx);
-                true
-            }
+            Some(pdf::LinkDestination::SameDocument(destination)) => match disposition {
+                LinkDisposition::CurrentPane => {
+                    self.selection.clear();
+                    self.navigate_outline(destination, cx);
+                    true
+                }
+                LinkDisposition::NewWindow => {
+                    cx.emit(DocumentEvent::OpenDestinationWindow {
+                        generation,
+                        destination,
+                    });
+                    false
+                }
+                LinkDisposition::OtherPane => {
+                    cx.emit(DocumentEvent::OpenDestinationSplit {
+                        generation,
+                        destination,
+                    });
+                    true
+                }
+            },
             Some(pdf::LinkDestination::AnotherDocument { path, page }) => {
                 if self.is_preview(cx) {
                     self.report_link_error(
@@ -2213,6 +2233,13 @@ impl Render for ReaderView {
         if !self.focus_initialized {
             if self.focus_on_mount {
                 window.focus(&self.focus, cx);
+            }
+            if self.pending_split_destination.is_some() {
+                // The first layout populates the new pane's scroll bounds.
+                let reader = cx.weak_entity();
+                window.on_next_frame(move |_, cx| {
+                    let _ = reader.update(cx, |reader, cx| reader.sync_viewport(cx));
+                });
             }
             cx.observe_window_bounds(window, |reader, window, cx| {
                 reader.invalidate_hints(cx);
@@ -2414,7 +2441,7 @@ impl Render for ReaderView {
                             )
                         }
                         Some(pdf::LinkDestination::WebUrl(url)) => {
-                            format!("Open {url} in the default browser")
+                            format!("Open {url}")
                         }
                         None => "Unsupported PDF link".to_owned(),
                     };
@@ -2422,11 +2449,13 @@ impl Render for ReaderView {
                         div()
                             .id(id)
                             .test_support()
-                            .role(if matches!(link.target(), Some(pdf::LinkDestination::WebUrl(_))) {
-                                gpui::Role::Link
-                            } else {
-                                gpui::Role::Button
-                            })
+                            .role(
+                                if matches!(link.target(), Some(pdf::LinkDestination::WebUrl(_))) {
+                                    gpui::Role::Link
+                                } else {
+                                    gpui::Role::Button
+                                },
+                            )
                             .aria_label(label)
                             .absolute()
                             .left(px(left * self.scale))
@@ -2455,16 +2484,35 @@ impl Render for ReaderView {
                                     },
                                 ),
                             )
-                            .on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                                // Gesture ownership comes from mouse-down, even
-                                // if Option is released before mouse-up.
-                                if matches!(event, gpui::ClickEvent::Mouse(mouse) if mouse.down.modifiers.alt) {
-                                    return;
-                                }
-                                if this.activate_link(generation, index, link_index, cx) {
-                                    window.focus(&this.focus, cx);
-                                }
-                            })),
+                            .on_click(cx.listener(
+                                move |this, event: &gpui::ClickEvent, window, cx| {
+                                    // Gesture ownership comes from mouse-down, even
+                                    // if a modifier is released before mouse-up.
+                                    let disposition = match event {
+                                        gpui::ClickEvent::Mouse(mouse)
+                                            if mouse.down.modifiers.alt =>
+                                        {
+                                            return;
+                                        }
+                                        gpui::ClickEvent::Mouse(mouse)
+                                            if mouse.down.modifiers
+                                                == gpui::Modifiers::secondary_key(cx) =>
+                                        {
+                                            LinkDisposition::OtherPane
+                                        }
+                                        _ => LinkDisposition::CurrentPane,
+                                    };
+                                    if this.follow_link(
+                                        generation,
+                                        index,
+                                        link_index,
+                                        disposition,
+                                        cx,
+                                    ) {
+                                        window.focus(&this.focus, cx);
+                                    }
+                                },
+                            )),
                     );
                 }
             }
@@ -2562,10 +2610,13 @@ impl Render for ReaderView {
                 this.begin_selection(selection::Targeting::Lines, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FollowLink, window, cx| {
-                this.begin_link_hints(false, window, cx);
+                this.begin_link_hints(LinkDisposition::CurrentPane, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FollowLinkInNewWindow, window, cx| {
-                this.begin_link_hints(true, window, cx);
+                this.begin_link_hints(LinkDisposition::NewWindow, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FollowLinkInSplit, window, cx| {
+                this.begin_link_hints(LinkDisposition::OtherPane, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ApplyMarkup, window, cx| {
                 this.markup_selection(this.active_markup, window, cx)

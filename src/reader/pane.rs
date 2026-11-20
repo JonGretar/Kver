@@ -32,6 +32,7 @@ impl ReaderView {
     pub(crate) fn duplicate(&self, cx: &mut Context<Self>) -> Self {
         let mut pane = Self::new(None, self.display_scale, cx);
         pane.focus_on_mount = false;
+        pane.record_active = false;
         pane.path = self.path.clone();
         pane.session = self.session.clone();
         pane.session_epoch = self.session_epoch;
@@ -61,6 +62,21 @@ impl ReaderView {
                 Some(cx.observe(session, |pane, _, cx| pane.sync_shared_session(cx)));
         }
         pane
+    }
+
+    pub(crate) fn open_split_destination(
+        &mut self,
+        destination: pdf::OutlineDestination,
+        cx: &mut Context<Self>,
+    ) {
+        let size = self.scroll.bounds().size;
+        if size.width > px(0.) && size.height > px(0.) {
+            self.pending_split_destination = None;
+            self.navigate_outline(destination, cx);
+        } else {
+            self.pending_split_destination = Some((self.document_generation, destination));
+            cx.notify();
+        }
     }
 
     pub(crate) fn accepts_pane_command(&self, window: &Window) -> bool {

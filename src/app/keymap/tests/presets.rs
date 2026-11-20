@@ -23,6 +23,13 @@ fn follow_links_are_reader_scoped_in_every_preset_and_platform() {
                     assert_eq!(map.action(key, context), None);
                 }
             }
+            for context in [Context::Reader, Context::Global, Context::Sidebar] {
+                assert_eq!(
+                    map.action("g w f", context),
+                    (preset == Preset::Vim && context == Context::Reader)
+                        .then_some("kver::FollowLinkInSplit")
+                );
+            }
             let map = resolve_config(
                 "[[keyboard.bindings]]\nkeys = 'q'\ncontext = 'reader'\ncommand = 'follow-link-in-new-window'\n",
                 platform, preset,

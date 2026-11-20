@@ -22,6 +22,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   Linux and Windows while scrolling. Zoom follows the pointer and keeps page
   images visible while sharper replacements render.
 
+### Fixed
+
+- Custom keyboard shortcuts accept non-ASCII keys such as `ö`.
+
 ## [0.7.0] - 2026-11-16
 
 Select passages and follow links without reaching for the mouse. This release

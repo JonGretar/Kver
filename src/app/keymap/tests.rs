@@ -758,6 +758,35 @@ fn installed_policy_masks_global_keys_only_in_the_unbound_context(cx: &mut TestA
 }
 
 #[gpui_kit::test]
+fn unicode_reader_binding_matches_input(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        let map = resolve_config(
+            "[[keyboard.bindings]]\nkeys = 'ö'\ncontext = 'reader'\ncommand = 'next-page'\n",
+            platform(cx),
+            Preset::Standard,
+        )
+        .unwrap();
+        cx.bind_keys(map.bindings(cx));
+        let input = Keystroke {
+            key: "ö".into(),
+            key_char: Some("ö".into()),
+            modifiers: Default::default(),
+        };
+        let reader = [KeyContext::parse(key_context::READER).unwrap()];
+        let keymap = cx.key_bindings();
+        let bindings = keymap.borrow();
+        assert_eq!(
+            bindings
+                .bindings_for_input(&[input], &reader)
+                .0
+                .first()
+                .map(|binding| binding.action().name()),
+            Some("kver::NextPage")
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn contents_unbind_masks_the_parent_sidebar_key(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);

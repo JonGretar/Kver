@@ -346,7 +346,7 @@ fn visual_select_commits_inclusive_forward_reverse_and_same_word_in_both_layouts
             cx.update_window(handle, |_, window, cx| {
                 assert!(window.try_find("hint-input").is_none());
                 assert!(reader.read(cx).focus_handle(cx).is_focused(window));
-                window.press("secondary-c", cx);
+                window.press("y", cx);
                 assert_eq!(
                     cx.read_from_clipboard().and_then(|item| item.text()),
                     Some(expected.to_owned()),

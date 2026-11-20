@@ -228,6 +228,8 @@ commands! {
         "switch-pane" => SwitchPane, "close-pane" => ClosePane,
         "keep-only-pane" => KeepOnlyPane,
         "quit" => Quit, "about-kver" => AboutKver, "check-for-updates" => CheckForUpdates,
+        "open-kver-website" => crate::app::commands::OpenKverWebsite,
+        "open-vim-tutor" => crate::app::commands::OpenVimTutor,
         "show-settings" => ShowSettings, "close-settings" => CloseSettings,
         "close-about" => CloseAbout, "command-palette" => ShowCommandPalette,
         "show-contents" => ShowContents, "show-find" => ShowFind,

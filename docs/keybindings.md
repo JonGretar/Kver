@@ -110,7 +110,7 @@ by the current keyboard configuration:
 
 | Task | Commands |
 | --- | --- |
-| Application and windows | `open-pdf`, `open-url`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
+| Application and windows | `open-pdf`, `open-url`, `save`, `save-as`, `show-recent`, `new-window`, `close-window`, `next-window`, `previous-window`, `quit`, `about-kver`, `check-for-updates`, `open-kver-website`, `open-vim-tutor`, `show-settings`, `close-settings`, `close-about`, `command-palette` |
 | Reader and navigation | `next-page`, `previous-page`, `navigate-back`, `navigate-forward`, `document-start`, `document-end`, `read-down`, `read-up`, `scroll-down`, `scroll-up`, `scroll-left`, `scroll-right`, `scroll-screen-down`, `scroll-screen-up`, `scroll-half-screen-down`, `scroll-half-screen-up` |
 | Reader display | `zoom-in`, `zoom-out`, `fit-width`, `fit-page`, `single-page`, `continuous`, `use-default-reading-mode`, `toggle-pdf-dark-mode`, `copy` |
 | Split reading | `split-side-by-side`, `split-stacked`, `switch-pane`, `close-pane`, `keep-only-pane` |
@@ -271,9 +271,11 @@ Scrolling, zooming, resizing, changing the reading layout, or moving focus to
 another tool exits targeting; invoke Visual select again rather than reuse old
 labels. If there are too many visible words, zoom in and retry.
 
-The result is ordinary text selection: copy it or apply any text-markup type.
-Selection alone does not edit the PDF. This is not a caret or persistent Vim
-visual mode, and it does not select across pages.
+The result is ordinary text selection. In the Vim reader, press `y` to yank
+(copy) selected text to the clipboard, including text selected with the mouse.
+Command-C on macOS and Ctrl-C on Linux and Windows still work. You can also
+apply any text-markup type. Selection alone does not edit the PDF. This is
+not a caret or persistent Vim visual mode, and it does not select across pages.
 
 Standard has no bare-letter default. To assign a shortcut in either preset:
 

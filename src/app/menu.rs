@@ -6,6 +6,9 @@ use gpui_kit::{Action, AnyWindowHandle, App, AppContext as _};
 #[cfg(target_os = "macos")]
 use gpui_kit::{Global, Menu, MenuItem};
 
+#[cfg(target_os = "macos")]
+use super::commands::{OPEN_KVER_WEBSITE_LABEL, OPEN_VIM_TUTOR_LABEL};
+use super::commands::{OpenKverWebsite, OpenVimTutor, PROJECT_URL};
 use super::document_window::OpenPdf;
 #[cfg(target_os = "macos")]
 use super::document_window::{
@@ -25,6 +28,9 @@ use crate::reading_history::ShowRecent;
 use crate::settings_ui::ShowSettings;
 
 pub use super::commands::{AboutKver, CheckForUpdates, Quit};
+
+const VIM_TUTOR_URL: &str =
+    "https://raw.githubusercontent.com/JonGretar/Kver/main/examples/vim-tutor.pdf";
 
 /// A native-menu adapter, deliberately never bound to keys. Forward the
 /// original command through GPUI so bare reader bindings cannot become Cocoa
@@ -96,6 +102,8 @@ fn is_pane_action(action: &dyn Action) -> bool {
 pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
     "about-kver",
     "check-for-updates",
+    "open-kver-website",
+    "open-vim-tutor",
     "show-settings",
     "quit",
     "new-window",
@@ -193,6 +201,16 @@ pub fn install(cx: &mut App) {
         }
     });
     cx.on_action(|_: &Quit, cx| super::windows::request_quit(cx));
+    cx.on_action(|_: &OpenKverWebsite, cx| cx.open_url(PROJECT_URL));
+    cx.on_action(|_: &OpenVimTutor, cx| {
+        cx.defer(|cx| {
+            let result =
+                super::remote_pdf::parse_url(VIM_TUTOR_URL).and_then(|url| open_tutor(url, cx));
+            if let Err(error) = result {
+                eprintln!("Cannot open Vim Tutor: {error}");
+            }
+        });
+    });
     cx.on_action(|_: &super::document_window::OpenUrl, cx| {
         if cx.windows().is_empty() {
             match super::windows::open(cx, None) {
@@ -223,6 +241,20 @@ pub fn install(cx: &mut App) {
     })
     .detach();
     refresh_navigation(cx, false, false);
+}
+
+fn open_tutor(
+    url: url::Url,
+    cx: &mut App,
+) -> Result<gpui_kit::Entity<super::document_window::DocumentWindow>, String> {
+    use super::windows::{self, OpenMode};
+
+    // Practice in a separate window without replacing the current document.
+    let tutor = windows::open(cx, None)?;
+    tutor.update(cx, |tutor, cx| {
+        tutor.open_remote_pdf(url, OpenMode::Reuse, false, cx);
+    });
+    Ok(tutor)
 }
 
 /// Native menus snapshot both the resolved keymap and the active window's
@@ -325,6 +357,10 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                     MenuItem::action("Next Window", NextWindow),
                     MenuItem::action("Previous Window", PreviousWindow),
                 ]),
+                Menu::new("Help").items([
+                    MenuItem::action(OPEN_KVER_WEBSITE_LABEL, OpenKverWebsite),
+                    MenuItem::action(OPEN_VIM_TUTOR_LABEL, OpenVimTutor),
+                ]),
             ],
             cx,
         ));
@@ -393,6 +429,65 @@ mod tests {
     use gpui_kit::{
         InputEvent as _, KeyUpEvent, Keystroke, TestAppContext, test::TestWindowExt as _,
     };
+
+    #[cfg(target_os = "macos")]
+    #[gpui_kit::test]
+    fn help_menu_lists_exactly_the_website_and_vim_tutor(cx: &mut TestAppContext) {
+        use gpui_kit::OwnedMenuItem;
+
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            install(cx);
+            let help = cx
+                .get_menus()
+                .unwrap()
+                .into_iter()
+                .find(|menu| menu.name == "Help")
+                .unwrap();
+            assert_eq!(help.items.len(), 2);
+            for (item, (label, expected_action)) in help.items.iter().zip([
+                ("Open Kver Website", "kver::OpenKverWebsite"),
+                ("Open Vim Tutor", "kver::OpenVimTutor"),
+            ]) {
+                let OwnedMenuItem::Action {
+                    name,
+                    action,
+                    disabled,
+                    ..
+                } = item
+                else {
+                    panic!("expected an enabled Help command");
+                };
+                assert_eq!(name.as_str(), label);
+                assert_eq!(action.name(), expected_action);
+                assert!(!disabled);
+            }
+        });
+        cx.update(|cx| cx.dispatch_action(&OpenKverWebsite));
+        assert_eq!(cx.opened_url().as_deref(), Some(PROJECT_URL));
+    }
+
+    #[gpui_kit::test]
+    fn vim_tutor_opens_a_web_preview_without_replacing_the_document(cx: &mut TestAppContext) {
+        use super::super::{remote_pdf, windows};
+
+        let url = remote_pdf::tests::serve(std::fs::read("examples/vim-tutor.pdf").unwrap(), 1);
+        let (original, tutor) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            let original = windows::open(cx, Some("examples/readme-sample.pdf".into())).unwrap();
+            let tutor = open_tutor(url, cx).unwrap();
+            (original, tutor)
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_eq!(cx.windows().len(), 2);
+            assert_eq!(original.read(cx).reader().read(cx).page_count(), Some(100));
+            let reader = tutor.read(cx).reader().read(cx);
+            assert_eq!(reader.page_count(), Some(9));
+            assert!(reader.is_preview(cx));
+            assert!(reader.record_path().is_none());
+        });
+    }
 
     #[gpui_kit::test]
     fn about_kver_opens_one_window_and_can_reopen_after_dismissal(cx: &mut TestAppContext) {

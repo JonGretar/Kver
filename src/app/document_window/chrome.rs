@@ -23,6 +23,7 @@ use super::{
     SplitStacked, SwitchPane,
 };
 use crate::{
+    app::commands::{OPEN_KVER_WEBSITE_LABEL, OPEN_VIM_TUTOR_LABEL, OpenKverWebsite, OpenVimTutor},
     pdf::annotations::{HighlightColor, MarkupKind},
     reader::{
         Continuous, FitPage, FitWidth, NextPage, PreviousPage, ReaderView, ReadingMode, SinglePage,
@@ -44,7 +45,7 @@ pub(super) fn application_menu(
         .when(compact, |button| button.tooltip("Application menu"))
         .ghost()
         .small()
-        .dropdown_menu(move |menu, _, cx| {
+        .dropdown_menu(move |menu, window, cx| {
             let Some(reader) = reader.upgrade() else {
                 return menu;
             };
@@ -120,6 +121,18 @@ pub(super) fn application_menu(
                 crate::app::menu::AboutKver,
                 true,
             ))
+            .submenu("Help", window, cx, |menu, _, _| {
+                menu.item(application_menu_item(
+                    OPEN_KVER_WEBSITE_LABEL,
+                    OpenKverWebsite,
+                    true,
+                ))
+                .item(application_menu_item(
+                    OPEN_VIM_TUTOR_LABEL,
+                    OpenVimTutor,
+                    true,
+                ))
+            })
             .separator()
             .item(application_menu_item(
                 "Quit Kver",

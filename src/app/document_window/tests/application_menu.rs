@@ -48,6 +48,35 @@ fn formatted(cx: &mut TestAppContext, keys: &str) -> String {
 }
 
 #[gpui_kit::test]
+fn in_window_help_reaches_the_project_site_and_lists_the_tutor(cx: &mut TestAppContext) {
+    setup_menu(cx);
+    cx.update(menu::install);
+    let (handle, _) = open(cx, None);
+    cx.run_until_parked();
+    open_menu(cx, handle);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let help = window
+            .within("popup-menu")
+            .find_by_label("Help")
+            .bounds()
+            .center();
+        window.pointer_move(help, None, cx);
+        window.render_frame(cx);
+        assert!(window.find("kver::OpenVimTutor").visible());
+        let website = window.find("kver::OpenKverWebsite").bounds().center();
+        window.pointer_down(website, gpui_kit::MouseButton::Left, cx);
+        window.pointer_up(website, gpui_kit::MouseButton::Left, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some(crate::app::commands::PROJECT_URL)
+    );
+}
+
+#[gpui_kit::test]
 fn menu_routes_application_commands_to_existing_owners(cx: &mut TestAppContext) {
     setup_menu(cx);
     cx.update(|cx| {

@@ -134,7 +134,7 @@ fn stale_link_activation_cannot_navigate_replacement(cx: &mut TestAppContext) {
     let generation = reader.read_with(cx, |reader, _| reader.document_generation());
     reader.update(cx, |reader, cx| {
         reader.open_path(PathBuf::from("examples/field-guide.pdf"), cx);
-        reader.activate_link(generation, 0, 0, cx);
+        reader.follow_link(generation, 0, 0, LinkDisposition::CurrentPane, cx);
     });
     cx.run_until_parked();
     reader.read_with(cx, |reader, _| {

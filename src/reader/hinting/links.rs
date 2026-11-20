@@ -4,6 +4,10 @@ use super::*;
 
 impl ReaderView {
     pub(super) fn prepare_link_hints(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let same_document_only =
+            self.hints.active.as_ref().is_some_and(|session| {
+                matches!(session.mode, Mode::Links(LinkDisposition::OtherPane))
+            });
         let (top, _, height) = self.viewport();
         let visible = self.layout().visible_pages(top, height);
         if visible.clone().any(|page| self.links.failed(page)) {
@@ -54,6 +58,11 @@ impl ReaderView {
                 .iter()
                 .enumerate()
             {
+                if same_document_only
+                    && !matches!(link.target(), Some(pdf::LinkDestination::SameDocument(_)))
+                {
+                    continue;
+                }
                 regions.push((page, ix, link.page_rect(), link.document_rect()));
             }
         }
@@ -99,6 +108,9 @@ impl ReaderView {
                 };
                 session.state = match result {
                     Ok(snapshot) => State::Links(Arc::new(snapshot)),
+                    Err(hint::Refusal::NoText) if same_document_only => {
+                        State::Refused("No visible links within this PDF")
+                    }
                     Err(hint::Refusal::NoText) => State::Refused("No visible links to follow"),
                     Err(hint::Refusal::Crowded) => {
                         State::Refused("Hints are too crowded. Zoom in and try again.")

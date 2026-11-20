@@ -37,6 +37,11 @@ context = "reader"
 command = "follow-link-in-new-window"
 
 [[keyboard.bindings]]
+keys = "g w f"
+context = "reader"
+command = "follow-link-in-split"
+
+[[keyboard.bindings]]
 keys = "v"
 context = "reader"
 command = "visual-select"

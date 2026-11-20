@@ -862,6 +862,14 @@ impl DocumentWindow {
             }
             return;
         }
+        if let DocumentEvent::OpenDestinationSplit {
+            generation,
+            destination,
+        } = event
+        {
+            self.open_destination_in_split(*generation, *destination, window, cx);
+            return;
+        }
         if let DocumentEvent::OpenLinkedDocument {
             generation,
             path,
@@ -876,6 +884,7 @@ impl DocumentWindow {
             | DocumentEvent::Opened { generation, .. }
             | DocumentEvent::Updated { generation } => *generation,
             DocumentEvent::OpenLinkedDocument { .. }
+            | DocumentEvent::OpenDestinationSplit { .. }
             | DocumentEvent::OpenDestinationWindow { .. } => unreachable!(),
         };
         if generation != self.reader.read(cx).document_generation() {
@@ -1047,6 +1056,9 @@ impl Render for DocumentWindow {
             .on_action(cx.listener(Self::route_selection_action::<crate::reader::FollowLink>))
             .on_action(
                 cx.listener(Self::route_selection_action::<crate::reader::FollowLinkInNewWindow>),
+            )
+            .on_action(
+                cx.listener(Self::route_selection_action::<crate::reader::FollowLinkInSplit>),
             )
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::ApplyMarkup>))
             .on_action(cx.listener(Self::route_reader_action::<crate::reader::Highlight>))

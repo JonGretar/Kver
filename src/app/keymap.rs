@@ -403,7 +403,8 @@ fn parse(keys: &str, os: OperatingSystem) -> Result<Vec<Keystroke>, Diagnostic> 
             let stroke = Keystroke::parse_with_os(key, os)
                 .map_err(|_| Diagnostic::InvalidSequence(keys.into()))?;
             let name = stroke.key.as_str();
-            let known = (name.len() == 1 && name.is_ascii())
+            let mut chars = name.chars();
+            let known = matches!((chars.next(), chars.next()), (Some(c), None) if !c.is_control())
                 || matches!(
                     name,
                     "space"

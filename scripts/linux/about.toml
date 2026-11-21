@@ -10,3 +10,6 @@ ignore-build-dependencies = true
 
 [private]
 ignore = true
+
+[webpki-roots]
+accepted = ["CDLA-Permissive-2.0"]

@@ -22,22 +22,29 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
-      - name: Validate existing release for manual recovery
+          python-version: '3.12'
+      - name: Prepare existing release for manual recovery
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          git check-ref-format "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid release tag ref' }
+          gh release view --repo "$env:GITHUB_REPOSITORY" -- "$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery requires an existing release' }
+          git fetch --no-tags origin "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release tag fetch failed' }
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Release source checkout failed' }
           python scripts/release-metadata.py --tag "$env:RELEASE_TAG"
           if ($LASTEXITCODE -ne 0) { throw 'Release metadata validation failed' }
-          gh release view "$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Recovery requires an existing release' }
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
+          # Build the tagged source with the current notice policy only.
+          git restore --source="$env:GITHUB_SHA" -- scripts/windows/about.toml
+          if ($LASTEXITCODE -ne 0) { throw 'License policy restore failed' }
       - name: Initialize x64 MSVC and Windows SDK
         shell: pwsh
         run: |

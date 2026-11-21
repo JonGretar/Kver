@@ -2,6 +2,12 @@ name: Experimental Linux archive
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to rebuild and attach Linux assets
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,6 +21,19 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Prepare existing release for manual recovery
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          gh release view --repo "$GITHUB_REPOSITORY" -- "$RELEASE_TAG"
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          git checkout --detach FETCH_HEAD
+          python3 scripts/release-metadata.py --tag "$RELEASE_TAG"
+          # Build the tagged source with the current notice policy only.
+          git restore --source="$GITHUB_SHA" -- scripts/linux/about.toml
       - name: Install Ubuntu build and loader-inspection requirements
         run: |
           sudo apt-get update -qq
@@ -36,7 +55,7 @@ jobs:
       - name: Upload experimental archive and checksum to release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
           gh release upload "$RELEASE_TAG" \

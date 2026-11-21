@@ -110,9 +110,11 @@ The tag-only workflow validates metadata and signing configuration, packages
 the app, signs/verifies updates, and marks the release latest. After macOS
 publication, it builds experimental Linux and Windows archives and uploads
 them with their checksums to the same release. These builds do not run on PRs.
-Their failures leave the macOS release available; rerun failed jobs after
-resolving the failure. Experimental archives are not part of the Sparkle feed.
-Do not use a production tag to test CI.
+Experimental archives are not part of the Sparkle feed. If an archive job
+fails, the macOS release stays available. Rerun a transient failure, or, after
+landing a license-policy fix, run the affected archive workflow manually from
+`main` with `release_tag` set to the existing release tag. It builds the tagged
+source using the current notice policy. Do not move the release tag.
 
 ## Native quit checks after dependency upgrades
 

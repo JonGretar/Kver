@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fetch a pinned, checksum-verified SDK into ignored build output.
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 version=2.10.1
 sha256=1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27
 destination="${CARGO_TARGET_DIR:-target}/sparkle/$version"

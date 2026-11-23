@@ -1,6 +1,6 @@
 """Exercise the packaged installer on an actual extracted Linux archive.
 
-Usage: python3 scripts/test_linux_install.py EXTRACTED_PACKAGE [--version X.Y.Z]
+Usage: python3 packaging/tests/test_linux_install.py EXTRACTED_PACKAGE [--version X.Y.Z]
 All user directories and mutations are contained in a workspace-local fixture.
 """
 
@@ -16,7 +16,7 @@ import tempfile
 
 
 def verify(source, version=None, custom_data=True):
-    workspace = Path(__file__).resolve().parents[1] / "target"
+    workspace = Path(__file__).resolve().parents[2] / "target"
     workspace.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="linux install ", dir=workspace) as temp:
         base = Path(temp)

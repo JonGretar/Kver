@@ -39,7 +39,7 @@ class UpdateSignatureTests(unittest.TestCase):
             [
                 "xcrun",
                 "swiftc",
-                pathlib.Path(__file__).with_name("verify-update-signatures.swift"),
+                pathlib.Path(__file__).parents[1] / "macos/verify-update-signatures.swift",
                 "-o",
                 cls.verifier,
             ],

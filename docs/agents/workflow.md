@@ -72,7 +72,7 @@ GitHub issue or PR, not in architecture docs or a test diary.
    expected checks block landing; intentionally disabled matrix entries are
    not expected checks and need no per-PR waiver. Keep the separate real-Mac
    manual check for native window/input changes. Before tagging a release, run
-   the unsigned archive verification in `scripts/package-macos-app.sh` on an Apple
+   the unsigned archive verification in `packaging/macos/package.sh` on an Apple
    silicon Mac; see [macOS releases](../releasing.md) for the full procedure.
    An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree

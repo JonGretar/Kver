@@ -16,6 +16,10 @@ jobs:
   archive:
     name: Experimental Ubuntu x86-64 tarball (not native GUI acceptance)
     runs-on: ubuntu-24.04
+    env:
+      PACKAGE_METADATA: packaging/common/release-metadata.py
+      PACKAGE_TESTS: packaging/tests
+      PACKAGE_ENTRY: packaging/linux/package.sh
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -26,14 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          git check-ref-format "refs/tags/$RELEASE_TAG"
-          gh release view --repo "$GITHUB_REPOSITORY" -- "$RELEASE_TAG"
-          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
-          git checkout --detach FETCH_HEAD
-          python3 scripts/release-metadata.py --tag "$RELEASE_TAG"
-          # Build the tagged source with the current notice policy only.
-          git restore --source="$GITHUB_SHA" -- scripts/linux/about.toml
+        run: python3 packaging/common/prepare-archive-recovery.py linux "$RELEASE_TAG"
       - name: Install Ubuntu build and loader-inspection requirements
         run: |
           sudo apt-get update -qq
@@ -49,15 +46,15 @@ jobs:
         with:
           cache-on-failure: true
       - name: Test archive rejection checks
-        run: python3 -m unittest discover -s scripts -p test_linux_package.py
+        run: python3 -m unittest discover -s "$PACKAGE_TESTS" -p test_linux_package.py
       - name: Build, package and verify clean extraction
-        run: sh scripts/package-linux.sh
+        run: sh "$PACKAGE_ENTRY"
       - name: Upload experimental archive and checksum to release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
+          version=$(python3 "$PACKAGE_METADATA" --tag "$RELEASE_TAG")
           gh release upload "$RELEASE_TAG" \
             "target/x86_64-unknown-linux-gnu/release/Kver-v${version}-experimental-linux-x86_64.tar.gz" \
             "target/x86_64-unknown-linux-gnu/release/Kver-v${version}-experimental-linux-x86_64.tar.gz.sha256" \

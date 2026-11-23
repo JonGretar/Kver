@@ -1,14 +1,16 @@
 pkgbase = kver
 	pkgdesc = Fast PDF reader with Vim-style navigation (GPUI)
 	pkgver = 0.8.0
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/JonGretar/Kver
 	arch = x86_64
 	license = MIT
 	makedepends = cargo
+	makedepends = cargo-about
 	makedepends = clang
 	makedepends = cmake
 	makedepends = pkgconf
+	makedepends = python
 	depends = fontconfig
 	depends = libxkbcommon
 	depends = libxkbcommon-x11

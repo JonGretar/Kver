@@ -11,7 +11,7 @@ checks; results belong in the release PR, not in this document.
 On an Apple silicon Mac:
 
 ```sh
-sh scripts/package-macos-app.sh
+sh packaging/macos/package.sh
 ```
 
 This builds an optimized app, verifies its version, architecture, resources,
@@ -25,7 +25,7 @@ Check for Updates. For an update-enabled candidate, supply the production
 
 ```sh
 export KVER_UPDATE_PUBLIC_KEY='your-base64-public-key'
-sh scripts/package-macos-app.sh
+sh packaging/macos/package.sh
 ```
 
 The builder fetches the pinned, checksum-verified Sparkle SDK and bundles it.
@@ -37,7 +37,7 @@ Sparkle signing is independent of Apple Developer ID signing/notarization.
 On a trusted Mac, generate the production key:
 
 ```sh
-sdk=$(sh scripts/fetch-sparkle.sh)
+sdk=$(sh packaging/macos/fetch-sparkle.sh)
 "$sdk/bin/generate_keys" --account Kver
 ```
 
@@ -97,7 +97,7 @@ update-enabled release before relying on that path.
 1. Set the package version in `Cargo.toml`; move changelog entries from
    `Unreleased` into exactly one `## [X.Y.Z] - YYYY-MM-DD` heading and leave
    a new `Unreleased` section.
-2. Run `python3 scripts/release-metadata.py --tag vX.Y.Z` and the candidate
+2. Run `python3 packaging/common/release-metadata.py --tag vX.Y.Z` and the candidate
    packaging/native checks above. Have the release change reviewed and landed.
 3. Only with explicit authorization for that release, create and push its
    `vX.Y.Z` tag. A tag push triggers publication; ordinary pushes and PRs do not.

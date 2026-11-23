@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    "linux_package", Path(__file__).parent / "linux/package.py"
+    "linux_package", Path(__file__).parents[1] / "linux/package.py"
 )
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)

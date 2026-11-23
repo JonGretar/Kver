@@ -9,6 +9,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -196,13 +197,6 @@ def package(release, licenses):
     report = inspect_pe(executable, version)
     require(licenses.is_file() and "<pre>" in licenses.read_text(encoding="utf-8"),
             "Missing third-party license text")
-    metadata = json.loads(subprocess.check_output([
-        "cargo", "+stable", "metadata", "--locked", "--format-version", "1",
-        "--filter-platform", TARGET,
-    ], cwd=ROOT))
-    assets = [p for p in metadata["packages"] if p["name"] == "gpui-kit-assets"]
-    require(len(assets) == 1, "Cannot locate GPUI Kit artwork license")
-    lucide = Path(assets[0]["manifest_path"]).parent / "LICENSE-LUCIDE"
     sysroot = Path(subprocess.check_output(["rustc", "+stable", "--print", "sysroot"], text=True).strip())
     rust_docs = sysroot / "share/doc/rust"
     require((rust_docs / "COPYRIGHT.html").is_file()
@@ -215,7 +209,7 @@ def package(release, licenses):
         stage = Path(temp)
         for source, destination in (
             (executable, "kver.exe"), (ROOT / "LICENSE", "LICENSE"),
-            (licenses, "THIRD-PARTY-LICENSES.html"), (lucide, "licenses/LICENSE-LUCIDE"),
+            (licenses, "THIRD-PARTY-LICENSES.html"),
             (ROOT / "docs/windows.md", "README.md"),
             (ROOT / "docs/cli.md", "CLI.md"),
             (rust_docs / "COPYRIGHT.html", "licenses/rust/COPYRIGHT.html"),
@@ -224,19 +218,8 @@ def package(release, licenses):
             dest = stage / destination
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, dest)
-        # Preserve accompanying attribution notices in addition to the license
-        # texts collected by cargo-about (notably Apache NOTICE obligations).
-        for dependency in metadata["packages"]:
-            source_root = Path(dependency["manifest_path"]).parent
-            if source_root == ROOT:
-                continue
-            for notice in source_root.rglob("*"):
-                if notice.is_file() and notice.name.upper().startswith("NOTICE"):
-                    dest = (stage / "licenses/notices"
-                            / f"{dependency['name']}-{dependency['version']}"
-                            / notice.relative_to(source_root))
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(notice, dest)
+        subprocess.run([sys.executable, str(ROOT / "packaging/common/collect-notices.py"),
+                        str(ROOT), TARGET, str(stage / "licenses")], check=True)
         shutil.copytree(rust_docs / "licenses", stage / "licenses/rust/licenses")
         (stage / "PE-DEPENDENCIES.json").write_text(json.dumps(report, indent=2) + "\n")
         hashes = {p.relative_to(stage).as_posix(): digest(p)

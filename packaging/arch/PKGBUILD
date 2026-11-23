@@ -1,13 +1,13 @@
 # Maintainer: troyhy
 pkgname=kver
 pkgver=0.8.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Fast PDF reader with Vim-style navigation (GPUI)'
 arch=('x86_64')
 url='https://github.com/JonGretar/Kver'
 license=('MIT')
 depends=('fontconfig' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'vulkan-icd-loader' 'libglvnd' 'libx11' 'libxcb' 'xdg-desktop-portal')
-makedepends=('cargo' 'clang' 'cmake' 'pkgconf')
+makedepends=('cargo' 'cargo-about' 'clang' 'cmake' 'pkgconf' 'python')
 # makepkg's default LTO adds -flto=auto to CFLAGS; ring's C objects then fail to link under ld.lld.
 options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -16,7 +16,8 @@ sha256sums=('2535dbd7066a6b47869f76525e45b01defe5ecd4ae8d493e9fdef8d3d5f0777d')
 prepare() {
   cd "Kver-$pkgver"
   export RUSTUP_TOOLCHAIN=stable
-  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  # cargo-about resolves the locked graph before filtering it to Linux.
+  cargo fetch --locked
 }
 
 build() {
@@ -24,6 +25,9 @@ build() {
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release --bin kver
+  # Use the recipe checkout's approved policy, even for an older source tag.
+  cargo about generate --frozen --fail -c "$startdir/../linux/about.toml" \
+    -o target/THIRD-PARTY-LICENSES.html "$startdir/../common/licenses.hbs"
 }
 
 check() {
@@ -51,5 +55,9 @@ StartupWMClass=kver
 EOF
   install -Dm644 docs/cli.md "$pkgdir/usr/share/doc/$pkgname/cli.md"
   install -Dm644 docs/keybindings.md "$pkgdir/usr/share/doc/$pkgname/keybindings.md"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  local license_dir="$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 LICENSE "$license_dir/LICENSE"
+  install -Dm644 target/THIRD-PARTY-LICENSES.html "$license_dir/THIRD-PARTY-LICENSES.html"
+  python "$startdir/../common/collect-notices.py" "$PWD" x86_64-unknown-linux-gnu \
+    "$license_dir" --offline
 }

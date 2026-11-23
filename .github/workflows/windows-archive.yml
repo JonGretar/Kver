@@ -20,6 +20,11 @@ jobs:
   archive:
     name: Experimental x86-64 MSVC ZIP (not native GUI acceptance)
     runs-on: windows-2025
+    env:
+      PACKAGE_TOOLS: packaging
+      PACKAGE_METADATA: packaging/common/release-metadata.py
+      PACKAGE_TESTS: packaging/tests
+      PACKAGE_ENTRY: packaging/windows/package.ps1
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -31,20 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          git check-ref-format "refs/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Invalid release tag ref' }
-          gh release view --repo "$env:GITHUB_REPOSITORY" -- "$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Recovery requires an existing release' }
-          git fetch --no-tags origin "refs/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Release tag fetch failed' }
-          git checkout --detach FETCH_HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'Release source checkout failed' }
-          python scripts/release-metadata.py --tag "$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Release metadata validation failed' }
-          # Build the tagged source with the current notice policy only.
-          git restore --source="$env:GITHUB_SHA" -- scripts/windows/about.toml
-          if ($LASTEXITCODE -ne 0) { throw 'License policy restore failed' }
+        run: python packaging/common/prepare-archive-recovery.py windows "$env:RELEASE_TAG"
       - name: Initialize x64 MSVC and Windows SDK
         shell: pwsh
         run: |
@@ -62,7 +54,7 @@ jobs:
         run: |
           rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rust-docs
           if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
-          python -m pip install -r scripts/windows/requirements.txt
+          python -m pip install -r "$env:PACKAGE_TOOLS/windows/requirements.txt"
           if ($LASTEXITCODE -ne 0) { throw 'PE inspection tool installation failed' }
           cargo +stable install cargo-about --locked --version 0.9.3 --features cli
           if ($LASTEXITCODE -ne 0) { throw 'License tool installation failed' }
@@ -71,17 +63,17 @@ jobs:
           cache-on-failure: true
       - name: Test archive rejection checks
         shell: pwsh
-        run: python -m unittest discover -s scripts -p test_windows_package.py
+        run: python -m unittest discover -s "$env:PACKAGE_TESTS" -p test_windows_package.py
       - name: Build, package and verify clean extraction
         shell: pwsh
-        run: ./scripts/package-windows.ps1
+        run: '& "./$env:PACKAGE_ENTRY"'
       - name: Upload experimental archive and checksum to release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          $version = python scripts/release-metadata.py --tag "$env:RELEASE_TAG"
+          $version = python "$env:PACKAGE_METADATA" --tag "$env:RELEASE_TAG"
           if ($LASTEXITCODE -ne 0) { throw 'Release metadata validation failed' }
           gh release upload "$env:RELEASE_TAG" `
             "target/x86_64-pc-windows-msvc/release/Kver-v${version}-experimental-windows-x86_64.zip" `

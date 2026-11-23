@@ -23,12 +23,12 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           test -n "$SPARKLE_PRIVATE_KEY" || { echo "Configure the SPARKLE_PRIVATE_KEY Actions secret."; exit 1; }
-          python3 scripts/update-metadata.py
+          python3 packaging/macos/update-metadata.py
 
       - name: Validate tag, package version, and dated changelog
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: python3 scripts/release-metadata.py --tag "$RELEASE_TAG"
+        run: python3 packaging/common/release-metadata.py --tag "$RELEASE_TAG"
 
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal
@@ -40,15 +40,15 @@ jobs:
           fi
 
       - name: Build and verify Apple silicon archive
-        run: sh scripts/package-macos-app.sh
+        run: sh packaging/macos/package.sh
 
       - name: Sign update archive and feed
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
-          sdk=$(sh scripts/fetch-sparkle.sh)
+          version=$(python3 packaging/common/release-metadata.py --tag "$RELEASE_TAG")
+          sdk=$(sh packaging/macos/fetch-sparkle.sh)
           updates="$RUNNER_TEMP/kver-updates"
           mkdir -p "$updates"
           cp "target/release/Kver-v${version}-macos-arm64.zip" "$updates/"
@@ -58,7 +58,7 @@ jobs:
             --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/" \
             --full-release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG" \
             -o "$updates/appcast.xml" "$updates"
-          xcrun swift scripts/verify-update-signatures.swift \
+          xcrun swift packaging/macos/verify-update-signatures.swift \
             "$updates/appcast.xml" "$updates/Kver-v${version}-macos-arm64.zip"
 
       - name: Publish GitHub Release
@@ -66,8 +66,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          version=$(python3 scripts/release-metadata.py --tag "$RELEASE_TAG")
-          python3 scripts/release-metadata.py --tag "$RELEASE_TAG" --notes > "$RUNNER_TEMP/release-notes.md"
+          version=$(python3 packaging/common/release-metadata.py --tag "$RELEASE_TAG")
+          python3 packaging/common/release-metadata.py --tag "$RELEASE_TAG" --notes > "$RUNNER_TEMP/release-notes.md"
           printf '\nUnsigned Apple silicon macOS app. See the [download/security instructions](https://github.com/%s/blob/%s/README.md#install).\n' \
             "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$RUNNER_TEMP/release-notes.md"
           printf '\nExperimental Linux and Windows archives and checksums are added after their builds succeed. These are unsupported testing builds; packaging checks do not certify native GUI usability. See the [Linux guide](https://github.com/%s/blob/%s/docs/linux.md) and [Windows guide](https://github.com/%s/blob/%s/docs/windows.md).\n' \

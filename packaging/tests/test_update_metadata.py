@@ -3,7 +3,7 @@ import importlib.util
 import pathlib
 import unittest
 
-SCRIPT = pathlib.Path(__file__).with_name("update-metadata.py")
+SCRIPT = pathlib.Path(__file__).parents[1] / "macos/update-metadata.py"
 spec = importlib.util.spec_from_file_location("update_metadata", SCRIPT)
 update_metadata = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(update_metadata)

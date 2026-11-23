@@ -9,7 +9,7 @@ import warnings
 import zipfile
 
 spec = importlib.util.spec_from_file_location(
-    "windows_package", Path(__file__).parent / "windows/package.py"
+    "windows_package", Path(__file__).parents[1] / "windows/package.py"
 )
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)

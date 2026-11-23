@@ -7,7 +7,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 version=$(awk '
     /^\[package\]$/ { in_package = 1; next }
     /^\[/ { in_package = 0 }
@@ -26,8 +26,8 @@ fi
 # Validate before building/downloading; never consume a private signing key here.
 sparkle_dir=
 if [ -n "${KVER_UPDATE_PUBLIC_KEY:-}" ]; then
-    python3 scripts/update-metadata.py
-    sparkle_dir=$(sh scripts/fetch-sparkle.sh)
+    python3 packaging/macos/update-metadata.py
+    sparkle_dir=$(sh packaging/macos/fetch-sparkle.sh)
 elif [ -n "${KVER_UPDATE_FEED_URL:-}" ]; then
     echo "KVER_UPDATE_FEED_URL requires KVER_UPDATE_PUBLIC_KEY." >&2
     exit 1
@@ -80,7 +80,7 @@ if [ -n "$sparkle_dir" ]; then
     # ditto preserves Sparkle's framework and helper symlinks and signatures.
     ditto "$sparkle_dir/Sparkle.framework" "$stage/Contents/Frameworks/Sparkle.framework"
     install -m 644 "$sparkle_dir/LICENSE" "$stage/Contents/Resources/Sparkle-LICENSE"
-    python3 scripts/update-metadata.py "$stage/Contents/Info.plist"
+    python3 packaging/macos/update-metadata.py "$stage/Contents/Info.plist"
 fi
 
 plutil -lint "$stage/Contents/Info.plist"

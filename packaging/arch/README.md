@@ -1,7 +1,8 @@
 # Arch Linux package
 
-Unofficial `PKGBUILD`. Builds the tagged release from the GitHub source
-tarball with the system Rust (`cargo`), not the pinned `rust-toolchain.toml`.
+Unofficial `PKGBUILD`. Run it from a repository checkout so it can use the
+shared packaging licence tools. It builds the tagged GitHub source tarball
+with system Rust (`cargo`), not the pinned `rust-toolchain.toml`.
 
 ```sh
 cd packaging/arch
@@ -9,8 +10,8 @@ makepkg -sf
 sudo pacman -U kver-*-x86_64.pkg.tar.zst
 ```
 
-Installs `/usr/bin/kver`, `kver.desktop`, hicolor icons, docs and the licence.
-Does not set the default PDF reader.
+Installs `/usr/bin/kver`, `kver.desktop`, hicolor icons, docs and licence
+notices under `/usr/share/licenses/kver/`. Does not set the default PDF reader.
 
 - `options=('!lto')` is required. makepkg's default `-flto=auto` breaks linking
   of `ring` under `ld.lld`.
@@ -21,7 +22,7 @@ Does not set the default PDF reader.
 
 ## Bump to a new release
 
-1. Set `pkgver`, reset `pkgrel=1`.
+1. Set `pkgver` and reset `pkgrel=1`.
 2. `updpkgsums`
 3. `makepkg --printsrcinfo > .SRCINFO`
 4. Build and run `kver --version`.

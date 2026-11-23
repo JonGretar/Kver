@@ -10,6 +10,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -126,23 +127,18 @@ def verify_archive(archive, version, expected_hashes):
         require(output(str(stage / "kver"), "--version", cwd=unrelated).strip() == f"kver {version}",
                 "Extracted CLI identity/version mismatch")
         # Run the production installer against this exact extracted archive.
-        print(output("python3", str(ROOT / "scripts/test_linux_install.py"), str(stage),
+        print(output(sys.executable, str(ROOT / "packaging/tests/test_linux_install.py"), str(stage),
                      "--version", version), end="")
 
 
 def package(release, licenses):
     require(platform.system() == "Linux" and platform.machine() == "x86_64",
             "Native x86-64 Linux required")
-    version = output("python3", str(ROOT / "scripts/release-metadata.py"), "--version").strip()
+    version = output(sys.executable, str(ROOT / "packaging/common/release-metadata.py"), "--version").strip()
     executable = release / "kver"
     report = inspect_elf(executable)
     require(licenses.is_file() and "<pre>" in licenses.read_text(),
             "Missing dependency license text")
-    metadata = json.loads(output("cargo", "+stable", "metadata", "--locked",
-                                 "--format-version", "1", "--filter-platform", TARGET, cwd=ROOT))
-    assets = [p for p in metadata["packages"] if p["name"] == "gpui-kit-assets"]
-    require(len(assets) == 1, "Cannot locate GPUI Kit artwork license")
-    lucide = Path(assets[0]["manifest_path"]).parent / "LICENSE-LUCIDE"
     sysroot = Path(output("rustc", "+stable", "--print", "sysroot").strip())
     rust_docs = sysroot / "share/doc/rust"
     require(any((rust_docs / "licenses").glob("*")), "Install stable rust-docs for runtime licenses")
@@ -164,10 +160,10 @@ def package(release, licenses):
         stage = Path(temp)
         for source, destination in (
             (executable, "kver"), (ROOT / "LICENSE", "LICENSE"),
-            (licenses, "THIRD-PARTY-LICENSES.html"), (lucide, "licenses/LICENSE-LUCIDE"),
+            (licenses, "THIRD-PARTY-LICENSES.html"),
             (ROOT / "docs/linux.md", "README.md"), (ROOT / "docs/cli.md", "CLI.md"),
             (ROOT / "assets/icons/png/256.png", "resources/kver.png"),
-            (ROOT / "scripts/linux/install.py", "install.py"),
+            (ROOT / "packaging/linux/install.py", "install.py"),
             (rust_docs / "COPYRIGHT.html", "licenses/rust/COPYRIGHT.html"),
             (rust_docs / "COPYRIGHT-library.html", "licenses/rust/COPYRIGHT-library.html"),
         ):
@@ -175,18 +171,8 @@ def package(release, licenses):
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, dest)
         shutil.copytree(rust_docs / "licenses", stage / "licenses/rust/licenses")
-        # Preserve accompanying NOTICE obligations beyond cargo-about's license texts.
-        for dependency in metadata["packages"]:
-            source_root = Path(dependency["manifest_path"]).parent
-            if source_root == ROOT:
-                continue
-            for notice in source_root.rglob("*"):
-                if notice.is_file() and notice.name.upper().startswith("NOTICE"):
-                    dest = (stage / "licenses/notices"
-                            / f"{dependency['name']}-{dependency['version']}"
-                            / notice.relative_to(source_root))
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(notice, dest)
+        output(sys.executable, str(ROOT / "packaging/common/collect-notices.py"),
+               str(ROOT), TARGET, str(stage / "licenses"))
         for name, data in (("ELF-DEPENDENCIES.json", report), ("BUILD-INFO.json", build)):
             (stage / name).write_text(json.dumps(data, indent=2) + "\n")
         files = sorted(p for p in stage.rglob("*") if p.is_file())

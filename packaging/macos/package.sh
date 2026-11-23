@@ -7,9 +7,9 @@ if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
     exit 1
 fi
 
-cd "$(dirname "$0")/.."
-version=$(python3 scripts/release-metadata.py --version)
-sh scripts/build-macos-app.sh
+cd "$(dirname "$0")/../.."
+version=$(python3 packaging/common/release-metadata.py --version)
+sh packaging/macos/build-app.sh
 
 release_dir="${CARGO_TARGET_DIR:-target}/release"
 app="$release_dir/Kver.app"

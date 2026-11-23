@@ -74,7 +74,7 @@ window/input checks.
 ## Build a local macOS app
 
 ```sh
-sh scripts/build-macos-app.sh
+sh packaging/macos/build-app.sh
 open -n -a "$PWD/target/release/Kver.app"
 ```
 
@@ -99,7 +99,7 @@ sudo apt-get install --no-install-recommends \
   libvulkan1 mesa-vulkan-drivers libwayland-client0 libegl1 binutils
 rustup toolchain install stable --profile minimal --component rust-docs
 cargo +stable install cargo-about --locked --version 0.9.3 --features cli
-sh scripts/package-linux.sh
+sh packaging/linux/package.sh
 ```
 
 The entrypoint resolves the checkout from its script path, builds the locked
@@ -125,9 +125,9 @@ Rust and the build-only inspection/license tools:
 
 ```powershell
 rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --component rust-docs
-python -m pip install -r scripts/windows/requirements.txt
+python -m pip install -r packaging/windows/requirements.txt
 cargo +stable install cargo-about --locked --version 0.9.3 --features cli
-./scripts/package-windows.ps1
+./packaging/windows/package.ps1
 ```
 
 Python 3.11 or newer is required. The entrypoint resolves the repository from

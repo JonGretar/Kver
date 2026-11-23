@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-SCRIPT = pathlib.Path(__file__).with_name("release-metadata.py")
+SCRIPT = pathlib.Path(__file__).parents[1] / "common/release-metadata.py"
 spec = importlib.util.spec_from_file_location("release_metadata", SCRIPT)
 release_metadata = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release_metadata)

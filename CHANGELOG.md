@@ -7,10 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-27
+
+### Added
+
+- An unofficial Arch Linux package recipe for x86-64.
+
 ### Fixed
 
-- Release old page textures when switching PDFs, changing splits, zooming, or
-  scrolling so they do not accumulate over a reading session.
+- Switching PDFs, changing splits, zooming, and scrolling no longer leave old
+  page images in graphics memory.
 
 ## [0.8.0] - 2026-11-20
 

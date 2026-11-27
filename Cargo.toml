@@ -26,7 +26,7 @@ required-features = ["screenshot"]
 # Revisit when Corgi resolves metadata using the requested features.
 # Before upgrading GPUI Kit, run the native-quit checklist in docs/releasing.md.
 gpui-kit = { version = "=0.8.1", features = ["test-support"], optional = true }
-hayro = "0.8.0"
+hayro = "0.9.0"
 # Separate PDF writer; incremental encoding preserves the loaded baseline bytes.
 # Kept pinned to the version exercised by the annotation interchange fixtures.
 lopdf = { version = "=0.47.0", default-features = false }

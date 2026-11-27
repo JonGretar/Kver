@@ -180,7 +180,7 @@ impl Document {
             &self.pdf,
             page,
             InterpreterSettings {
-                render_annotations: false,
+                render_content: hayro::hayro_interpret::RenderContent::PAGE,
                 ..Default::default()
             },
         )?;
@@ -664,8 +664,9 @@ impl<'a> Device<'a> for TextCollector {
                 Glyph::Type3(_) => None,
             };
             let outline = match &**glyph {
-                Glyph::Outline(outline) if !outline.outline().elements().is_empty() => {
-                    Some((transform * outline.outline()).bounding_box())
+                Glyph::Outline(glyph) => {
+                    let path = glyph.outline();
+                    (!path.elements().is_empty()).then(|| (transform * path).bounding_box())
                 }
                 _ => None,
             };

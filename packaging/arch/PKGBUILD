@@ -1,7 +1,7 @@
 # Maintainer: troyhy
 pkgname=kver
-pkgver=0.8.0
-pkgrel=2
+pkgver=0.8.1
+pkgrel=1
 pkgdesc='Fast PDF reader with Vim-style navigation (GPUI)'
 arch=('x86_64')
 url='https://github.com/JonGretar/Kver'
@@ -11,7 +11,7 @@ makedepends=('cargo' 'cargo-about' 'clang' 'cmake' 'pkgconf' 'python')
 # makepkg's default LTO adds -flto=auto to CFLAGS; ring's C objects then fail to link under ld.lld.
 options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('2535dbd7066a6b47869f76525e45b01defe5ecd4ae8d493e9fdef8d3d5f0777d')
+sha256sums=('8869919944957a3d15cb1f93ad9330ea2aecb7011c6f18c067b7ddb76506f9bc')
 
 prepare() {
   cd "Kver-$pkgver"

@@ -46,7 +46,7 @@ pub(crate) use marks::{LocalMarks, MarksView};
 use navigation::{GAP, PAGE_PADDING, PageLayout, Position};
 pub use navigation::{ReadingMode, ZoomMode};
 pub(crate) use pane::PaneActivation;
-use rendering::{Completion, PageRasters, Schedule};
+use rendering::{Completion, PageRasters, Schedule, retire_images};
 use selection::Selection;
 
 use std::{
@@ -272,6 +272,7 @@ impl ReaderView {
         .detach();
         let participant = cx.entity_id();
         cx.on_release(move |reader, cx| {
+            reader.rasters.invalidate(retire_images(cx));
             if let Some(session) = &reader.session {
                 session.update(cx, |session, _| session.detach(participant));
             }
@@ -376,7 +377,7 @@ impl ReaderView {
         self.scale = 1.0;
         self.zoom_mode = ZoomMode::Fixed;
         self.pages.clear();
-        self.rasters.invalidate();
+        self.rasters.invalidate(retire_images(cx));
         self.page_index = 0;
         self.selected_page = None;
         self.scroll.set_offset(point(px(0.0), px(0.0)));
@@ -1042,7 +1043,7 @@ impl ReaderView {
             }
             self.document = Some(shared);
             self.links.reset();
-            self.rasters.invalidate();
+            self.rasters.invalidate(retire_images(cx));
             self.schedule(cx);
             self.status = if self.is_dirty(cx) {
                 "Newer changes remain unsaved".into()
@@ -1121,7 +1122,7 @@ impl ReaderView {
         self.page_text = page_text::PageTexts::default();
         self.ruler = ruler::Ruler::default();
         self.links.reset();
-        self.rasters.invalidate();
+        self.rasters.invalidate(retire_images(cx));
         self.find_highlight = None;
         self.annotation_identification = None;
         self.selected_annotation = None;
@@ -2142,7 +2143,7 @@ impl ReaderView {
         });
         if self.page_colors != colors {
             self.page_colors = colors;
-            self.rasters.invalidate();
+            self.rasters.invalidate(retire_images(cx));
             self.schedule(cx);
             cx.notify();
         }
@@ -2157,17 +2158,18 @@ impl ReaderView {
         };
         let (top, _, height) = self.viewport();
         let layout = PageLayout::new(&self.pages, self.scale, self.reading_mode, self.page_index);
-        let request = match self
-            .rasters
-            .schedule(&layout, top, height, self.display_scale)
-        {
-            Schedule::Unchanged => return,
-            Schedule::Ready => {
-                self.status = self.ready_status();
-                return;
-            }
-            Schedule::Render(request) => request,
-        };
+        let request =
+            match self
+                .rasters
+                .schedule(&layout, top, height, self.display_scale, retire_images(cx))
+            {
+                Schedule::Unchanged => return,
+                Schedule::Ready => {
+                    self.status = self.ready_status();
+                    return;
+                }
+                Schedule::Render(request) => request,
+            };
         self.status = format!(
             "Rendering page {} at {}%…",
             request.page() + 1,
@@ -2186,7 +2188,10 @@ impl ReaderView {
             let _ = this.update(cx, |this, cx| {
                 let (top, _, height) = this.viewport();
                 let visible = this.layout().visible_pages(top, height);
-                match this.rasters.finish(request, result, visible) {
+                match this
+                    .rasters
+                    .finish(request, result, visible, retire_images(cx))
+                {
                     Completion::Obsolete => return,
                     Completion::Accepted => {}
                     Completion::Failed(error) => this.status = error,
@@ -2264,7 +2269,7 @@ impl Render for ReaderView {
         let density = window.scale_factor();
         if self.display_scale != density {
             self.display_scale = density;
-            self.rasters.invalidate();
+            self.rasters.invalidate(retire_images(cx));
             self.schedule(cx);
         }
         if !self.pages.is_empty() && self.viewport() != self.last_viewport {

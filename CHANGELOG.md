@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Release old page textures when switching PDFs, changing splits, zooming, or
+  scrolling so they do not accumulate over a reading session.
+
 ## [0.8.0] - 2026-11-20
 
 Read two places in the same PDF at once, open PDFs from the web, and learn

@@ -118,7 +118,7 @@ impl ReaderView {
         self.marks = None;
         self.marks_subscriptions.clear();
         self.links.reset();
-        self.rasters.invalidate();
+        self.rasters.invalidate(super::retire_images(cx));
     }
 }
 

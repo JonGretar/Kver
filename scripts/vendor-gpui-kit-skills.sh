@@ -2,11 +2,12 @@
 # Reproduce the GPUI Kit skills from the same release as Cargo.toml.
 set -eu
 
-revision=99576db58ec8103417c41a092e891b4022d24e7e # v0.8.1
-source_dir=target/gpui-kit-skills-upstream
+tag=v0.11.0
+revision=e97fe438129c5e4ccab504f2e6fafd9a4e396bba
+source_dir=target/gpui-kit-skills-$tag
 
 if [ ! -d "$source_dir/.git" ]; then
-    git clone --depth 1 --filter=blob:none --sparse --branch v0.8.1 \
+    git clone --depth 1 --filter=blob:none --sparse --branch "$tag" \
         https://github.com/longbridge/gpui-kit.git "$source_dir"
 fi
 test "$(git -C "$source_dir" rev-parse HEAD)" = "$revision"

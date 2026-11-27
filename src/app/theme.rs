@@ -214,12 +214,11 @@ fn config(mode: ThemeMode) -> ThemeConfig {
     colors.chart_4 = color(p.yellow);
     colors.chart_5 = color(p.red);
     // Kit derives button/status hover and pressed states from these roles.
-    ThemeConfig {
-        name: name.into(),
-        mode,
-        colors,
-        ..Default::default()
-    }
+    let mut config = ThemeConfig::default();
+    config.name = name.into();
+    config.mode = mode;
+    config.colors = colors;
+    config
 }
 
 #[cfg(test)]

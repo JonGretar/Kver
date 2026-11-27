@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- PDF rendering now uses hinted text and includes fixes for embedded fonts,
+  transparent images, and malformed documents.
+
 ## [0.8.1] - 2026-11-27
 
 ### Added

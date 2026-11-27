@@ -52,7 +52,15 @@ fn pdf_dark_mode_override_is_local_unsaved_and_cleared_on_open(cx: &mut TestAppC
             reader.reading_position(),
         )
     });
+    cx.update_window(window, |_, window, _| {
+        assert!(window.has_image_atlas_entry(&old_image))
+    })
+    .unwrap();
     toggle(cx, window);
+    cx.update_window(window, |_, window, _| {
+        assert!(!window.has_image_atlas_entry(&old_image))
+    })
+    .unwrap();
     first.read_with(cx, |reader, cx| {
         assert!(!cx.theme().mode.is_dark());
         let paper = reader.page_colors.unwrap().paper();
@@ -157,7 +165,7 @@ fn color_change_retires_in_flight_page_pixels(cx: &mut TestAppContext) {
     let request = reader.update(cx, |reader, _| {
         reader.pages = vec![(100., 100.)];
         let layout = PageLayout::new(&reader.pages, 1., ReadingMode::Continuous, 0);
-        let Schedule::Render(request) = reader.rasters.schedule(&layout, 0., 100., 1.) else {
+        let Schedule::Render(request) = reader.rasters.schedule(&layout, 0., 100., 1., drop) else {
             panic!("expected a raster request");
         };
         reader.page_colors = Some(pdf::PageColors::new([0.1; 3], [0.9; 3]));
@@ -169,7 +177,7 @@ fn color_change_retires_in_flight_page_pixels(cx: &mut TestAppContext) {
         assert!(matches!(
             reader
                 .rasters
-                .finish(request, Err("obsolete pixels".into()), 0..1),
+                .finish(request, Err("obsolete pixels".into()), 0..1, drop),
             Completion::Obsolete
         ));
         assert!(reader.rasters.image(0).is_none());

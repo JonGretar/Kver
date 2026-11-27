@@ -19,7 +19,7 @@ fn request(
     height: f32,
     density: f32,
 ) -> RasterRequest {
-    match rasters.schedule(layout, top, height, density) {
+    match rasters.schedule(layout, top, height, density, drop) {
         Schedule::Render(request) => request,
         Schedule::Ready => panic!("expected a raster request, got Ready"),
         Schedule::Unchanged => panic!("expected a raster request, got Unchanged"),
@@ -38,7 +38,7 @@ fn continuous_zoom_keeps_previews_and_coalesces_to_latest_scale() {
     let layout = PageLayout::new(&pages, 1.0, ReadingMode::Continuous, 0);
     let mut rasters = PageRasters::default();
     let initial = request(&mut rasters, &layout, 0.0, 1000.0, 1.0);
-    rasters.finish(initial, Ok(bitmap(100, 100)), 0..1);
+    rasters.finish(initial, Ok(bitmap(100, 100)), 0..1, drop);
     rasters.zoom_changed();
     let zoomed = PageLayout::new(&pages, 1.1, ReadingMode::Continuous, 0);
     let pending = request(&mut rasters, &zoomed, 0.0, 1000.0, 1.0);
@@ -46,22 +46,22 @@ fn continuous_zoom_keeps_previews_and_coalesces_to_latest_scale() {
         rasters.zoom_changed();
         let layout = PageLayout::new(&pages, scale, ReadingMode::Continuous, 0);
         assert!(matches!(
-            rasters.schedule(&layout, 0.0, 1000.0, 1.0),
+            rasters.schedule(&layout, 0.0, 1000.0, 1.0, drop),
             Schedule::Unchanged
         ));
         assert!(rasters.image(0).is_some());
     }
-    rasters.finish(pending, Ok(bitmap(110, 110)), 0..1);
+    rasters.finish(pending, Ok(bitmap(110, 110)), 0..1, drop);
     let latest = PageLayout::new(&pages, 1.4, ReadingMode::Continuous, 0);
     let pending = request(&mut rasters, &latest, 0.0, 1000.0, 1.0);
     assert_eq!(pending.scale(), 1.4);
-    rasters.finish(pending, Ok(bitmap(140, 140)), 0..1);
+    rasters.finish(pending, Ok(bitmap(140, 140)), 0..1, drop);
     assert!(matches!(
-        rasters.schedule(&latest, 0.0, 1000.0, 1.0),
+        rasters.schedule(&latest, 0.0, 1000.0, 1.0, drop),
         Schedule::Ready
     ));
     assert_eq!(rasters.retained_bytes(), 140 * 140 * 4);
-    rasters.invalidate();
+    rasters.invalidate(drop);
     assert!(rasters.image(0).is_none());
 }
 
@@ -80,7 +80,7 @@ fn old_zoom_failure_does_not_block_latest_scale() {
     let mut rasters = PageRasters::default();
     let old = request(&mut rasters, &layout, 0.0, 1000.0, 1.0);
     rasters.zoom_changed();
-    rasters.finish(old, Err("old zoom failed".into()), 0..1);
+    rasters.finish(old, Err("old zoom failed".into()), 0..1, drop);
     let latest = PageLayout::new(&pages, 2.0, ReadingMode::Continuous, 0);
     assert_eq!(
         request(&mut rasters, &latest, 0.0, 1000.0, 1.0).scale(),
@@ -95,11 +95,11 @@ fn nearest_visible_page_runs_first_and_next_job_uses_latest_viewport() {
     let first = request(&mut rasters, &layout, 90.0, 140.0, 1.0);
     assert_eq!(first.page(), 1);
     assert!(matches!(
-        rasters.schedule(&layout, 348.0, 100.0, 1.0),
+        rasters.schedule(&layout, 348.0, 100.0, 1.0, drop),
         Schedule::Unchanged
     ));
     assert!(matches!(
-        rasters.finish(first, Ok(bitmap(100, 100)), 3..4),
+        rasters.finish(first, Ok(bitmap(100, 100)), 3..4, drop),
         Completion::Accepted
     ));
     assert!(
@@ -116,20 +116,24 @@ fn scrolling_evicts_old_bitmaps_even_while_a_job_is_current() {
     let mut rasters = PageRasters::default();
     let first = request(&mut rasters, &layout, 0.0, 220.0, 1.0);
     assert!(matches!(
-        rasters.finish(first, Ok(bitmap(100, 100)), 0..2),
+        rasters.finish(first, Ok(bitmap(100, 100)), 0..2, drop),
         Completion::Accepted
     ));
     assert_eq!(rasters.retained_bytes(), 40_000);
     let second = request(&mut rasters, &layout, 0.0, 220.0, 1.0);
     assert_eq!(second.page(), 1);
+    let previous = rasters.image(0).unwrap().clone();
+    let mut retired = Vec::new();
     assert!(matches!(
-        rasters.schedule(&layout, 232.0, 100.0, 1.0),
+        rasters.schedule(&layout, 232.0, 100.0, 1.0, |image| retired.push(image)),
         Schedule::Unchanged
     ));
+    assert_eq!(retired.len(), 1);
+    assert!(Arc::ptr_eq(&retired[0], &previous));
     assert!(rasters.image(0).is_none());
     assert_eq!(rasters.retained_bytes(), 0);
     assert!(matches!(
-        rasters.finish(second, Err("offscreen failure".into()), 2..3),
+        rasters.finish(second, Err("offscreen failure".into()), 2..3, drop),
         Completion::Accepted
     ));
     assert_eq!(request(&mut rasters, &layout, 232.0, 100.0, 1.0).page(), 2);
@@ -142,27 +146,27 @@ fn invalidation_rejects_old_pixels_and_errors_without_retiring_new_job() {
             let layout = PageLayout::new(&[(2.0, 2.0)], 1.0, ReadingMode::Continuous, 0);
             let mut rasters = PageRasters::default();
             let old = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
-            rasters.invalidate();
+            rasters.invalidate(drop);
             let changed = PageLayout::new(&[(2.0, 2.0)], zoom, ReadingMode::Continuous, 0);
             let current = request(&mut rasters, &changed, 0.0, 100.0, density);
             assert_ne!(old, current);
             assert_eq!(current.scale(), zoom * density);
             assert!(matches!(
-                rasters.finish(old, old_result, 0..1),
+                rasters.finish(old, old_result, 0..1, drop),
                 Completion::Obsolete
             ));
             assert!(rasters.image(0).is_none());
             assert!(matches!(
-                rasters.schedule(&changed, 0.0, 100.0, density),
+                rasters.schedule(&changed, 0.0, 100.0, density, drop),
                 Schedule::Unchanged
             ));
             let size = (2.0 * current.scale()) as u32;
             assert!(matches!(
-                rasters.finish(current, Ok(bitmap(size, size)), 0..1),
+                rasters.finish(current, Ok(bitmap(size, size)), 0..1, drop),
                 Completion::Accepted
             ));
             assert_eq!(rasters.retained_bytes(), (size * size * 4) as usize);
-            rasters.invalidate();
+            rasters.invalidate(drop);
             assert!(rasters.image(0).is_none());
             assert_eq!(rasters.retained_bytes(), 0);
         }
@@ -175,12 +179,12 @@ fn completed_ticket_cannot_finish_a_later_request_for_the_same_page() {
     let mut rasters = PageRasters::default();
     let old = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
     assert!(matches!(
-        rasters.finish(old, Ok(bitmap(100, 100)), 0..1),
+        rasters.finish(old, Ok(bitmap(100, 100)), 0..1, drop),
         Completion::Accepted
     ));
     let other = request(&mut rasters, &layout, 116.0, 100.0, 1.0);
     assert!(matches!(
-        rasters.finish(other, Ok(bitmap(100, 100)), 1..2),
+        rasters.finish(other, Ok(bitmap(100, 100)), 1..2, drop),
         Completion::Accepted
     ));
     let current = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
@@ -188,15 +192,15 @@ fn completed_ticket_cannot_finish_a_later_request_for_the_same_page() {
     assert_eq!(current.scale(), old.scale());
     assert_ne!(current, old);
     assert!(matches!(
-        rasters.finish(old, Err("duplicate old reply".into()), 0..1),
+        rasters.finish(old, Err("duplicate old reply".into()), 0..1, drop),
         Completion::Obsolete
     ));
     assert!(matches!(
-        rasters.schedule(&layout, 0.0, 100.0, 1.0),
+        rasters.schedule(&layout, 0.0, 100.0, 1.0, drop),
         Schedule::Unchanged
     ));
     assert!(matches!(
-        rasters.finish(current, Ok(bitmap(100, 100)), 0..1),
+        rasters.finish(current, Ok(bitmap(100, 100)), 0..1, drop),
         Completion::Accepted
     ));
 }
@@ -207,16 +211,16 @@ fn visible_failures_do_not_spin_and_explicit_turn_keeps_retry_policy() {
     let mut rasters = PageRasters::default();
     let failed = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
     assert!(
-        matches!(rasters.finish(failed, Err("cannot render".into()), 0..1),
+        matches!(rasters.finish(failed, Err("cannot render".into()), 0..1, drop),
         Completion::Failed(error) if error == "cannot render")
     );
     assert!(matches!(
-        rasters.schedule(&layout, 0.0, 100.0, 1.0),
+        rasters.schedule(&layout, 0.0, 100.0, 1.0, drop),
         Schedule::Unchanged
     ));
     rasters.on_page_selected(0);
     assert!(matches!(
-        rasters.schedule(&layout, 0.0, 100.0, 1.0),
+        rasters.schedule(&layout, 0.0, 100.0, 1.0, drop),
         Schedule::Unchanged
     ));
     // Selecting a neighbor permits another try even if the failed page stays visible.
@@ -230,21 +234,21 @@ fn leaving_viewport_or_changing_render_inputs_allows_failed_page_retry() {
     let mut rasters = PageRasters::default();
     let first = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
     assert!(matches!(
-        rasters.finish(first, Err("failure".into()), 0..1),
+        rasters.finish(first, Err("failure".into()), 0..1, drop),
         Completion::Failed(_)
     ));
     let other = request(&mut rasters, &layout, 116.0, 100.0, 1.0);
     assert!(matches!(
-        rasters.finish(other, Ok(bitmap(100, 100)), 1..2),
+        rasters.finish(other, Ok(bitmap(100, 100)), 1..2, drop),
         Completion::Accepted
     ));
     let retry = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
     assert_eq!(retry.page(), 0);
     assert!(matches!(
-        rasters.finish(retry, Err("failure".into()), 0..1),
+        rasters.finish(retry, Err("failure".into()), 0..1, drop),
         Completion::Failed(_)
     ));
-    rasters.invalidate();
+    rasters.invalidate(drop);
     let new_density = request(&mut rasters, &layout, 0.0, 100.0, 2.0);
     assert_eq!(new_density.page(), 0);
     assert_eq!(new_density.scale(), 2.0);
@@ -257,12 +261,12 @@ fn malformed_pixels_report_error_without_installing_an_image() {
     let current = request(&mut rasters, &layout, 0.0, 100.0, 1.0);
     let mut invalid = bitmap(1, 1);
     invalid.bgra.clear();
-    assert!(matches!(rasters.finish(current, Ok(invalid), 0..1),
+    assert!(matches!(rasters.finish(current, Ok(invalid), 0..1, drop),
         Completion::Failed(error) if error == "Cannot display page image: invalid pixel dimensions"));
     assert!(rasters.image(0).is_none());
     assert_eq!(rasters.retained_bytes(), 0);
     assert!(matches!(
-        rasters.schedule(&layout, 0.0, 100.0, 1.0),
+        rasters.schedule(&layout, 0.0, 100.0, 1.0, drop),
         Schedule::Unchanged
     ));
 }
@@ -278,12 +282,12 @@ fn budget_defers_another_bitmap_until_visible_cache_has_room() {
     let mut rasters = PageRasters::default();
     let first = request(&mut rasters, &layout, 0.0, 10000.0, 1.0);
     assert!(matches!(
-        rasters.finish(first, Ok(bitmap(2048, 1024)), 0..2),
+        rasters.finish(first, Ok(bitmap(2048, 1024)), 0..2, drop),
         Completion::Accepted
     ));
     assert_eq!(rasters.retained_bytes(), 8 * 1024 * 1024);
     assert!(matches!(
-        rasters.schedule(&layout, 0.0, 10000.0, 1.0),
+        rasters.schedule(&layout, 0.0, 10000.0, 1.0, drop),
         Schedule::Ready
     ));
     assert!(rasters.image(0).is_some());
@@ -303,7 +307,7 @@ fn sustained_single_page_turns_keep_only_current_page_pixels() {
         let current = request(&mut rasters, &layout, 0.0, 700.0, 1.0);
         assert_eq!(current.page(), page);
         assert!(matches!(
-            rasters.finish(current, Ok(bitmap(1, 1)), page..page + 1),
+            rasters.finish(current, Ok(bitmap(1, 1)), page..page + 1, drop),
             Completion::Accepted
         ));
         assert_eq!(rasters.retained_bytes(), 4);
@@ -312,7 +316,7 @@ fn sustained_single_page_turns_keep_only_current_page_pixels() {
             assert!(rasters.image(page - 1).is_none());
         }
         assert!(matches!(
-            rasters.schedule(&layout, 0.0, 700.0, 1.0),
+            rasters.schedule(&layout, 0.0, 700.0, 1.0, drop),
             Schedule::Ready
         ));
     }
@@ -323,7 +327,7 @@ fn empty_layout_schedules_no_work() {
     let layout = PageLayout::new(&[], 1.0, ReadingMode::Continuous, 0);
     let mut rasters = PageRasters::default();
     assert!(matches!(
-        rasters.schedule(&layout, 0.0, 700.0, 1.0),
+        rasters.schedule(&layout, 0.0, 700.0, 1.0, drop),
         Schedule::Ready
     ));
     assert_eq!(rasters.retained_bytes(), 0);

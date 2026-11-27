@@ -8,13 +8,19 @@
 
 use std::{collections::HashMap, ops::Range, sync::Arc};
 
-use gpui_kit::RenderImage;
+use gpui_kit::{App, RenderImage};
 use image::{Frame, RgbaImage};
 
 use super::navigation::PageLayout;
 use crate::pdf::RenderedBitmap;
 
 pub(super) const BITMAP_BUDGET: usize = 128 * 1024 * 1024;
+
+/// Dropping the Rust image does not remove its uploaded texture. Defer until
+/// GPUI has returned the currently updating window to the app's window list.
+pub(super) fn retire_images(cx: &mut App) -> impl FnMut(Arc<RenderImage>) + '_ {
+    |image| cx.defer(move |cx| cx.drop_image(image, None))
+}
 
 #[derive(Default)]
 pub(super) struct PageRasters {
@@ -65,8 +71,10 @@ pub(super) enum Completion {
 
 impl PageRasters {
     /// A document or density change retires all cached work and failures.
-    pub(super) fn invalidate(&mut self) {
-        self.images.clear();
+    pub(super) fn invalidate(&mut self, mut retire: impl FnMut(Arc<RenderImage>)) {
+        for (_, bitmap) in self.images.drain() {
+            retire(bitmap.image);
+        }
         self.in_flight = None;
         self.failed = None;
     }
@@ -104,6 +112,7 @@ impl PageRasters {
         top: f32,
         height: f32,
         display_scale: f32,
+        mut retire: impl FnMut(Arc<RenderImage>),
     ) -> Schedule {
         let visible = layout.visible_pages(top, height);
         if self.failed.is_some_and(|request| {
@@ -117,7 +126,9 @@ impl PageRasters {
             self.failed = None;
         }
         // Eviction still happens while a current job is running.
-        self.images.retain(|page, _| visible.contains(page));
+        for (_, bitmap) in self.images.extract_if(|page, _| !visible.contains(page)) {
+            retire(bitmap.image);
+        }
         if self.in_flight.is_some() {
             return Schedule::Unchanged;
         }
@@ -163,6 +174,7 @@ impl PageRasters {
         request: RasterRequest,
         result: Result<RenderedBitmap, String>,
         visible: Range<usize>,
+        retire: impl FnOnce(Arc<RenderImage>),
     ) -> Completion {
         if self.in_flight != Some(request) {
             return Completion::Obsolete;
@@ -183,7 +195,9 @@ impl PageRasters {
         });
         match result {
             Ok(bitmap) => {
-                self.images.insert(request.page, bitmap);
+                if let Some(old) = self.images.insert(request.page, bitmap) {
+                    retire(old.image);
+                }
                 Completion::Accepted
             }
             Err(error) => {

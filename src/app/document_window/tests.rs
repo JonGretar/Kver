@@ -21,6 +21,7 @@ mod pane_navigation;
 mod panes;
 mod recent_history;
 mod recent_picker;
+mod ribbon;
 mod saving;
 mod sidebar;
 mod split_acceptance;

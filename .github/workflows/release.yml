@@ -85,6 +85,8 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/linux-archive.yml
+    secrets:
+      LINUX_UPDATE_PRIVATE_KEY: ${{ secrets.LINUX_UPDATE_PRIVATE_KEY }}
 
   publish-linux:
     needs: [release, linux-archive]
@@ -102,7 +104,9 @@ jobs:
         run: |
           archive="Kver-$RELEASE_TAG-linux-x86_64.tar.gz"
           sha256sum -c -- "$archive.sha256"
-          gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$archive" "$archive.sha256" --clobber
+          assets=("$archive" "$archive.sha256")
+          if [[ -f "$archive.sha256.sig" ]]; then assets+=("$archive.sha256.sig"); fi
+          gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "${assets[@]}" --clobber
 
   windows-archive:
     needs: release

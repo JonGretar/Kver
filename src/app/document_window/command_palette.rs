@@ -99,6 +99,11 @@ impl CommandPalette {
     ) -> [AnyElement; 2] {
         let has_document = available.page_count > 0;
         let mut items = vec![
+            command(
+                "Check for Updates…",
+                crate::app::commands::CheckForUpdates,
+                crate::app::commands::has_update_check(cx),
+            ),
             command("Open PDF…", OpenPdf, true),
             command("Open URL…", super::OpenUrl, true),
             command(OPEN_VIM_TUTOR_LABEL, OpenVimTutor, true),

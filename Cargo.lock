@@ -4273,6 +4273,7 @@ name = "kver"
 version = "0.8.1"
 dependencies = [
  "async-channel",
+ "block2 0.6.2",
  "directories",
  "gpui-kit",
  "hayro",
@@ -4284,6 +4285,8 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "rfd",
  "rusqlite",
+ "semver",
+ "serde_json",
  "tempfile",
  "toml_edit 0.22.27",
  "unicode-segmentation",

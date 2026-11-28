@@ -1161,6 +1161,7 @@ impl Render for DocumentWindow {
                             .min_w_0()
                             .min_h_0()
                             .children(toolbar)
+                            .children(super::ribbon::render(window, cx))
                             .child(self.render_panes(cx))
                             .children(statusbar),
                     ),

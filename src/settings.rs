@@ -190,6 +190,7 @@ impl OpenFiles {
 /// Unknown TOML entries remain in the file, but are not applied as settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppSettings {
+    automatic_update_checks: bool,
     appearance: Appearance,
     pdf_dark_mode: bool,
     show_toolbar: bool,
@@ -207,6 +208,9 @@ pub struct AppSettings {
 }
 
 impl AppSettings {
+    pub fn automatic_update_checks(&self) -> bool {
+        self.automatic_update_checks
+    }
     pub fn open_files(&self) -> OpenFiles {
         self.open_files
     }
@@ -355,6 +359,11 @@ impl AppSettings {
                     .to_owned(),
             },
             appearance: appearance_in(document)?,
+            automatic_update_checks: bool_in(
+                application.and_then(|table| table.get("automatic_update_checks")),
+                true,
+                "[application].automatic_update_checks",
+            )?,
             pdf_dark_mode: bool_in(
                 reader.and_then(|table| table.get("pdf_dark_mode")),
                 false,
@@ -414,6 +423,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             appearance: Appearance::default(),
+            automatic_update_checks: true,
             pdf_dark_mode: false,
             show_toolbar: true,
             show_statusbar: true,

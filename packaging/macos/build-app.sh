@@ -79,6 +79,16 @@ if [ -n "$sparkle_dir" ]; then
     mkdir -p "$stage/Contents/Frameworks"
     # ditto preserves Sparkle's framework and helper symlinks and signatures.
     ditto "$sparkle_dir/Sparkle.framework" "$stage/Contents/Frameworks/Sparkle.framework"
+    driver="$stage/Contents/PlugIns/KverUpdateDriver.bundle"
+    mkdir -p "$driver/Contents/MacOS"
+    xcrun clang -mmacosx-version-min=12.0 -fobjc-arc -Werror -bundle -F"$sparkle_dir" -framework Sparkle -framework AppKit \
+        -Wl,-rpath,@loader_path/../../../../Frameworks packaging/macos/KverUpdateDriver.m \
+        -o "$driver/Contents/MacOS/KverUpdateDriver"
+    /usr/bin/plutil -create xml1 "$driver/Contents/Info.plist"
+    for entry in CFBundleExecutable:KverUpdateDriver CFBundlePackageType:BNDL CFBundleIdentifier:io.github.jongretar.kver.update-driver; do
+        plutil -insert "${entry%%:*}" -string "${entry#*:}" "$driver/Contents/Info.plist"
+    done
+    codesign --force --sign - "$driver"
     install -m 644 "$sparkle_dir/LICENSE" "$stage/Contents/Resources/Sparkle-LICENSE"
     python3 packaging/macos/update-metadata.py "$stage/Contents/Info.plist"
 fi

@@ -12,9 +12,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Install the latest Linux release from the terminal with a
   checksum-verified download. The user-level installer adds a `kver` command
   when `~/.local/bin` is on your `PATH`, without replacing an unrelated command.
+- Linux readers announce new stable releases. Official signing-enabled user
+  installations can download and restart to update; source builds, portable
+  copies and distro packages show the release link without replacing files.
 
 ### Changed
 
+- On macOS, update checks, downloads and restart prompts now appear below
+  the reader toolbar instead of opening Sparkle windows.
 - The command palette lists actions alphabetically. While you search, it puts
   exact matches and names that start with your query first, and highlights
   matching text in action names.

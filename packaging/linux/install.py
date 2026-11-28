@@ -1,6 +1,7 @@
 """Install/remove this extracted Kver archive for the current user (Python 3.9+)."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -122,6 +123,23 @@ def sync_cli_link(link, executable, installing):
 
 
 def run(action):
+    # Coordinate manual installation/removal with the reader's atomic exchange.
+    # Lock the containing directory: the package directory itself is replaced.
+    root, _ = layout()
+    if action == "install":
+        safe(root / ".install.json")
+        root.parent.mkdir(parents=True, exist_ok=True)
+    if not root.parent.exists():
+        return run_locked(action)
+    fd = os.open(root.parent, os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        run_locked(action)
+    finally:
+        os.close(fd)
+
+
+def run_locked(action):
     root, external = layout()
     cli = root.parents[1] / "bin/kver"
     manifest = root / ".install.json"

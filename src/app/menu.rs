@@ -150,7 +150,6 @@ pub(crate) const ACCELERATOR_COMMANDS: &[&str] = &[
 
 #[cfg(target_os = "macos")]
 struct MenuState {
-    updates_available: bool,
     can_back: Cell<bool>,
     can_forward: Cell<bool>,
     highlight_available: Cell<bool>,
@@ -169,10 +168,9 @@ impl Global for MenuState {}
 /// Install handlers and native menus after the application keymap.
 pub fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
-    let updates_available = crate::updater::install(cx);
+    crate::updater::install(cx);
     #[cfg(target_os = "macos")]
     cx.set_global(MenuState {
-        updates_available,
         can_back: Cell::new(false),
         can_forward: Cell::new(false),
         highlight_available: Cell::new(false),
@@ -269,7 +267,7 @@ pub(crate) fn refresh_navigation(cx: &App, can_back: bool, can_forward: bool) {
                 Menu::new("Kver").items([
                     MenuItem::action("About Kver", AboutKver),
                     MenuItem::action("Check for Updates…", CheckForUpdates)
-                        .disabled(!state.updates_available),
+                        .disabled(!super::commands::has_update_check(cx)),
                     MenuItem::separator(),
                     MenuItem::action("Settings…", ShowSettings),
                     MenuItem::separator(),

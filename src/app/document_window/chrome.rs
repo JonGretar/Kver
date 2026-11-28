@@ -121,6 +121,13 @@ pub(super) fn application_menu(
                 crate::app::menu::AboutKver,
                 true,
             ))
+            .when(crate::app::commands::has_update_check(cx), |menu| {
+                menu.item(application_menu_item(
+                    "Check for Updates…",
+                    crate::app::commands::CheckForUpdates,
+                    true,
+                ))
+            })
             .submenu("Help", window, cx, |menu, _, _| {
                 menu.item(application_menu_item(
                     OPEN_KVER_WEBSITE_LABEL,

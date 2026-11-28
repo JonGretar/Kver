@@ -188,6 +188,17 @@ pub fn open_requested_path(cx: &mut App, initial: &WeakEntity<DocumentWindow>, p
     );
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn show_reader(cx: &mut App) {
+    if let Some((handle, _)) = most_recent(cx) {
+        if cx.active_window() != Some(handle) {
+            let _ = cx.update_window(handle, |_, window, _| window.activate_window());
+        }
+    } else if let Err(error) = open(cx, None) {
+        eprintln!("Cannot open reader: {error}");
+    }
+}
+
 /// Dock activation while windowless opens one empty reader.
 pub fn reopen(cx: &mut App) {
     if cx.windows().is_empty()

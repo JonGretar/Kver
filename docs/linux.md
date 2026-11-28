@@ -2,7 +2,30 @@
 
 The Linux release targets x86-64 with an Ubuntu 24.04 / glibc 2.39 baseline.
 Other distributions and desktop configurations may work but are not all
-verified. No Rust development environment is needed. Updates are manual.
+verified. No Rust development environment is needed.
+
+## Update notices
+
+Linux builds check GitHub for a newer stable Kver release in the background,
+at most once a day. **Check for Updates…** in the Kver menu or command palette
+checks on demand, including after dismissing a version. To disable background
+network checks, set `automatic_update_checks = false` under `[application]` in
+`config.toml`. Manual checks still work.
+
+The ribbon offers **View release** to source, Arch, and portable builds, and
+while Linux assets for the new tag are still being published. Use the same
+installation method as before. Kver never asks for `sudo`.
+
+An official, signing-enabled copy installed by the user installer can instead
+offer **Download update**. It needs Python 3.9+, OpenSSL, and an unmodified
+installer inventory. Downloading does not interrupt reading. **Restart to
+update** uses the normal unsaved-document decision; cancelling keeps both
+your edits and the prepared download. After quit, the helper verifies the
+signed checksum, checks that the replacement executable runs, and switches
+the package directory in one operation. Settings, PDFs and history are not
+part of that directory. If the archive changes desktop integration or the
+filesystem cannot atomically exchange directories, use the manual installer.
+Older releases without the updater need one manual upgrade.
 
 ## Download or install
 
@@ -153,8 +176,8 @@ Save your work and quit **all** Kver windows/processes before switching builds;
 otherwise the new executable can forward to the old running app. Extract and
 verify the new tarball in a separate directory, then run that copy and check
 its version. Keep the previous archive if you want to return to it. For an
-installed copy, use the replacement procedure above. Neither procedure updates
-automatically or resets configuration and reading history.
+installed copy, the replacement procedure above remains available. Neither
+manual procedure resets configuration or reading history.
 
 ## Native testing
 

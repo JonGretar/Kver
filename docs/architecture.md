@@ -32,7 +32,8 @@ domain terms.
 | Coordinate transforms | [`coordinates.rs`](../src/coordinates.rs) |
 | Preferences, paths, and Settings UI | [`settings.rs`](../src/settings.rs), [`settings_ui.rs`](../src/settings_ui.rs) |
 | Reading history, serialized storage, and Open Recent | [`reading_history.rs`](../src/reading_history.rs) and its child modules |
-| macOS quit protection and updates | [`app/quit_guard.rs`](../src/app/quit_guard.rs), [`updater.rs`](../src/updater.rs) |
+| Reader notices and update checks | [`app/ribbon.rs`](../src/app/ribbon.rs), [`app/commands.rs`](../src/app/commands.rs); macOS Sparkle adapter in [`updater.rs`](../src/updater.rs) and [`KverUpdateDriver.m`](../packaging/macos/KverUpdateDriver.m); Linux discovery in [`app/linux_updates.rs`](../src/app/linux_updates.rs) and managed installation in [`update.py`](../packaging/linux/update.py) |
+| macOS quit protection | [`app/quit_guard.rs`](../src/app/quit_guard.rs) |
 
 ## Ownership boundaries
 

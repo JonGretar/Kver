@@ -7,8 +7,12 @@ license = "MIT"
 
 [features]
 default = ["gui"]
-gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:interprocess", "dep:objc2", "dep:objc2-foundation", "dep:ureq"]
+gui = ["dep:gpui-kit", "dep:image", "dep:rfd", "dep:async-channel", "dep:interprocess", "dep:block2", "dep:objc2", "dep:objc2-foundation", "dep:ureq"]
 screenshot = ["gui", "gpui-kit/test-support"]
+
+[[example]]
+name = "update_ribbon_preview"
+required-features = ["screenshot"]
 
 [[bin]]
 name = "kver"
@@ -40,6 +44,8 @@ image = { version = "0.25", default-features = false, optional = true }
 rfd = { version = "0.17.2", optional = true }
 async-channel = { version = "2", optional = true }
 url = "2"
+serde_json = "1"
+semver = "1"
 interprocess = { version = "2.4.8", default-features = false, optional = true }
 # Streaming HTTP with Rustls; no browser, subprocess, or async runtime required.
 ureq = { version = "3.3", optional = true }
@@ -47,6 +53,7 @@ ureq = { version = "3.3", optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 # Native Sparkle/quit bridges; these versions are already used by the GUI stack.
 objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3", features = ["NSBundle", "NSError", "NSString"], optional = true }
 
 # Keep PDF processing fast in tests without optimizing the reader or GUI.

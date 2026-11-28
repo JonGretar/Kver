@@ -74,7 +74,8 @@ downloads, uninstall, and the separate Arch recipe.
 Download the experimental ZIP from [GitHub Releases](https://github.com/JonGretar/Kver/releases).
 See the [Windows guide](docs/windows.md) for runtime and security guidance.
 
-Updates are manual for both platforms. No GitHub sign-in is required.
+Windows updates are manual. On Linux, see [update notices and managed updates](docs/linux.md#update-notices).
+No GitHub sign-in is required.
 Archives appear after the macOS release if their builds succeed.
 Native testing needs contributors—see [the per-OS acceptance gaps](https://github.com/JonGretar/Kver/issues/183).
 

@@ -28,12 +28,18 @@ pub(crate) fn invalidate_approval() {
     macos::invalidate_approval();
 }
 
-pub(crate) fn cancel_request() {
+pub(crate) fn cancel_request(_cx: &mut App) {
+    #[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+    super::linux_updates::cancel_restart(_cx);
     #[cfg(target_os = "macos")]
     macos::cancel_request();
 }
 
 pub(super) fn finish_quit(cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    if !super::linux_updates::approve_restart(cx) {
+        return;
+    }
     #[cfg(target_os = "macos")]
     macos::approve_next_request();
     cx.quit();

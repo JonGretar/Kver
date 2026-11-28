@@ -2,6 +2,9 @@ name: Linux archive
 
 on:
   workflow_call:
+    secrets:
+      LINUX_UPDATE_PRIVATE_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       release_tag:
@@ -50,6 +53,8 @@ jobs:
       - name: Test archive rejection checks
         run: python3 -m unittest discover -s "$PACKAGE_TESTS" -p test_linux_package.py
       - name: Build, package and verify clean extraction
+        env:
+          KVER_LINUX_RELEASE_PUBLIC_KEY: ${{ vars.LINUX_UPDATE_PUBLIC_KEY }}
         run: sh "$PACKAGE_ENTRY"
       - name: Locate verified Linux archive
         id: archive-paths
@@ -65,12 +70,22 @@ jobs:
           fi
           test -f "$archive" && test -f "$archive.sha256" || exit 1
           printf 'path=%s\nfilename=%s\n' "$archive" "${archive##*/}" >> "$GITHUB_OUTPUT"
+      - name: Sign version-bound Linux checksum for managed updates
+        if: vars.LINUX_UPDATE_PUBLIC_KEY != ''
+        env:
+          PRIVATE_KEY: ${{ secrets.LINUX_UPDATE_PRIVATE_KEY }}
+          PUBLIC_KEY: ${{ vars.LINUX_UPDATE_PUBLIC_KEY }}
+          ARCHIVE: ${{ steps.archive-paths.outputs.path }}
+        run: |
+          openssl dgst -sha256 -sign /dev/stdin -out "$ARCHIVE.sha256.sig" "$ARCHIVE.sha256" <<<"$PRIVATE_KEY"
+          openssl dgst -sha256 -verify /dev/stdin -signature "$ARCHIVE.sha256.sig" "$ARCHIVE.sha256" <<<"$PUBLIC_KEY"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
           path: |
             ${{ steps.archive-paths.outputs.path }}
             ${{ steps.archive-paths.outputs.path }}.sha256
+            ${{ steps.archive-paths.outputs.path }}.sha256.sig
           if-no-files-found: error
           compression-level: 0
 
@@ -91,4 +106,6 @@ jobs:
           archive: ${{ needs.archive.outputs.filename }}
         run: |
           sha256sum -c -- "$archive.sha256"
-          gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$archive" "$archive.sha256" --clobber
+          assets=("$archive" "$archive.sha256")
+          if [[ -f "$archive.sha256.sig" ]]; then assets+=("$archive.sha256.sig"); fi
+          gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "${assets[@]}" --clobber

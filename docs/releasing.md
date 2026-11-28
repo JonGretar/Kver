@@ -95,6 +95,64 @@ stable path.
 
 ## Validate before publishing
 
+### Linux update signing
+
+Linux uses a separate RSA signing key, not the Sparkle key. Provision an RSA
+key (3072 bits or stronger) on a trusted signing machine. Put the PEM public
+key in the repository Actions variable `LINUX_UPDATE_PUBLIC_KEY` and the
+matching PEM private key in the Actions secret `LINUX_UPDATE_PRIVATE_KEY`.
+Keep the private key out of the checkout and back it up securely.
+
+The Linux archive job embeds only the public key. It signs the exact `.sha256`
+file (which includes the versioned filename) and verifies the signature before
+publishing `.sha256.sig` alongside the tarball and checksum. Without the public
+variable, releases remain notification-only. With it set, a missing or
+mismatched private key fails the Linux job rather than publishing an
+unverifiable update. Keep the key stable: replacing it requires a manual
+upgrade for installations that trust the old key.
+
+**Local two-candidate rehearsal.** On an x86-64 Ubuntu 24.04 desktop with
+the Rust/Linux GUI build prerequisites, Python and OpenSSL, run:
+
+```sh
+testdir="$PWD/target/linux-rehearsal"
+python3 packaging/linux/rehearse-update.py build "$testdir"
+python3 packaging/linux/rehearse-update.py serve "$testdir"
+```
+
+The build requires a **new** directory, uses a throwaway signing key and private
+source copies, and produces real `0.0.1` and `0.0.2` Kver binaries in minimal
+test packages. Only the candidates use the loopback feed. No production keys,
+tags, or published releases are involved. To test on another compatible desktop,
+copy the whole resulting directory there, owned by your user. Keep the feed
+running in the first terminal. In a second terminal, set `testdir` to the same
+directory and run these from the repository:
+
+```sh
+python3 packaging/linux/rehearse-update.py managed "$testdir"
+# Separately, for the notification-only case:
+python3 packaging/linux/rehearse-update.py source "$testdir"
+```
+
+Each reader gets its own home, instance lock and expendable PDF. In the
+managed reader, make an unsaved highlight, download the offered update, then
+choose **Restart to update → Cancel**. Confirm the edit and restart action
+remain. Retry, save, and confirm Kver relaunches; check the installed version
+with `"$testdir/managed-home/.local/opt/kver/kver" --version` (`kver 0.0.2`).
+Reopen `managed-home/Rehearsal.pdf` and check the saved highlight. A manual
+check should now say Kver is up to date. The source reader should still offer
+`0.0.2` with **View release** only. Close both readers and stop the feed when
+done. A native acceptance run should also exercise Discard with a disposable PDF.
+
+**Mac visual preview.** From the repository, run
+`corgi run --features screenshot --example update_ribbon_preview` (append
+`-- --source` for the notification-only offer). This opens a separate reader
+window with the real ribbon on a sample PDF. Download and restart advance a
+simulation; neither performs an update. Close the window to exit. This
+preview does not test Linux packaging, desktop integration, or process restart.
+
+### macOS candidate
+
 Use a real Mac window, not merely a successful `open` command:
 
 1. Extract the candidate and launch it without a PDF argument. Check its
@@ -113,9 +171,16 @@ For update changes, use two disposable bundles with increasing
 `CFBundleVersion` values and the same separate test key. Generate a signed
 test feed with Sparkle's `generate_appcast`; local builds accept
 `KVER_UPDATE_FEED_URL` as a credential-free HTTPS override.
-Check newer/equal versions, continued reading during downloads, installation
-and relaunch, cancellation, offline failure, tampered feeds, and corrupted
-archives. Failures must leave the installed app usable.
+Check both scheduled discovery and **Check for Updates…** from the menu and
+command palette. A newer version should appear below the active reader's
+toolbar without taking focus. Dismiss the offer, restart, and verify it stays
+quiet for that version but a manual check still finds it. During a download,
+verify hiding the ribbon does not cancel the transfer. Bring it back with the
+same command. Exercise **Restart to update** with an unsaved annotation:
+cancel quitting, confirm the edit remains usable, then retry and save.
+Check equal versions, installation and relaunch, explicit download
+cancellation, offline failure, tampered feeds, and corrupted archives.
+Failures must leave the installed app usable.
 Run `codesign --verify --deep --strict` on the installed app.
 Kver does not restore open windows after relaunch; use Open Recent.
 A local test does not establish production HTTPS publication or another

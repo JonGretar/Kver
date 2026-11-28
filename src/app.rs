@@ -8,10 +8,18 @@ pub mod commands;
 pub mod document_window;
 mod instance;
 pub mod keymap;
+#[cfg(any(
+    target_os = "linux",
+    all(any(test, feature = "screenshot"), target_os = "macos")
+))]
+mod linux_updates;
+#[cfg(all(feature = "screenshot", any(target_os = "macos", target_os = "linux")))]
+pub use linux_updates::preview_ribbon;
 pub mod menu;
 mod onboarding;
 pub(crate) mod quit_guard;
 pub(crate) mod remote_pdf;
+pub(crate) mod ribbon;
 pub(crate) mod shortcut_label;
 pub(crate) mod theme;
 pub mod windows;
@@ -124,6 +132,8 @@ fn start_reader(
     gpui_kit::component::theme::Theme::sync_system_appearance(None, cx);
     initialize_services(cx, paths);
     cx.set_global(StartupReady);
+    #[cfg(target_os = "linux")]
+    linux_updates::install(cx);
     if let Err(error) = quit_guard::install(cx) {
         eprintln!("Cannot protect unsaved work during native Quit: {error}");
         cx.quit();

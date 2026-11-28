@@ -28,7 +28,7 @@ impl DocumentWindow {
     pub(super) fn cancel_pending_leave(&mut self, cx: &mut Context<Self>) {
         let pending = self.pending_leave.take();
         if matches!(pending, Some(Leave::Quit)) {
-            crate::app::quit_guard::cancel_request();
+            crate::app::quit_guard::cancel_request(cx);
         }
         self.save_prompt_open = false;
         if let Some(Leave::Replace(crate::reader::DocumentSource::File(path))) = pending

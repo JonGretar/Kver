@@ -44,4 +44,10 @@ cmp "$contents/MacOS/kver" "$stage/Kver.app/Contents/MacOS/kver"
 cmp "$contents/Resources/kver.icns" "$stage/Kver.app/Contents/Resources/kver.icns"
 cmp "$contents/Info.plist" "$stage/Kver.app/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$stage/Kver.app"
+if [ -n "${KVER_UPDATE_PUBLIC_KEY:-}" ]; then
+    frameworks="$stage/Kver.app/Contents/Frameworks"
+    xcrun clang -fobjc-arc -Werror -F"$frameworks" -framework Sparkle -framework Foundation \
+        -Wl,-rpath,"$frameworks" packaging/macos/check-update-driver.m -o "$stage/check-driver"
+    "$stage/check-driver" "$stage/Kver.app/Contents/PlugIns/KverUpdateDriver.bundle"
+fi
 echo "Verified ad-hoc-signed app archive (not notarized): $archive"

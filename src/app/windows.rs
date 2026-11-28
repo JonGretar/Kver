@@ -1,12 +1,12 @@
 //! Document-window lifecycle and focus; each window owns an independent reader.
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use gpui_kit as gpui;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Entity, Global, WeakEntity, Window,
-    WindowBounds, WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, DisplayId, Entity, Global, Pixels, Size,
+    WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
 };
 
 use super::document_window::DocumentWindow;
@@ -46,7 +46,10 @@ pub(crate) struct OpenRequest {
 }
 
 #[derive(Default)]
-struct DocumentWindows(Vec<(AnyWindowHandle, WeakEntity<DocumentWindow>)>);
+struct DocumentWindows {
+    readers: Vec<(AnyWindowHandle, WeakEntity<DocumentWindow>)>,
+    next_cascade_step: HashMap<DisplayId, usize>,
+}
 impl Global for DocumentWindows {}
 
 pub(crate) fn register_document(
@@ -57,7 +60,7 @@ pub(crate) fn register_document(
     if !cx.has_global::<DocumentWindows>() {
         cx.set_global(DocumentWindows::default());
     }
-    let windows = &mut cx.global_mut::<DocumentWindows>().0;
+    let windows = &mut cx.global_mut::<DocumentWindows>().readers;
     windows.retain(|(_, document)| document.upgrade().is_some());
     windows.push((handle, document));
 }
@@ -66,16 +69,16 @@ pub(crate) fn note_activation(handle: AnyWindowHandle, cx: &mut App) {
     if !cx.has_global::<DocumentWindows>() {
         return;
     }
-    let windows = cx.global_mut::<DocumentWindows>();
-    if let Some(ix) = windows.0.iter().position(|(window, _)| *window == handle) {
-        let document = windows.0.remove(ix);
-        windows.0.push(document);
+    let windows = &mut cx.global_mut::<DocumentWindows>().readers;
+    if let Some(ix) = windows.iter().position(|(window, _)| *window == handle) {
+        let document = windows.remove(ix);
+        windows.push(document);
     }
 }
 
 fn most_recent(cx: &App) -> Option<(AnyWindowHandle, Entity<DocumentWindow>)> {
     cx.try_global::<DocumentWindows>()?
-        .0
+        .readers
         .iter()
         .rev()
         .filter(|(handle, _)| cx.windows().contains(handle))
@@ -129,7 +132,7 @@ pub(crate) fn request_quit(cx: &mut App) {
     // only discover/update it after the current effect returns it to the app.
     cx.defer(|cx| {
         let dirty = cx.try_global::<DocumentWindows>().and_then(|windows| {
-            windows.0.iter().find_map(|(handle, document)| {
+            windows.readers.iter().find_map(|(handle, document)| {
                 let document = document.upgrade()?;
                 let reader = document.read(cx).reader().read(cx);
                 (reader.is_dirty(cx) || reader.is_saving(cx)).then_some((*handle, document))
@@ -206,17 +209,63 @@ pub(crate) fn open_link(
     open_source(cx, Some(DocumentSource::File(path)), Some(page))
 }
 
+const DOCUMENT_SIZE: Size<Pixels> = size(px(920.0), px(800.0));
+const CASCADE_STEP: f32 = 24.0;
+const CASCADE_SLOTS: usize = 4;
+
+fn cascade_bounds(visible: Bounds<Pixels>, step: usize) -> (Bounds<Pixels>, usize) {
+    let centered = Bounds::centered_at(visible.center(), DOCUMENT_SIZE.min(&visible.size));
+    let offset = px(CASCADE_STEP * step as f32);
+    let mut candidate = centered;
+    candidate.origin += point(offset, offset);
+    let end = candidate.bottom_right();
+    let limit = visible.bottom_right();
+    if end.x > limit.x || end.y > limit.y {
+        (centered, 1)
+    } else {
+        (candidate, (step + 1) % CASCADE_SLOTS)
+    }
+}
+
+fn document_placement(cx: &mut App) -> (Bounds<Pixels>, Option<(DisplayId, usize)>) {
+    let Some(primary) = cx.primary_display() else {
+        // Wayland has no primary display and its compositor places toplevels.
+        return (Bounds::new(point(px(0.0), px(0.0)), DOCUMENT_SIZE), None);
+    };
+    if !cx.has_global::<DocumentWindows>() {
+        cx.set_global(DocumentWindows::default());
+    }
+    if most_recent(cx).is_none() {
+        cx.global_mut::<DocumentWindows>().next_cascade_step.clear();
+    }
+
+    // Only an active reader can select another display; auxiliary windows don't
+    // affect document placement. Don't use the reader's frame as the anchor.
+    let windows = cx.global::<DocumentWindows>();
+    let active_display = cx
+        .active_window()
+        .filter(|active| windows.readers.iter().any(|(handle, _)| handle == active))
+        .and_then(|_| cx.active_display());
+    let display = active_display.unwrap_or(primary);
+
+    let id = display.id();
+    let step = windows.next_cascade_step.get(&id).copied().unwrap_or(0);
+    let (bounds, next_step) = cascade_bounds(display.visible_bounds(), step);
+    (bounds, Some((id, next_step)))
+}
+
 pub(super) fn open_source(
     cx: &mut App,
     source: Option<DocumentSource>,
     page: Option<usize>,
 ) -> Result<Entity<DocumentWindow>, String> {
-    let bounds = Bounds::centered(None, size(px(920.0), px(800.0)), cx);
+    let (bounds, cascade) = document_placement(cx);
     let (handle, reader) = gpui_kit::open_window(
         WindowOptions {
             #[cfg(target_os = "linux")]
             app_id: Some(crate::app::LINUX_APP_ID.into()),
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            display_id: cascade.map(|(id, _)| id),
             window_min_size: Some(size(px(360.0), px(240.0))),
             ..TitleBar::window_options()
         },
@@ -224,6 +273,11 @@ pub(super) fn open_source(
         |window, cx| cx.new(|cx| DocumentWindow::new_with_page(source, page, window, cx)),
     )
     .map_err(|error| error.to_string())?;
+    if let Some((id, next_step)) = cascade {
+        cx.global_mut::<DocumentWindows>()
+            .next_cascade_step
+            .insert(id, next_step);
+    }
     cx.update_window(handle, |_, window, _| window.activate_window())
         .map_err(|error| error.to_string())?;
     Ok(reader)
@@ -251,6 +305,80 @@ pub fn cycle(window: &mut Window, cx: &mut App, step: isize) {
 mod tests {
     use super::*;
     use gpui_kit::TestAppContext;
+
+    #[test]
+    fn cascade_starts_centered_and_wraps_after_four_windows() {
+        let visible = Bounds::new(point(px(-1600.0), px(30.0)), size(px(1600.0), px(1000.0)));
+        let mut step = 0;
+        for offset in [0.0, 24.0, 48.0, 72.0, 0.0] {
+            let (bounds, next) = cascade_bounds(visible, step);
+            assert_eq!(
+                bounds.origin,
+                point(px(-1260.0 + offset), px(130.0 + offset))
+            );
+            assert_eq!(bounds.size, DOCUMENT_SIZE);
+            step = next;
+        }
+    }
+
+    #[test]
+    fn cascade_wraps_early_when_the_next_step_would_leave_the_work_area() {
+        let visible = Bounds::new(point(px(10.0), px(30.0)), size(px(1200.0), px(848.0)));
+        let (center, step) = cascade_bounds(visible, 0);
+        let (offset, step) = cascade_bounds(visible, step);
+        assert_eq!(offset.origin, center.origin + point(px(24.0), px(24.0)));
+        assert_eq!(offset.bottom_right().y, visible.bottom_right().y);
+        assert_eq!(cascade_bounds(visible, step), (center, 1));
+    }
+
+    #[test]
+    fn cascade_keeps_the_centered_fit_when_the_default_size_is_too_large() {
+        let visible = Bounds::new(point(px(10.0), px(30.0)), size(px(850.0), px(700.0)));
+        assert_eq!(cascade_bounds(visible, 0), (visible, 1));
+        assert_eq!(cascade_bounds(visible, 1), (visible, 1));
+    }
+
+    #[gpui_kit::test]
+    fn real_new_readers_advance_the_cascade_but_reuse_does_not(cx: &mut TestAppContext) {
+        let bounds = |cx: &mut App, handle| {
+            cx.update_window(handle, |_, window, _| window.bounds())
+                .unwrap()
+        };
+        let (first_handle, centered) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            install(cx);
+            let first = open(cx, None).unwrap();
+            let first_handle = first.read(cx).window_handle();
+            let centered = Bounds::centered(None, DOCUMENT_SIZE, cx);
+            assert_eq!(bounds(cx, first_handle), centered);
+
+            open_request(
+                cx,
+                &first.downgrade(),
+                OpenRequest {
+                    target: Some(OpenTarget::File("examples/readme-sample.pdf".into())),
+                    mode: OpenMode::Reuse,
+                },
+            );
+            assert_eq!(cx.windows().len(), 1);
+            assert_eq!(bounds(cx, first_handle), centered);
+            (first_handle, centered)
+        });
+        cx.run_until_parked();
+        cx.update(|cx| cx.dispatch_action(&NewWindow));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_eq!(cx.windows().len(), 2);
+            let second_handle = cx
+                .windows()
+                .into_iter()
+                .find(|handle| *handle != first_handle)
+                .unwrap();
+            let mut expected = centered;
+            expected.origin += point(px(24.0), px(24.0));
+            assert_eq!(bounds(cx, second_handle), expected);
+        });
+    }
 
     #[gpui_kit::test]
     fn cli_reuses_most_recent_reader_even_when_an_auxiliary_window_is_active(

@@ -11,6 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - PDF rendering now uses hinted text and includes fixes for embedded fonts,
   transparent images, and malformed documents.
+- New document windows cascade slightly instead of opening directly on top of
+  one another, where the window system supports placement.
 
 ## [0.8.1] - 2026-11-27
 

@@ -4270,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "kver"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "async-channel",
  "block2 0.6.2",

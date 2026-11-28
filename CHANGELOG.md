@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-28
+
+Check for updates without leaving the reader, and find commands more easily
+with ranked, highlighted search results.
+
 ### Added
 
 - Install the latest Linux release from the terminal with a

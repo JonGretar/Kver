@@ -5,7 +5,8 @@ basics, see the [development guide](development.md).
 This is the maintainer runbook and the procedure behind `/release`.
 [Release automation](../.github/workflows/release.yml) and the scripts under
 [`packaging/`](../packaging/) define how artifacts are built and published.
-Record results in the release PR, not in this document.
+Record verification in the release thread, linking to CI and the published
+release, not in this document.
 
 ## Choose the version and scope
 
@@ -165,7 +166,7 @@ Use a real Mac window, not merely a successful `open` command:
    Save/Discard/Cancel with shared-document windows. Verify saved PDFs in
    another reader; headless checks do not establish cross-reader fidelity.
 5. Record the candidate revision, machine/macOS, documents, checks actually
-   performed, and remaining limitations in the release PR.
+   performed, and remaining limitations in the release thread.
 
 For update changes, use two disposable bundles with increasing
 `CFBundleVersion` values and the same separate test key. Generate a signed
@@ -189,11 +190,20 @@ update-enabled release before relying on that path.
 
 ## Land and publish
 
-1. With publication authorized, review and land the release change using the
-   [normal landing gates](agents/workflow.md#feature-workflow), including
-   the currently applicable CI checks. If the candidate changes, repeat the
-   checks affected by the change.
-2. Fetch the publication remote and verify that the landed release commit
+This direct-push exception covers only `Cargo.toml` and `Cargo.lock` version
+bumps, the dated changelog chapter, and the post-tag Arch recipe metadata bump.
+Land code, dependency, signing, and workflow fixes separately through the
+[normal PR workflow](agents/workflow.md#feature-workflow).
+
+1. With publication authorized and the local candidate checked, review the
+   release diff and fetch `main` from the publication remote. Confirm the
+   prepared commit is based on that tip, then push it directly to `main` as
+   a fast-forward, without a PR. If `main` advances, integrate it without
+   rewriting remote history and repeat the affected candidate checks.
+2. Wait for all applicable `main` CI checks to pass on that exact release
+   commit. If an expected check is missing, pending, canceled, or failing,
+   leave the tag unpushed. Fetch the publication remote and verify that the
+   release commit is on `main` and
    matches the tested candidate tree. Validate the version again there and
    check that the tag does not exist remotely. Create the tag at that exact
    commit, not at whatever `main` points to later. After verifying that `origin`
@@ -219,7 +229,7 @@ update-enabled release before relying on that path.
 | Apple silicon macOS ZIP and Sparkle feed | [Release workflow](../.github/workflows/release.yml). Confirm the intended release is latest and its notes match the dated chapter. Download the ZIP and `appcast.xml`, verify both with `packaging/macos/verify-update-signatures.swift` and the production public key, and check the public latest feed points to that ZIP. Repeat the launch and reading smoke check with a browser download on Apple silicon; record actual Gatekeeper behavior separately from CLI-download checks. |
 | Linux x86-64 archive | [Linux archive workflow](../.github/workflows/linux-archive.yml) and [Linux guide](linux.md). Check the published archive and checksum, including the contents and notices from clean extraction. |
 | Windows x86-64 archive | [Windows archive workflow](../.github/workflows/windows-archive.yml) and [Windows guide](windows.md). Check the published archive and checksum, including the contents and notices from clean extraction. |
-| Arch Linux x86-64 recipe | [Arch bump instructions](../packaging/arch/README.md#bump-to-a-new-release). After tagging, update `PKGBUILD` and `.SRCINFO`, verifying the source checksum against the tagged tarball. Land the recipe update using the normal gates. Record whether `makepkg` and the installed version were actually checked. This step is part of the release; it is not a GitHub release asset or a prerequisite for macOS publication. |
+| Arch Linux x86-64 recipe | [Arch bump instructions](../packaging/arch/README.md#bump-to-a-new-release). After tagging, update `PKGBUILD` and `.SRCINFO`, verifying the source checksum against the tagged tarball. Push the recipe bump directly to `main` as a fast-forward and verify its own applicable `main` CI checks. Record whether `makepkg` and the installed version were actually checked. This step is part of the release; it is not a GitHub release asset or a prerequisite for macOS publication. |
 
 Report each deliverable separately, with links to checks and any unverified
 steps. Linux x86-64 is a regular download with an Ubuntu 24.04 / glibc 2.39

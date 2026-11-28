@@ -71,8 +71,9 @@ GitHub issue or PR, not in architecture docs or a test diary.
    current workflow configuration. Pending, failing, canceled, or missing
    expected checks block landing; intentionally disabled matrix entries are
    not expected checks and need no per-PR waiver. Keep the separate real-Mac
-   manual check for native window/input changes. For release-specific checks,
-   follow the [release runbook](../releasing.md).
+   manual check for native window/input changes. The
+   [release runbook](../releasing.md#land-and-publish) defines a narrow
+   direct-push exception for authorized release metadata and Arch recipe bumps.
    An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree
    pull into its parent. Landing on `main` requires approval for that specific

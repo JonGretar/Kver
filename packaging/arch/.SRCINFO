@@ -1,6 +1,6 @@
 pkgbase = kver
 	pkgdesc = Fast PDF reader with Vim-style navigation (GPUI)
-	pkgver = 0.8.1
+	pkgver = 0.8.2
 	pkgrel = 1
 	url = https://github.com/JonGretar/Kver
 	arch = x86_64
@@ -21,7 +21,7 @@ pkgbase = kver
 	depends = libxcb
 	depends = xdg-desktop-portal
 	options = !lto
-	source = kver-0.8.1.tar.gz::https://github.com/JonGretar/Kver/archive/refs/tags/v0.8.1.tar.gz
-	sha256sums = 8869919944957a3d15cb1f93ad9330ea2aecb7011c6f18c067b7ddb76506f9bc
+	source = kver-0.8.2.tar.gz::https://github.com/JonGretar/Kver/archive/refs/tags/v0.8.2.tar.gz
+	sha256sums = 65a002b4c632b938538517e81bf7f685be3425bea3a63f280bca87d1b79c042e
 
 pkgname = kver

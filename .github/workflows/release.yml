@@ -70,7 +70,7 @@ jobs:
           python3 packaging/common/release-metadata.py --tag "$RELEASE_TAG" --notes > "$RUNNER_TEMP/release-notes.md"
           printf '\nUnsigned Apple silicon macOS app. See the [download/security instructions](https://github.com/%s/blob/%s/README.md#install).\n' \
             "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$RUNNER_TEMP/release-notes.md"
-          printf '\nExperimental Linux and Windows archives and checksums are added after their builds succeed. These are unsupported testing builds; packaging checks do not certify native GUI usability. See the [Linux guide](https://github.com/%s/blob/%s/docs/linux.md) and [Windows guide](https://github.com/%s/blob/%s/docs/windows.md).\n' \
+          printf '\nThe Linux x86-64 archive (Ubuntu 24.04 baseline) and the experimental Windows x86-64 archive are added with checksums after their builds succeed. See the [Linux guide](https://github.com/%s/blob/%s/docs/linux.md) and [Windows guide](https://github.com/%s/blob/%s/docs/windows.md) for requirements and validation limits.\n' \
             "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" \
             "target/release/Kver-v${version}-macos-arm64.zip" \
@@ -78,12 +78,31 @@ jobs:
             --verify-tag --latest --title "Kver $version" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
 
-  # Publish macOS first; experimental failures must not block its release.
+  # Build Linux in parallel; only its upload waits for the public release.
   linux-archive:
-    needs: release
+    # The reusable workflow also has a dispatch-only recovery uploader.
+    # Its build job uses contents: read in either mode.
     permissions:
       contents: write
     uses: ./.github/workflows/linux-archive.yml
+
+  publish-linux:
+    needs: [release, linux-archive]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x86_64
+      - name: Attach Linux archive and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          archive="Kver-$RELEASE_TAG-linux-x86_64.tar.gz"
+          sha256sum -c -- "$archive.sha256"
+          gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$archive" "$archive.sha256" --clobber
 
   windows-archive:
     needs: release

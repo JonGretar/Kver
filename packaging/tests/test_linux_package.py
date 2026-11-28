@@ -20,7 +20,7 @@ class ArchiveRejectionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.archive = Path(self.temp.name) / "candidate.tar.gz"
-        self.prefix = "Kver-v0.6.0-experimental-linux-x86_64/"
+        self.prefix = "Kver-v0.6.0-linux-x86_64/"
         self.files = {name: b"content" for name in package.REQUIRED}
         self.files["licenses/rust/licenses/MIT"] = b"license"
         self.hashes = {name: hashlib.sha256(data).hexdigest()
@@ -80,7 +80,7 @@ class ArchiveRejectionTests(unittest.TestCase):
         self.reject("Incorrect checksum inventory")
 
     def test_wrong_version_root(self):
-        self.prefix = "Kver-v9.9.9-experimental-linux-x86_64/"
+        self.prefix = "Kver-v9.9.9-linux-x86_64/"
         self.write()
         self.reject("Missing or unexpected")
 

@@ -1,4 +1,4 @@
-# Experimental Linux archive
+# Linux archive
 
 Run `sh packaging/linux/package.sh` on x86-64 Ubuntu 24.04. It builds, packages,
 and verifies the tarball and checksum without publishing. The archive includes

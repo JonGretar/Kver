@@ -1,5 +1,5 @@
 #!/bin/sh
-# Native Ubuntu build and verified, non-publishing experimental archive.
+# Native Ubuntu build and verified, non-publishing Linux archive.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$root"
@@ -9,7 +9,7 @@ cd "$root"
 }
 . /etc/os-release
 [ "$ID" = ubuntu ] && [ "$VERSION_ID" = 24.04 ] || {
-    echo "The experimental build baseline is Ubuntu 24.04." >&2
+    echo "The Linux build baseline is Ubuntu 24.04." >&2
     exit 1
 }
 for tool in cargo rustc python3 readelf ldd cargo-about; do

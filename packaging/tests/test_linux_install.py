@@ -30,6 +30,7 @@ def verify(source, version=None, custom_data=True):
         if not custom_data:
             del env["XDG_DATA_HOME"]
         root = home / ".local/opt/kver"
+        cli = home / ".local/bin/kver"
         desktop = data / "applications/kver.desktop"
         icon = data / "icons/hicolor/256x256/apps/kver.png"
         sentinels = [home / "Documents/book.pdf", home / "config/kver/config.toml",
@@ -52,9 +53,11 @@ def verify(source, version=None, custom_data=True):
                 assert result.returncode == 0, result.stderr
             for path in sentinels:
                 assert path.read_bytes() == b"preserve me", path
+            return result
 
         call("uninstall")
-        call("install")
+        assert "export PATH=" in call("install").stdout
+        assert cli.readlink() == root / "kver"
         assert (root / "kver").read_bytes() == (package / "kver").read_bytes()
         assert os.access(root / "kver", os.X_OK)
         assert icon.read_bytes() == (package / "resources/kver.png").read_bytes()
@@ -69,7 +72,7 @@ def verify(source, version=None, custom_data=True):
         # checks field expansion without starting Kver's GUI, IPC or a shell.
         if platform.system() == "Linux":
             if version:
-                actual = subprocess.check_output([str(root / "kver"), "--version"],
+                actual = subprocess.check_output([str(cli), "--version"],
                                                  env=env, cwd=base, text=True).strip()
                 assert actual == "kver " + version, actual
             executable = root / "kver"
@@ -107,7 +110,9 @@ assert json.loads(result.read_text()) == [sys.argv[2], "--", sys.argv[3]]
             finally:
                 executable.write_bytes(original)
 
-        call("install")
+        env["PATH"] = str(cli.parent) + os.pathsep + env.get("PATH", "")
+        assert "export PATH=" not in call("install").stdout
+        assert cli.readlink() == root / "kver"
         # Replacement changes resources, removes obsolete owned content, and
         # preserves unrelated content even inside the installation directory.
         unowned = root / "obsolete.txt"
@@ -153,16 +158,43 @@ assert json.loads(result.read_text()) == [sys.argv[2], "--", sys.argv[3]]
         # Missing owned files are safe partial states, for repair and removal.
         desktop.unlink()
         (root / "kver").unlink()
+        cli.unlink()
         call("install")
         assert desktop.exists() and (root / "kver").exists()
+        assert cli.readlink() == root / "kver"
         icon.unlink()
         call("uninstall")
         assert not desktop.exists() and not (root / ".install.json").exists()
+        assert not cli.is_symlink()
         assert unrelated.exists()
         call("uninstall", "Missing ownership manifest")
         sentinels.remove(unrelated)
         unrelated.unlink()
         call("uninstall")
+
+        # A colliding command does not prevent desktop installation, and a
+        # repointed link is never removed with the package.
+        cli.write_text("another command")
+        assert "leaving" in call("install").stderr
+        assert desktop.exists() and cli.read_text() == "another command"
+        call("uninstall")
+        assert cli.read_text() == "another command"
+        cli.unlink()
+        call("install")
+        cli.unlink()
+        other_target = home / "missing other command"
+        cli.symlink_to(other_target)
+        assert "leaving" in call("install").stderr
+        call("uninstall")
+        assert cli.readlink() == other_target
+        cli.unlink()
+        cli.parent.rmdir()
+        cli.parent.symlink_to(sentinels[0].parent, target_is_directory=True)
+        assert "leaving" in call("install").stderr
+        assert not (sentinels[0].parent / "kver").exists()
+        call("uninstall")
+        assert cli.parent.is_symlink()
+        cli.parent.unlink()
 
         # Neither an unowned collision nor a changed owned file is disposable.
         desktop.parent.mkdir(parents=True, exist_ok=True)

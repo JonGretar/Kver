@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Install the latest Linux release from the terminal with a
+  checksum-verified download. The user-level installer adds a `kver` command
+  when `~/.local/bin` is on your `PATH`, without replacing an unrelated command.
+
 ### Changed
 
 - The command palette lists actions alphabetically. While you search, it puts
@@ -16,6 +22,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   transparent images, and malformed documents.
 - New document windows cascade slightly instead of opening directly on top of
   one another, where the window system supports placement.
+- Linux x86-64 downloads no longer carry the experimental label. The Ubuntu
+  24.04 / glibc 2.39 baseline is unchanged. Windows remains experimental.
 
 ## [0.8.1] - 2026-11-27
 

@@ -1,15 +1,24 @@
-# Experimental Linux x86-64 archive
+# Linux x86-64 archive
 
-This is a testing artifact, not a supported Linux release or a claim of
-compatibility with every distribution. No Rust development environment is
-needed to use it. Updates are manual; no updater is included.
+The Linux release targets x86-64 with an Ubuntu 24.04 / glibc 2.39 baseline.
+Other distributions and desktop configurations may work but are not all
+verified. No Rust development environment is needed. Updates are manual.
 
-## Obtain a test build
+## Download or install
 
-Open [GitHub Releases](https://github.com/JonGretar/Kver/releases) and choose
-the version you intend to test. Download its experimental Linux tarball and
+For a user-level install of the latest release's Linux
+archive, use the [download installer](../README.md#linux-x86-64). It needs
+`curl`, Python 3.9+, `sha256sum`, and `tar`. If that release's Linux archive
+or checksum is not available yet, it stops rather than installing an older
+release. Quit Kver before running the installer to update an existing copy.
+See [removal instructions](#install-a-desktop-launcher-optional) below.
+Arch users can use the [separate package recipe](../packaging/arch/README.md).
+
+To run from a portable copy or choose a specific version, open
+[GitHub Releases](https://github.com/JonGretar/Kver/releases) and choose
+the version you want. Download its Linux tarball and
 matching checksum from **Assets**. These are public downloads; no GitHub
-sign-in is needed. Experimental assets appear after the macOS release if
+sign-in is needed. Linux assets appear after the macOS release if
 their build succeeds.
 
 Keep the release URL. `BUILD-INFO.json` inside the tarball records its source commit.
@@ -18,14 +27,15 @@ Package/loader checks do not establish native desktop usability. See
 
 ## Extract and run
 
-Download the versioned `Kver-vX.Y.Z-experimental-linux-x86_64.tar.gz` and
+Download the versioned `Kver-vX.Y.Z-linux-x86_64.tar.gz` and
 matching `.tar.gz.sha256` from the same release. In the download directory,
-substitute its version:
+substitute its version. For older releases, use the exact filename from
+GitHub, which includes `-experimental-`:
 
 ```sh
-sha256sum -c Kver-vX.Y.Z-experimental-linux-x86_64.tar.gz.sha256
-tar -xzf Kver-vX.Y.Z-experimental-linux-x86_64.tar.gz
-cd Kver-vX.Y.Z-experimental-linux-x86_64
+sha256sum -c Kver-vX.Y.Z-linux-x86_64.tar.gz.sha256
+tar -xzf Kver-vX.Y.Z-linux-x86_64.tar.gz
+cd Kver-vX.Y.Z-linux-x86_64
 sha256sum -c SHA256SUMS
 ./kver --version
 ./kver /absolute/path/to/document.pdf
@@ -102,9 +112,14 @@ the Kver icon under `${XDG_DATA_HOME:-$HOME/.local/share}`. Open **Kver** from
 your desktop's application menu (a desktop refresh or re-login may be needed).
 The launcher accepts one PDF per invocation and delegates opening and window
 preferences to the existing CLI. It does not change your default PDF reader,
-edit `mimeapps.list`, add a shell command to `PATH`, or implement another IPC
-service. From a terminal, use `"$HOME/.local/opt/kver/kver"` with the options
-in `CLI.md`. Python is not needed to run the installed app.
+edit `mimeapps.list`, or implement another IPC service.
+
+The installer also links `~/.local/bin/kver` to the installed binary. If
+`~/.local/bin` is on your `PATH`, use `kver some.pdf` from a terminal. Otherwise,
+the installer prints a PATH hint without editing your shell configuration.
+An existing unrelated command is left alone; you can still invoke
+`"$HOME/.local/opt/kver/kver"` directly. See `CLI.md` for options. Python is not
+needed to run the installed app.
 
 To update or return to an older build, quit Kver, extract that archive, check
 its checksums, and run its `python3 install.py install` again. Keep the original
@@ -121,6 +136,7 @@ the installed script is missing. Use the same `HOME` and `XDG_DATA_HOME` as
 installation. Missing owned files are tolerated; reinstall repairs them.
 Documents, configuration, reading history and unrelated files are preserved.
 Only inventory-owned files with recognized contents are replaced or removed.
+The CLI symlink is removed only if it still points to this installation's binary.
 If a file was modified, move it aside and retry; if the ownership manifest is
 missing, the script refuses to adopt or delete existing contents. Symlinked
 destination files or parent directories are rejected rather than followed.

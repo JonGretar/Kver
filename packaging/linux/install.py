@@ -95,8 +95,35 @@ def payload(source):
     return files
 
 
+def sync_cli_link(link, executable, installing):
+    # Unlike payload files, the optional CLI entry is owned by its exact link
+    # target. Never follow a redirected bin directory or replace another command.
+    if any(parent.is_symlink() for parent in link.parents):
+        if installing:
+            print(f"Warning: leaving {link} untouched: a parent is a symlink.", file=sys.stderr)
+        return
+    if link.is_symlink() and link.readlink() == executable:
+        if not installing:
+            link.unlink()
+            return
+    elif installing:
+        try:
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(executable)
+        except OSError as error:
+            print(f"Warning: leaving {link} untouched: {error}", file=sys.stderr)
+            return
+    else:
+        return
+
+    print(f"Terminal command: {link}")
+    if str(link.parent) not in {p.rstrip("/") for p in os.get_exec_path()}:
+        print('To use kver in this shell, run: export PATH="$HOME/.local/bin:$PATH"')
+
+
 def run(action):
     root, external = layout()
+    cli = root.parents[1] / "bin/kver"
     manifest = root / ".install.json"
     safe(manifest)
     previous = {}
@@ -174,7 +201,9 @@ def run(action):
     if contents:
         record({key: [checksum(data)] for key, data in contents.items()})
         print(f"Installed Kver at {root}; launcher: {external['launcher']}")
+        sync_cli_link(cli, root / "kver", installing=True)
     else:
+        sync_cli_link(cli, root / "kver", installing=False)
         manifest.unlink()
         print("Removed Kver installation; documents, settings and history were not touched.")
 

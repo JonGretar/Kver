@@ -1,4 +1,4 @@
-"""Stage and verify the actual experimental Linux tarball; never publish it."""
+"""Stage and verify the actual Linux tarball; never publish it."""
 
 import argparse
 import ctypes
@@ -92,7 +92,7 @@ def verify_archive(archive, version, expected_hashes):
     require(REQUIRED <= expected_hashes.keys(), "Missing required inventory")
     require(any(n.startswith("licenses/rust/licenses/") for n in expected_hashes),
             "Missing Rust license texts")
-    prefix = f"Kver-v{version}-experimental-linux-x86_64"
+    prefix = f"Kver-v{version}-linux-x86_64"
     with tempfile.TemporaryDirectory(prefix="kver-linux-extracted-") as temp:
         clean = Path(temp)
         with tarfile.open(archive, "r:gz") as tar:
@@ -147,14 +147,14 @@ def package(release, licenses):
     require(baseline.get("ID", "").strip('"') == "ubuntu"
             and baseline.get("VERSION_ID", "").strip('"') == "24.04", "Ubuntu 24.04 baseline required")
     build = {
-        "version": version, "target": TARGET, "experimental": True,
+        "version": version, "target": TARGET,
         "os_release": baseline, "rustc": output("rustc", "+stable", "-vV"),
         "glibc": output("getconf", "GNU_LIBC_VERSION").strip(),
         "source_commit": output("git", "rev-parse", "HEAD", cwd=ROOT).strip(),
         "resource_policy": "Reader/Kit icons, app artwork and keybinding presets are embedded. "
                            "resources/kver.png is optional external integration artwork, not a runtime lookup.",
     }
-    prefix = f"Kver-v{version}-experimental-linux-x86_64"
+    prefix = f"Kver-v{version}-linux-x86_64"
     archive = release / f"{prefix}.tar.gz"
     with tempfile.TemporaryDirectory(prefix="kver-linux-staging-") as temp:
         stage = Path(temp)

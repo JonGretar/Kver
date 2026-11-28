@@ -71,9 +71,8 @@ GitHub issue or PR, not in architecture docs or a test diary.
    current workflow configuration. Pending, failing, canceled, or missing
    expected checks block landing; intentionally disabled matrix entries are
    not expected checks and need no per-PR waiver. Keep the separate real-Mac
-   manual check for native window/input changes. Before tagging a release, run
-   the unsigned archive verification in `packaging/macos/package.sh` on an Apple
-   silicon Mac; see [macOS releases](../releasing.md) for the full procedure.
+   manual check for native window/input changes. For release-specific checks,
+   follow the [release runbook](../releasing.md).
    An independent thread's changes reach the project through
    version control; an isolated subthread's changes require an explicit worktree
    pull into its parent. Landing on `main` requires approval for that specific
@@ -246,7 +245,5 @@ Write notable changes under `## [Unreleased]`, using only relevant categories
 such as `Added`, `Changed`, and `Fixed`. Describe the change from a reader's
 perspective, not as a list of commits; omit routine internal work. The changelog is meant for the users of the app to see changes. Avoid lengthy technical information or instructions unless it's valuable for the user.
 
-Prepare or publish a release only when explicitly requested. Follow
-[macOS packaging and releases](../releasing.md) for versioning, signing,
-candidate checks, and publication. Creating or pushing a release tag requires
-authorization for that release.
+For release preparation or publication, follow the [release runbook](../releasing.md).
+`/release` is the agent entry point; it uses the same procedure.

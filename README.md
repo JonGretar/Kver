@@ -55,20 +55,27 @@ from the project's release page and trust the source.
 After a blocked launch, open **System Settings → Privacy & Security → Open
 Anyway** and confirm. Do not disable Gatekeeper globally.
 
-### Windows and Linux
+### Linux (x86-64)
 
-Windows and Linux are targets, but supported downloads are not available
-yet. Testers can obtain experimental archives from
-[GitHub Releases](https://github.com/JonGretar/Kver/releases), with manual updates:
+To install the latest Linux build for your user, without `sudo`:
 
-- [Linux x86-64 tarball: download, requirements and optional launcher installation](docs/linux.md)
-  — Ubuntu 24.04/glibc 2.39 baseline; no older-distribution promise.
-- [Windows x86-64 ZIP: download, runtime and security guidance](docs/windows.md)
-  — unsigned; requires the Microsoft x64 v14 runtime.
+```sh
+curl -fsSL https://raw.githubusercontent.com/JonGretar/Kver/main/packaging/linux/install.sh -o kver-install.sh
+sh kver-install.sh
+```
 
-These downloads are experimental, not native GUI certification. Each guide
-explains extraction, use, updates and useful bug reports. No GitHub sign-in is
-required. Archives appear after the macOS release if their builds succeed.
+Review the script before running it if you prefer. It verifies the archive
+checksum and runs the packaged Python installer. See the [Linux guide](docs/linux.md)
+for prerequisites (including the Ubuntu 24.04/glibc 2.39 baseline), manual
+downloads, uninstall, and the separate Arch recipe.
+
+### Windows (x86-64)
+
+Download the experimental ZIP from [GitHub Releases](https://github.com/JonGretar/Kver/releases).
+See the [Windows guide](docs/windows.md) for runtime and security guidance.
+
+Updates are manual for both platforms. No GitHub sign-in is required.
+Archives appear after the macOS release if their builds succeed.
 Native testing needs contributors—see [the per-OS acceptance gaps](https://github.com/JonGretar/Kver/issues/183).
 
 ## Get started

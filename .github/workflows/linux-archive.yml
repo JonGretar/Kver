@@ -1,4 +1,4 @@
-name: Experimental Linux archive
+name: Linux archive
 
 on:
   workflow_call:
@@ -10,12 +10,14 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   archive:
-    name: Experimental Ubuntu x86-64 tarball (not native GUI acceptance)
+    name: Ubuntu x86-64 tarball (package verification)
     runs-on: ubuntu-24.04
+    outputs:
+      filename: ${{ steps.archive-paths.outputs.filename }}
     env:
       PACKAGE_METADATA: packaging/common/release-metadata.py
       PACKAGE_TESTS: packaging/tests
@@ -49,13 +51,44 @@ jobs:
         run: python3 -m unittest discover -s "$PACKAGE_TESTS" -p test_linux_package.py
       - name: Build, package and verify clean extraction
         run: sh "$PACKAGE_ENTRY"
-      - name: Upload experimental archive and checksum to release
+      - name: Locate verified Linux archive
+        id: archive-paths
         env:
-          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           version=$(python3 "$PACKAGE_METADATA" --tag "$RELEASE_TAG")
-          gh release upload "$RELEASE_TAG" \
-            "target/x86_64-unknown-linux-gnu/release/Kver-v${version}-experimental-linux-x86_64.tar.gz" \
-            "target/x86_64-unknown-linux-gnu/release/Kver-v${version}-experimental-linux-x86_64.tar.gz.sha256" \
-            --clobber
+          release_dir=target/x86_64-unknown-linux-gnu/release
+          archive="$release_dir/Kver-v${version}-linux-x86_64.tar.gz"
+          # Recovery builds the tagged packager, which may use the old name.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ ! -f "$archive" ]; then
+            archive="$release_dir/Kver-v${version}-experimental-linux-x86_64.tar.gz"
+          fi
+          test -f "$archive" && test -f "$archive.sha256" || exit 1
+          printf 'path=%s\nfilename=%s\n' "$archive" "${archive##*/}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            ${{ steps.archive-paths.outputs.path }}
+            ${{ steps.archive-paths.outputs.path }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-recovery:
+    if: github.event_name == 'workflow_dispatch'
+    needs: archive
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x86_64
+      - name: Attach Linux archive to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          archive: ${{ needs.archive.outputs.filename }}
+        run: |
+          sha256sum -c -- "$archive.sha256"
+          gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "$archive" "$archive.sha256" --clobber

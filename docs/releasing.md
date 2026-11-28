@@ -1,10 +1,40 @@
-# macOS packaging and releases
+# Releasing Kver
 
 For installation, see the [README](../README.md#install); for local build
 basics, see the [development guide](development.md).
-This guide is for maintainers. Scripts and the
-[release workflow](../.github/workflows/release.yml) define the automated
-checks; results belong in the release PR, not in this document.
+This is the maintainer runbook and the procedure behind `/release`.
+[Release automation](../.github/workflows/release.yml) and the scripts under
+[`packaging/`](../packaging/) define how artifacts are built and published.
+Record results in the release PR, not in this document.
+
+## Choose the version and scope
+
+Check the latest published stable [release](https://github.com/JonGretar/Kver/releases)
+and its tag, then review `Unreleased` and the changes since that tag. If no
+version was supplied, recommend one and explain why. In the current `0.x`
+series, propose a patch for fixes and a minor bump for substantial new
+reader-facing features or compatibility changes; discuss deliberate breaking
+changes explicitly. Check that the proposed tag is unused. Wait for version
+confirmation before preparing it and explicit publication approval before
+landing the release change or pushing a tag. A request to publish a specific
+version covers the release change, publication, and the Arch recipe update.
+
+## Prepare the release change
+
+1. Start from the current default branch. Set the Kver version in `Cargo.toml`
+   and `Cargo.lock`. Consolidate `Unreleased` into one dated
+   `## [X.Y.Z] - YYYY-MM-DD` chapter and leave an empty `Unreleased` section.
+   Describe the final reader-facing behavior, not intermediate changes to new
+   features. Call out known limitations and keep past chapters intact.
+2. Run `python3 packaging/common/release-metadata.py --tag vX.Y.Z`. Review the
+   same command with `--notes`; the workflow uses that output for GitHub.
+3. If dependencies or packaging changed, check the affected target's notice
+   generation before tagging. Use its checked-in policy and locked dependency
+   graph. A successful compile does not prove the archive can be packaged.
+   Keep notice generation mandatory; review any new license before accepting
+   it and verify its required notices are included.
+4. Build the Apple silicon candidate and run the native checks below. Record
+   what passed and what could not be checked on the exact candidate.
 
 ## Build a candidate
 
@@ -60,7 +90,7 @@ The stable feed is
 `https://github.com/JonGretar/Kver/releases/latest/download/appcast.xml`.
 It can return 404 until the first update-enabled release is published.
 Older apps without Sparkle require one manual download of an update-enabled
-release. Keep prereleases and experimental platform artifacts out of this
+release. Keep prereleases and non-macOS artifacts out of this
 stable path.
 
 ## Validate before publishing
@@ -92,29 +122,68 @@ A local test does not establish production HTTPS publication or another
 Mac's behavior. Check the production feed and an upgrade from the first
 update-enabled release before relying on that path.
 
-## Publish only with release authorization
+## Land and publish
 
-1. Set the package version in `Cargo.toml`; move changelog entries from
-   `Unreleased` into exactly one `## [X.Y.Z] - YYYY-MM-DD` heading and leave
-   a new `Unreleased` section.
-2. Run `python3 packaging/common/release-metadata.py --tag vX.Y.Z` and the candidate
-   packaging/native checks above. Have the release change reviewed and landed.
-3. Only with explicit authorization for that release, create and push its
-   `vX.Y.Z` tag. A tag push triggers publication; ordinary pushes and PRs do not.
-4. Verify the GitHub Release, ZIP, signed `appcast.xml`, and production URLs.
-   Download through a browser on an Apple silicon Mac and repeat the launch/
-   reading smoke check. Record Gatekeeper prompts and the override used;
-   a CLI download may not carry quarantine.
+1. With publication authorized, review and land the release change using the
+   [normal landing gates](agents/workflow.md#feature-workflow), including
+   the currently applicable CI checks. If the candidate changes, repeat the
+   checks affected by the change.
+2. Fetch the publication remote and verify that the landed release commit
+   matches the tested candidate tree. Validate the version again there and
+   check that the tag does not exist remotely. Create the tag at that exact
+   commit, not at whatever `main` points to later. After verifying that `origin`
+   is the publication remote, substitute the version and commit below:
 
-The tag-only workflow validates metadata and signing configuration, packages
-the app, signs/verifies updates, and marks the release latest. After macOS
-publication, it builds experimental Linux and Windows archives and uploads
-them with their checksums to the same release. These builds do not run on PRs.
-Experimental archives are not part of the Sparkle feed. If an archive job
-fails, the macOS release stays available. Rerun a transient failure, or, after
-landing a license-policy fix, run the affected archive workflow manually from
-`main` with `release_tag` set to the existing release tag. It builds the tagged
-source using the current notice policy. Do not move the release tag.
+   ```sh
+   jj tag set vX.Y.Z -r VERIFIED_RELEASE_COMMIT
+   jj git push --remote origin --tag vX.Y.Z --dry-run
+   jj git push --remote origin --tag vX.Y.Z
+   ```
+
+   A `vX.Y.Z` tag push publishes; ordinary pushes and PRs do not. Do not use
+   a production tag to test CI or move it to recover a failure.
+3. Confirm that the release workflow is running for the expected tag and
+   commit. The Linux build runs alongside macOS. After the macOS job publishes
+   the release and signed Sparkle feed, Linux can attach its verified archive
+   and checksum, and the Windows job starts.
+
+## Verify publication and update Arch
+
+| Deliverable | Definition and release check |
+| --- | --- |
+| Apple silicon macOS ZIP and Sparkle feed | [Release workflow](../.github/workflows/release.yml). Confirm the intended release is latest and its notes match the dated chapter. Download the ZIP and `appcast.xml`, verify both with `packaging/macos/verify-update-signatures.swift` and the production public key, and check the public latest feed points to that ZIP. Repeat the launch and reading smoke check with a browser download on Apple silicon; record actual Gatekeeper behavior separately from CLI-download checks. |
+| Linux x86-64 archive | [Linux archive workflow](../.github/workflows/linux-archive.yml) and [Linux guide](linux.md). Check the published archive and checksum, including the contents and notices from clean extraction. |
+| Windows x86-64 archive | [Windows archive workflow](../.github/workflows/windows-archive.yml) and [Windows guide](windows.md). Check the published archive and checksum, including the contents and notices from clean extraction. |
+| Arch Linux x86-64 recipe | [Arch bump instructions](../packaging/arch/README.md#bump-to-a-new-release). After tagging, update `PKGBUILD` and `.SRCINFO`, verifying the source checksum against the tagged tarball. Land the recipe update using the normal gates. Record whether `makepkg` and the installed version were actually checked. This step is part of the release; it is not a GitHub release asset or a prerequisite for macOS publication. |
+
+Report each deliverable separately, with links to checks and any unverified
+steps. Linux x86-64 is a regular download with an Ubuntu 24.04 / glibc 2.39
+baseline; Windows remains experimental. State the platform and runtime baseline
+and distinguish packaging checks from native desktop checks. Report an actual
+update install separately from signature and feed verification.
+
+If archive publication fails, leave working assets and the tag alone. Rerun
+transient failures. After landing a license-policy fix, manually run the
+affected archive workflow from `main` with `release_tag` set to the existing
+tag; it rebuilds the tagged source using the current notice policy. Download
+and verify recovered assets before reporting success. Non-macOS assets
+never enter the Sparkle feed. If recovery or the Arch update is blocked,
+report what is already live and what remains rather than calling the release
+complete.
+
+## Add a distribution format
+
+Keep version metadata and release notes shared; keep format-specific build,
+verification, and recovery in the platform packaging code. For a format
+attached to GitHub Releases, its build can run independently, but attaching
+assets must wait for publication. Add one row to the deliverables above and
+define the target architecture, runtime baseline, license notices, checksum,
+clean-install or extraction check,
+and how to recover from a partial upload. For example, a `.deb` would need an
+install/remove check on the intended distro; a script shipped in an existing
+archive belongs in that archive's verification, including preservation of user
+data on uninstall. A distro recipe can stay a post-tag step like Arch. Add the
+new format to the relevant install guide, not to the skill.
 
 ## Native quit checks after dependency upgrades
 

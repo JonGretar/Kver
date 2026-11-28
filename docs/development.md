@@ -84,10 +84,10 @@ Developer ID signed or notarized. Build on the Mac where you intend to run
 it; binaries are architecture-specific.
 
 The builder uses Corgi when available and falls back to Cargo.
-Maintainers: see [macOS packaging and releases](releasing.md) for candidate
+Maintainers: see the [release runbook](releasing.md) for candidate
 archives, update signing, release checks, and native quit upgrade checks.
 
-## Build an experimental Linux archive
+## Build a Linux archive
 
 Use native x86-64 Ubuntu 24.04 and Python 3.11 or newer. Install the same
 Fontconfig/xkbcommon build libraries as Linux CI, plus dynamic loaders and
@@ -110,11 +110,11 @@ Output is under `target/x86_64-unknown-linux-gnu/release` (or
 probes cover Wayland, Vulkan and EGL. Missing required contents, notices or
 loaders fail packaging rather than silently omitting them.
 
-The **Experimental Linux archive** workflow uses `ubuntu-24.04` and uploads
-the versioned tarball/checksum without publishing a release. It runs on
-packaging-related PR changes or manual dispatch. See [Linux tester
-guidance](linux.md), also shipped inside the archive, for runtime limits,
-manual updates and the separate native desktop checklist.
+The **Linux archive** workflow uses `ubuntu-24.04`. It builds in parallel with
+macOS and makes the tarball and checksum available to the release workflow
+for upload after publication. Manual recovery can still attach assets to an
+existing release. The [Linux guide](linux.md), also shipped in the archive,
+covers runtime limits, manual updates and the native desktop checklist.
 
 ## Build an experimental Windows archive
 

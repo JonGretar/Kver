@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- The command palette lists actions alphabetically. While you search, it puts
+  exact matches and names that start with your query first, and highlights
+  matching text in action names.
 - PDF rendering now uses hinted text and includes fixes for embedded fonts,
   transparent images, and malformed documents.
 - New document windows cascade slightly instead of opening directly on top of

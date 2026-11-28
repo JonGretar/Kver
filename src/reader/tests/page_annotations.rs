@@ -28,11 +28,10 @@ fn mixed_type_overlap_requires_an_explicit_target_and_preserves_text_dragging(
         })
         .unwrap();
         cx.run_until_parked();
-        cx.update_window(handle, |_, window, cx| {
-            window.input(label, cx);
-            window.press("enter", cx);
-        })
-        .unwrap();
+        cx.update_window(handle, |_, window, cx| window.input(label, cx))
+            .unwrap();
+        cx.update_window(handle, |_, window, cx| window.press("enter", cx))
+            .unwrap();
         cx.run_until_parked();
     }
     let annotations = catalog(&reader, cx);

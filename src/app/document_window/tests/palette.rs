@@ -3,6 +3,128 @@ use super::*;
 use crate::{app::keymap::install as bind_reader_keys, reader::ZoomMode};
 
 #[gpui_kit::test]
+fn palette_ranks_results_and_keeps_shortcuts_and_keyboard_selection(cx: &mut TestAppContext) {
+    setup(cx);
+    cx.update(|cx| {
+        crate::app::keymap::select_preset(cx, crate::app::keymap::Preset::Vim).unwrap();
+    });
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("secondary-shift-p", cx);
+        let rows = window
+            .within("reader-command-palette")
+            .find_all_by_role(gpui_kit::Role::ListBoxOption);
+        let labels: Vec<_> = rows.iter().filter_map(|row| row.label()).collect();
+        assert_eq!(labels.first().copied(), Some("Annotations"));
+        assert!(
+            labels
+                .windows(2)
+                .all(|pair| { pair[0].to_lowercase() <= pair[1].to_lowercase() })
+        );
+        window.input(" WiNdOw ", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let palette = window.within("reader-command-palette");
+        let results = palette.find_all_by_role(gpui_kit::Role::ListBoxOption);
+        assert_eq!(
+            results
+                .iter()
+                .filter_map(|row| row.label())
+                .collect::<Vec<_>>(),
+            [
+                "Follow link in new window…",
+                "New Window",
+                "Next Window",
+                "Previous Window"
+            ]
+        );
+        assert_eq!(results[0].selected(), Some(true));
+        assert!(
+            palette
+                .find("command-palette-shortcut:kver::FollowLinkInNewWindow")
+                .visible()
+        );
+        window.press("down", cx);
+        assert_eq!(
+            window
+                .within("reader-command-palette")
+                .find_by_label("New Window")
+                .selected(),
+            Some(true)
+        );
+        window.press("down", cx);
+        assert_eq!(
+            window
+                .within("reader-command-palette")
+                .find_by_label("Follow link in new window…")
+                .selected(),
+            Some(true)
+        );
+        window.press("escape", cx);
+        assert_eq!(document.read(cx).palette_query(cx).as_deref(), Some(""));
+        window.input(" NeW W ", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let results = window
+            .within("reader-command-palette")
+            .find_all_by_role(gpui_kit::Role::ListBoxOption);
+        assert_eq!(
+            results
+                .iter()
+                .filter_map(|row| row.label())
+                .collect::<Vec<_>>(),
+            ["New Window", "Follow link in new window…"]
+        );
+        assert_eq!(results[0].selected(), Some(true));
+        window.press("down", cx);
+        // Reinstalling an unchanged model must not take back the selection.
+        cx.notify(document.entity_id());
+        window.render_frame(cx);
+        assert_eq!(
+            window
+                .within("reader-command-palette")
+                .find_by_label("Follow link in new window…")
+                .selected(),
+            Some(true)
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn palette_enter_uses_the_best_match_even_before_repaint(cx: &mut TestAppContext) {
+    use crate::app::windows::NewWindow;
+
+    setup(cx);
+    cx.update(|cx| {
+        cx.on_action(|_: &NewWindow, cx| cx.open_url("https://example.org/new-window"));
+    });
+    let (handle, document) = open(cx, Some(PathBuf::from("examples/readme-sample.pdf")));
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("secondary-shift-p", cx);
+        window.input("new w", cx);
+    })
+    .unwrap();
+    // Dispatch directly: TestWindowExt::press would repaint first.
+    cx.simulate_keystrokes(handle, "enter");
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some("https://example.org/new-window")
+    );
+    assert!(!document.read_with(cx, |document, _| document.palette_open()));
+}
+
+#[gpui_kit::test]
 fn palette_dispatches_open_vim_tutor_from_an_empty_reader(cx: &mut TestAppContext) {
     use crate::app::commands::OpenVimTutor;
 
